@@ -95,6 +95,15 @@ def is_probable_wine_row(line, has_price=False):
     )
 
 
+def vintage_near(raw, position, fragment):
+    fragment_match = re.search(r"\b(19|20)\d{2}\b", fragment or "")
+    if fragment_match:
+        return fragment_match.group(0)
+    window = raw[max(0, position - 120) : min(len(raw), position + 260)]
+    window_match = re.search(r"\b(19|20)\d{2}\b", window)
+    return window_match.group(0) if window_match else None
+
+
 def matched_fragments(raw, query, country):
     tokens = query_tokens(query)
     if tokens and not all(token in fold_text(raw) for token in tokens):
@@ -106,7 +115,7 @@ def matched_fragments(raw, query, country):
             fragment = raw[position : match.end()]
             price_text, price_value, currency = parse_price(fragment, country, require_edge=True)
             if price_value is not None:
-                fragments.append((clean_fragment(fragment), price_text, price_value, currency))
+                fragments.append((clean_fragment(fragment), price_text, price_value, currency, vintage_near(raw, position, fragment)))
                 break
         else:
             before_start = max(0, position - 90)
@@ -115,16 +124,16 @@ def matched_fragments(raw, query, country):
                 fragment = raw[match.start() : min(len(raw), position + 220)]
                 price_text, price_value, currency = parse_price(fragment, country, require_edge=False)
                 if price_value is not None:
-                    fragments.append((clean_fragment(fragment), price_text, price_value, currency))
+                    fragments.append((clean_fragment(fragment), price_text, price_value, currency, vintage_near(raw, position, fragment)))
                     break
             else:
                 fragment = raw[max(0, position - 40) : min(len(raw), position + 220)]
                 price_text, price_value, currency = parse_price(fragment, country, require_edge=True)
-                fragments.append((clean_fragment(fragment), price_text, price_value, currency))
+                fragments.append((clean_fragment(fragment), price_text, price_value, currency, vintage_near(raw, position, fragment)))
     unique = []
     seen = set()
     for fragment in fragments:
-        key = (fragment[0], fragment[1])
+        key = (fragment[0], fragment[1], fragment[4])
         if key not in seen:
             seen.add(key)
             unique.append(fragment)
@@ -136,7 +145,7 @@ def match_lines(text, query, country, limit=200):
     for index, raw in enumerate(line.strip() for line in (text or "").splitlines()):
         if not raw:
             continue
-        for fragment_index, (fragment, price_text, price_value, currency) in enumerate(matched_fragments(raw, query, country)):
+        for fragment_index, (fragment, price_text, price_value, currency, nearby_vintage) in enumerate(matched_fragments(raw, query, country)):
             if not is_probable_wine_row(fragment, price_value is not None):
                 continue
             vintage_match = re.search(r"\b(19|20)\d{2}\b", fragment)
@@ -144,7 +153,7 @@ def match_lines(text, query, country, limit=200):
                 {
                     "id": f"pdf-{index}-{fragment_index}",
                     "text": fragment,
-                    "vintage": vintage_match.group(0) if vintage_match else None,
+                    "vintage": nearby_vintage or (vintage_match.group(0) if vintage_match else None),
                     "priceValue": price_value,
                     "currency": currency,
                     "prices": [price_text] if price_text else [],
