@@ -6,6 +6,7 @@ import search as base
 
 
 PRICE_CURRENCY_RE = base.PRICE_CURRENCY_RE
+BASE_NORMALIZE_RESULT = base.normalize_result
 
 
 def parse_price(line, country="", page_number=None, require_edge=False):
@@ -63,7 +64,7 @@ def parse_price(line, country="", page_number=None, require_edge=False):
 
 
 def normalize_result(result):
-    data = base.normalize_result(result)
+    data = BASE_NORMALIZE_RESULT(result)
     item = result.get("item") or {}
     wine_list = ((item.get("pw") or {}).get("wine_list") or {})
     country = (data.get("venue") or {}).get("country") or ""
