@@ -3,14 +3,10 @@ const queryInput = document.querySelector("#query");
 const countryInput = document.querySelector("#country");
 const cityInput = document.querySelector("#city");
 const vintageInput = document.querySelector("#vintage");
-const liveInput = document.querySelector("#liveSearch");
 const submitButton = form.querySelector("button[type='submit']");
-const statsEl = document.querySelector("#stats");
 const resultsEl = document.querySelector("#results");
 const countEl = document.querySelector("#count");
 const detailEl = document.querySelector("#detail");
-const showSearchButton = document.querySelector("#showSearch");
-const showUnparsedButton = document.querySelector("#showUnparsed");
 const googleMapEl = document.querySelector("#googleMap");
 const mapFallbackEl = document.querySelector("#mapFallback");
 const mapKeyForm = document.querySelector("#mapKeyForm");
@@ -27,6 +23,49 @@ let googleInfoWindow = null;
 let googleMarkers = [];
 let googleMapsPromise = null;
 let mapRenderToken = 0;
+
+const COUNTRY_CURRENCY = {
+  Argentina: "ARS",
+  Australia: "AUD",
+  Austria: "EUR",
+  Belgium: "EUR",
+  Canada: "CAD",
+  "Czech Republic": "CZK",
+  Denmark: "DKK",
+  France: "EUR",
+  Germany: "EUR",
+  "Greater China": "CNY",
+  "Hong Kong": "HKD",
+  Italy: "EUR",
+  Netherlands: "EUR",
+  Norway: "NOK",
+  Singapore: "SGD",
+  Spain: "EUR",
+  Sweden: "SEK",
+  Switzerland: "CHF",
+  UK: "GBP",
+  USA: "USD"
+};
+
+const KRW_RATES = {
+  KRW: 1,
+  EUR: 1705,
+  USD: 1465,
+  GBP: 1945,
+  CHF: 1815,
+  DKK: 229,
+  SEK: 154,
+  NOK: 145,
+  CAD: 1065,
+  AUD: 960,
+  SGD: 1135,
+  HKD: 188,
+  AED: 399,
+  CNY: 203,
+  CZK: 69,
+  ARS: 1.4,
+  JPY: 9.8
+};
 
 function fallback(value) {
   return value || "Unknown";
@@ -46,36 +85,72 @@ async function getJson(path) {
   return response.json();
 }
 
-function setMode(mode) {
-  showSearchButton.classList.toggle("active", mode === "search");
-  showUnparsedButton.classList.toggle("active", mode === "unparsed");
-}
-
-function renderStats(stats) {
-  const lastSync = stats.lastRun?.finished_at
-    ? new Date(stats.lastRun.finished_at).toLocaleDateString()
-    : "Not synced";
-  statsEl.innerHTML = [
-    ["Countries", stats.countryCount],
-    ["Venues", stats.venueCount],
-    ["Lists", stats.wineListCount],
-    ["Lines", stats.entryCount],
-    ["Updated", lastSync]
-  ].map(([label, value]) => `<span><b>${escapeHtml(value)}</b>${escapeHtml(label)}</span>`).join("");
-}
-
 function renderFilters(filters) {
   countryInput.innerHTML = `<option value="">All countries</option>${filters.countries
     .map((country) => `<option value="${escapeHtml(country)}">${escapeHtml(country)}</option>`)
     .join("")}`;
 }
 
-function resultPrice(result) {
-  return result.prices?.length ? result.prices.join(", ") : "";
-}
-
 function hasValidPrice(result) {
   return Number.isFinite(Number(result.priceValue)) && Number(result.priceValue) > 0;
+}
+
+function currencyCode(result) {
+  const raw = String(result.currency || "").trim().toUpperCase();
+  return raw || COUNTRY_CURRENCY[result.venue?.country] || "";
+}
+
+function formatAmount(value, currency) {
+  const digits = Number.isInteger(value) ? 0 : 2;
+  if (currency) {
+    try {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: digits
+      }).format(value);
+    } catch (_error) {
+      return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: digits }).format(value)} ${currency}`;
+    }
+  }
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: digits }).format(value);
+}
+
+function reviewBadge(label = "Review") {
+  return `<span class="review-pill">${escapeHtml(label)}</span>`;
+}
+
+function originalPriceMarkup(result) {
+  if (!hasValidPrice(result)) return reviewBadge("Review");
+  return `<span class="price-main">${escapeHtml(formatAmount(Number(result.priceValue), currencyCode(result)))}</span>`;
+}
+
+function krwPriceMarkup(result) {
+  if (!hasValidPrice(result)) return `<span class="review-pill muted">N/A</span>`;
+  const currency = currencyCode(result);
+  const rate = KRW_RATES[currency];
+  if (!rate) return `<span class="review-pill muted">N/A</span>`;
+  const krw = Math.round(Number(result.priceValue) * rate);
+  return `<span class="krw-price">${escapeHtml(new Intl.NumberFormat("ko-KR", {
+    style: "currency",
+    currency: "KRW",
+    maximumFractionDigits: 0
+  }).format(krw))}</span>`;
+}
+
+function originalPriceText(result) {
+  return hasValidPrice(result) ? formatAmount(Number(result.priceValue), currencyCode(result)) : "Review";
+}
+
+function krwPriceText(result) {
+  if (!hasValidPrice(result)) return "N/A";
+  const rate = KRW_RATES[currencyCode(result)];
+  if (!rate) return "N/A";
+  return new Intl.NumberFormat("ko-KR", {
+    style: "currency",
+    currency: "KRW",
+    maximumFractionDigits: 0
+  }).format(Math.round(Number(result.priceValue) * rate));
 }
 
 function resultLocation(result) {
@@ -125,17 +200,17 @@ function renderResultList() {
   const liveLine = liveRefreshLine(latestLiveRefresh);
   const results = latestResults;
   if (!results.length) {
-    resultsEl.innerHTML = `${liveLine}<div class="empty-list"><h3>No results</h3><p>Try another spelling or turn Live on.</p></div>`;
+    resultsEl.innerHTML = `${liveLine}<div class="empty-list"><h3>No results</h3><p>Try another spelling or a broader query.</p></div>`;
     return;
   }
   const rows = results.map((result) => {
-    const prices = hasValidPrice(result) ? resultPrice(result) : "Price review";
     const location = resultLocation(result);
     const key = venueKey(result);
     const pdfState = result.wineList?.localFileUrl ? "PDF saved" : result.wineList?.fileUrl ? "PDF source" : "No PDF";
     const list = result.wineList || {};
     return `<tr class="result-row${String(result.id) === String(activeId) ? " active" : ""}${key && key === activeVenueKey ? " venue-active" : ""}" data-id="${escapeHtml(result.id)}" data-venue-key="${escapeHtml(key)}">
-      <td class="price-cell">${escapeHtml(prices)}</td>
+      <td class="price-cell">${originalPriceMarkup(result)}</td>
+      <td class="krw-cell">${krwPriceMarkup(result)}</td>
       <td class="wine-cell">${escapeHtml(result.text)}</td>
       <td>${escapeHtml(result.venue?.name || "")}</td>
       <td>${escapeHtml(location)}</td>
@@ -148,7 +223,8 @@ function renderResultList() {
     <table class="result-table">
       <thead>
         <tr>
-          <th>Price</th>
+          <th>Original price</th>
+          <th>KRW</th>
           <th>Wine</th>
           <th>Venue</th>
           <th>Location</th>
@@ -185,7 +261,7 @@ function renderMap(results) {
   latestMapVenues = venues;
   const totalLines = venues.reduce((sum, group) => sum + group.results.length, 0);
   mapSummaryEl.textContent = venues.length
-    ? `${venues.length} mapped venues / ${totalLines} matching lines`
+    ? `${venues.length} restaurants/bars on map / ${totalLines} matching wines`
     : "No coordinates for these results yet";
   drawGoogleMap(venues);
 }
@@ -304,7 +380,7 @@ function setActiveMapMarker(key) {
     if (active && googleInfoWindow) {
       const group = latestMapVenues.find((item) => item.key === key);
       if (group) {
-        googleInfoWindow.setContent(`<strong>${escapeHtml(group.venue.name)}</strong><br>${escapeHtml([group.venue.city, group.venue.country].filter(Boolean).join(", "))}<br>${group.results.length} matching lines`);
+        googleInfoWindow.setContent(`<strong>${escapeHtml(group.venue.name)}</strong><br>${escapeHtml([group.venue.city, group.venue.country].filter(Boolean).join(", "))}<br>${group.results.length} matching wines`);
         googleInfoWindow.open({ map: googleMap, anchor: marker });
       }
     }
@@ -331,7 +407,8 @@ function renderDetail(result) {
   const venue = result.venue || {};
   const list = result.wineList || {};
   const location = resultLocation(result);
-  const prices = hasValidPrice(result) ? resultPrice(result) : "Needs price review";
+  const originalPrice = originalPriceText(result);
+  const krwPrice = krwPriceText(result);
   detailEl.innerHTML = `<div class="detail-grid">
     <div class="detail-title">
       <p class="eyebrow">${escapeHtml(fallback(venue.name))}</p>
@@ -339,7 +416,8 @@ function renderDetail(result) {
       <div class="detail-meta">
         <span>${escapeHtml(fallback(location))}</span>
         ${result.vintage ? `<span>${escapeHtml(result.vintage)}</span>` : ""}
-        <span class="price">${escapeHtml(prices)}</span>
+        <span class="price">${escapeHtml(originalPrice)}</span>
+        <span class="price">${escapeHtml(krwPrice)}</span>
       </div>
     </div>
     <div class="fact-grid">
@@ -347,7 +425,8 @@ function renderDetail(result) {
       <div class="fact"><span>City</span><b>${escapeHtml(fallback(venue.city))}</b></div>
       <div class="fact wide"><span>Address</span><b>${escapeHtml(fallback(venue.address))}</b></div>
       <div class="fact"><span>List updated</span><b>${escapeHtml(fallback(list.updatedDate || list.updatedText))}</b></div>
-      <div class="fact"><span>Price</span><b>${escapeHtml(prices)}</b></div>
+      <div class="fact"><span>Original price</span><b>${escapeHtml(originalPrice)}</b></div>
+      <div class="fact"><span>KRW estimate</span><b>${escapeHtml(krwPrice)}</b></div>
     </div>
     <div class="actions">
       ${list.localFileUrl ? `<a href="${escapeHtml(list.localFileUrl)}" target="_blank" rel="noreferrer">Local PDF</a>` : ""}
@@ -367,10 +446,9 @@ function renderVenueDetail(group) {
   const lines = group.results
     .slice(0, 80)
     .map((result) => {
-      const prices = hasValidPrice(result) ? resultPrice(result) : "Price review";
       return `<li>
         <span>${escapeHtml(result.text)}</span>
-        <b>${escapeHtml(prices)}</b>
+        <b>${escapeHtml(originalPriceText(result))}<small>${escapeHtml(krwPriceText(result))}</small></b>
       </li>`;
     })
     .join("");
@@ -380,7 +458,7 @@ function renderVenueDetail(group) {
       <h2>${escapeHtml(venue.name)}</h2>
       <div class="detail-meta">
         <span>${escapeHtml(venue.type || "Wine venue")}</span>
-        <span>${escapeHtml(group.results.length)} matching lines</span>
+        <span>${escapeHtml(group.results.length)} matching wines</span>
         ${Number.isFinite(group.lat) && Number.isFinite(group.lng) ? `<span>${group.lat.toFixed(3)}, ${group.lng.toFixed(3)}</span>` : ""}
       </div>
     </div>
@@ -406,7 +484,6 @@ function renderVenueDetail(group) {
 }
 
 async function runSearch() {
-  setMode("search");
   activeId = "";
   activeVenueKey = "";
   latestResults = [];
@@ -421,7 +498,7 @@ async function runSearch() {
   if (countryInput.value) params.set("country", countryInput.value);
   if (cityInput.value.trim()) params.set("city", cityInput.value.trim());
   if (vintageInput.value.trim()) params.set("vintage", vintageInput.value.trim());
-  if (liveInput.checked && queryInput.value.trim()) {
+  if (queryInput.value.trim()) {
     params.set("live", "1");
     params.set("livePages", "all");
     params.set("livePageCap", "10");
@@ -439,73 +516,9 @@ async function runSearch() {
       setActiveMapMarker(activeVenueKey);
     }
     renderDetail(selected);
-    refreshStats();
   } finally {
     submitButton.disabled = false;
   }
-}
-
-async function refreshStats() {
-  const stats = await getJson("/api/stats");
-  renderStats(stats);
-}
-
-async function showUnparsed() {
-  setMode("unparsed");
-  const payload = await getJson("/api/unparsed?limit=300");
-  countEl.textContent = String(payload.count);
-  latestResults = [];
-  resultsEl.innerHTML = payload.items.length
-    ? payload.items.map((item, index) => `<button class="result-item" data-unparsed="${index}">
-      <span class="result-topline">
-        <span>${escapeHtml(item.venueName)}</span>
-        <span>${escapeHtml(item.kind === "price" ? "Price review" : item.localFileUrl ? "PDF saved" : "Needs PDF")}</span>
-      </span>
-      <span class="wine-line">${escapeHtml(item.rawText || item.label || item.venueName)}</span>
-      <span class="result-meta">
-        <span>${escapeHtml([item.city, item.country].filter(Boolean).join(", "))}</span>
-        <span>${escapeHtml(item.updatedDate || "No date")}</span>
-        ${item.priceText ? `<span class="price">${escapeHtml(item.priceText)}</span>` : ""}
-      </span>
-    </button>`).join("")
-    : `<div class="empty-list"><h3>No items need review</h3></div>`;
-  renderReviewDetail();
-  resultsEl.querySelectorAll("[data-unparsed]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const item = payload.items[Number(button.dataset.unparsed)];
-      renderReviewDetail(item);
-    });
-  });
-}
-
-function renderReviewDetail(item = null) {
-  if (!item) {
-    detailEl.innerHTML = `<div class="empty">
-      <p class="panel-kicker">Review</p>
-      <h2>PDF review queue</h2>
-      <p>Items without parsed lines, local PDFs, or reliable prices are collected here.</p>
-    </div>`;
-    return;
-  }
-  detailEl.innerHTML = `<div class="detail-grid">
-    <div class="detail-title">
-      <p class="eyebrow">${escapeHtml([item.city, item.country].filter(Boolean).join(", "))}</p>
-      <h2>${escapeHtml(item.kind === "price" ? item.rawText : item.venueName)}</h2>
-      <div class="detail-meta"><span>${escapeHtml(item.kind === "price" ? item.venueName : item.label || "")}</span></div>
-    </div>
-    <div class="fact-grid">
-      <div class="fact"><span>List updated</span><b>${escapeHtml(item.updatedDate || "Unknown")}</b></div>
-      <div class="fact"><span>Status</span><b>${escapeHtml(item.lastError || "No parsed entries")}</b></div>
-      ${item.kind === "price" ? `<div class="fact"><span>Parsed price</span><b>${escapeHtml(item.priceText || "Missing")}</b></div>` : ""}
-    </div>
-    <div class="actions">
-      ${item.localFileUrl ? `<a href="${escapeHtml(item.localFileUrl)}" target="_blank" rel="noreferrer">Local PDF</a>` : ""}
-      ${item.fileUrl ? `<a class="secondary" href="${escapeHtml(item.fileUrl)}" target="_blank" rel="noreferrer">Source PDF</a>` : ""}
-      ${item.fileViewUrl ? `<a class="secondary" href="${escapeHtml(item.fileViewUrl)}" target="_blank" rel="noreferrer">External PDF</a>` : ""}
-      ${item.venueUrl ? `<a class="secondary" href="${escapeHtml(item.venueUrl)}" target="_blank" rel="noreferrer">Venue</a>` : ""}
-      ${item.downloadUrl ? `<a class="ghost" href="${escapeHtml(item.downloadUrl)}" target="_blank" rel="noreferrer">Download page</a>` : ""}
-    </div>
-  </div>`;
 }
 
 form.addEventListener("submit", (event) => {
@@ -514,9 +527,6 @@ form.addEventListener("submit", (event) => {
     resultsEl.innerHTML = `<div class="empty-list"><h3>Search error</h3><p>${escapeHtml(error.message)}</p></div>`;
   });
 });
-
-showSearchButton.addEventListener("click", () => runSearch());
-showUnparsedButton.addEventListener("click", () => showUnparsed());
 
 mapKeyForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -538,13 +548,12 @@ resultsEl.addEventListener("click", (event) => {
   renderDetail(selected);
 });
 
-Promise.all([getJson("/api/stats"), getJson("/api/filters")])
-  .then(([stats, filters]) => {
-    renderStats(stats);
+getJson("/api/filters")
+  .then((filters) => {
     renderFilters(filters);
     queryInput.value = "William Kelley";
     return runSearch();
   })
   .catch((error) => {
-    statsEl.innerHTML = `<span><b>Error</b>${escapeHtml(error.message)}</span>`;
+    resultsEl.innerHTML = `<div class="empty-list"><h3>Load error</h3><p>${escapeHtml(error.message)}</p></div>`;
   });
