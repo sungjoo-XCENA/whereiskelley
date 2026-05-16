@@ -3,17 +3,16 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Wine List Search</title>
+    <title>whereiskelley</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
     <main class="app-shell">
       <header class="app-header">
         <div>
-          <p class="eyebrow">Star Wine List local index</p>
-          <h1>Wine list search</h1>
+          <p class="eyebrow">Star Wine List finder</p>
+          <h1>whereiskelley</h1>
         </div>
-        <div id="stats" class="stats"></div>
       </header>
 
       <section class="command-bar">
@@ -27,16 +26,8 @@
           </select>
           <input id="city" name="city" type="search" placeholder="City">
           <input id="vintage" name="vintage" type="search" inputmode="numeric" maxlength="4" placeholder="Vintage">
-          <label class="switch">
-            <input id="liveSearch" type="checkbox" checked>
-            <span>Live</span>
-          </label>
-          <button type="submit">Run</button>
+          <button type="submit">Search</button>
         </form>
-        <div class="toolbar">
-          <button id="showSearch" type="button" class="tool active">Results</button>
-          <button id="showUnparsed" type="button" class="tool">Review</button>
-        </div>
       </section>
 
       <section class="map-panel">
