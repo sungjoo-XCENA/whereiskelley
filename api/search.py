@@ -28,6 +28,36 @@ COUNTRY_COORDS = {
     "UK": (55.3781, -3.4360),
     "USA": (37.0902, -95.7129),
 }
+CURRENCY_RE = r"\u20ac|\$|\u00a3|\u00a5|\u20a9|CHF|DKK|SEK|NOK|USD|EUR|GBP|CAD|AUD|SGD|HKD|AED|CNY|CZK|ARS|JPY|KRW"
+CURRENCY_ALIASES = {
+    "\u20ac": "EUR",
+    "$": "USD",
+    "\u00a3": "GBP",
+    "\u00a5": "JPY",
+    "\u20a9": "KRW",
+}
+COUNTRY_CURRENCIES = {
+    "Argentina": "ARS",
+    "Australia": "AUD",
+    "Austria": "EUR",
+    "Belgium": "EUR",
+    "Canada": "CAD",
+    "Czech Republic": "CZK",
+    "Denmark": "DKK",
+    "France": "EUR",
+    "Germany": "EUR",
+    "Greater China": "CNY",
+    "Hong Kong": "HKD",
+    "Italy": "EUR",
+    "Netherlands": "EUR",
+    "Norway": "NOK",
+    "Singapore": "SGD",
+    "Spain": "EUR",
+    "Sweden": "SEK",
+    "Switzerland": "CHF",
+    "UK": "GBP",
+    "USA": "USD",
+}
 
 
 def json_response(handler, payload, status=200):
@@ -106,26 +136,60 @@ def location_from_result(result, country, city):
     return slug, lat, lng, star_map_url or ""
 
 
-def parse_price(line):
-    def to_value(raw):
-        compact = re.sub(r"\s+", "", raw)
-        if re.fullmatch(r"\d+[,.]\d{2}", compact):
-            return float(compact.replace(",", "."))
-        compact = re.sub(r"[,.]", "", compact)
-        return float(compact)
+def normalize_currency(raw, country=""):
+    token = (raw or "").strip()
+    if not token:
+        return COUNTRY_CURRENCIES.get(country)
+    return CURRENCY_ALIASES.get(token, token.upper())
 
+
+def parse_price_number(raw):
+    compact = re.sub(r"\s+", "", raw or "")
+    if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d{2})?", compact):
+        return float(compact.replace(",", ""))
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+(?:,\d{2})?", compact):
+        return float(compact.replace(".", "").replace(",", "."))
+    if re.fullmatch(r"\d+[,.]\d{2}", compact):
+        return float(compact.replace(",", "."))
+    return float(re.sub(r"[,.]", "", compact))
+
+
+def display_price(value):
+    if value is None:
+        return ""
+    return str(int(value)) if float(value).is_integer() else f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def parse_price(line, country=""):
     text = re.sub(r"\b(19|20)\d{2}\b", " ", line or "")
+    text = re.sub(r"\b0\s*[,\.]\s*(?:187|375|5|50|70|75|750|150|1500)\b", " ", text)
+    text = re.sub(r"\b(?:187|375|500|750|1500)\s*(?:ml|cl)\b", " ", text, flags=re.I)
+    patterns = [
+        r"(?<!\d)\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?!\d)",
+        r"(?<!\d)\d{1,3}(?:[ .]\d{3})+(?:,\d{2})?(?!\d)",
+        r"(?<!\d)\d{2,6}\s*[,\.]\s*\d{2}(?!\d)",
+        r"(?<!\d)\d{2,6}(?!\d)",
+    ]
     candidates = []
-    for raw in re.findall(r"\b\d[\d\s.,]*\d\b", text):
-        try:
-            value = to_value(raw)
-        except ValueError:
-            continue
-        if value >= 10:
-            candidates.append((raw.strip(), value))
-    raw, value = candidates[-1] if candidates else ("", None)
-    currency_match = re.search(r"€|\$|£|¥|₩|CHF|DKK|SEK|NOK|USD|EUR|GBP|CAD|AUD|SGD|HKD|AED", line or "", re.I)
-    return raw, value, currency_match.group(0) if currency_match else None
+    used_spans = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            if any(match.start() < end and match.end() > start for start, end in used_spans):
+                continue
+            raw = match.group(0).strip()
+            try:
+                value = parse_price_number(raw)
+            except ValueError:
+                continue
+            if value >= 10:
+                candidates.append((match.start(), display_price(value), value))
+                used_spans.append(match.span())
+    currency_match = re.search(CURRENCY_RE, line or "", re.I)
+    currency = normalize_currency(currency_match.group(0), country) if currency_match else normalize_currency("", country)
+    if not candidates:
+        return "", None, currency
+    _pos, raw, value = sorted(candidates, key=lambda item: item[0])[-1]
+    return raw, value, currency
 
 
 def normalize_result(result):
@@ -135,11 +199,11 @@ def normalize_result(result):
     raw_text = item.get("text") or ""
     country, city = country_city_from_result(result)
     region_slug, lat, lng, star_map_url = location_from_result(result, country, city)
-    price_text, price_value, currency = parse_price(raw_text)
     vintage_match = re.search(r"\b(19|20)\d{2}\b", raw_text)
     venue_url = venue.get("URL") or ""
     venue_id = venue_slug_from_url(venue_url)
     wine_list_id = str(wine_list.get("id") or f"{venue_id}-{result.get('item_id') or ''}")
+    price_text, price_value, currency = parse_price(raw_text, country)
     return {
         "id": str(result.get("item_id") or f"{wine_list_id}-{raw_text}"),
         "text": raw_text,
