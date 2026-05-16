@@ -154,7 +154,12 @@ async function loadPdfLines(group) {
         fallbackUrls: pdfFallbackUrls(list).join("|"),
         country: group.venue?.country || ""
       });
-      const payload = await getJson(`/api/pdf_lines_v2?${params.toString()}`);
+      let payload;
+      try {
+        payload = await getJson(`/api/pdf_lines_v2?${params.toString()}`);
+      } catch (_error) {
+        payload = await getJson(`/api/pdf-lines?${params.toString()}`);
+      }
       pdfLineCache.set(key, payload);
     } catch (error) {
       pdfLineCache.set(key, { status: "review", reason: error.message, lines: [] });
@@ -253,7 +258,12 @@ async function runSearch() {
   }
   params.set("limit", "5000");
   try {
-    const payload = await getJson(`/api/search_v2?${params.toString()}`);
+    let payload;
+    try {
+      payload = await getJson(`/api/search_v2?${params.toString()}`);
+    } catch (_error) {
+      payload = await getJson(`/api/search?${params.toString()}`);
+    }
     renderResults(uniqueResults(payload.results), payload.liveRefresh);
   } finally {
     submitButton.disabled = false;
