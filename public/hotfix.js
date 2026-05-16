@@ -4,6 +4,7 @@ hotfixStyle.textContent = `
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    margin-left: 6px;
     min-width: 22px;
     height: 20px;
     border: 1px solid rgba(159, 18, 57, 0.18);
