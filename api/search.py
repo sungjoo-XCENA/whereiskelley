@@ -1,5 +1,6 @@
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
@@ -29,6 +30,8 @@ COUNTRY_COORDS = {
     "USA": (37.0902, -95.7129),
 }
 CURRENCY_RE = r"\u20ac|\$|\u00a3|\u00a5|\u20a9|CHF|DKK|SEK|NOK|USD|EUR|GBP|CAD|AUD|SGD|HKD|AED|CNY|CZK|ARS|JPY|KRW"
+PRICE_CURRENCY_RE = r"A\$|AU\$|CA\$|HK\$|S\$|US\$|" + CURRENCY_RE
+NO_PRICE_RE = r"\b(?:ask\s+(?:your\s+)?sommelier|ask\s+(?:us|staff)|on\s+request|upon\s+request|price\s+on\s+request|market\s+price|enquire|inquire|poa|n/?a|sold\s+out)\b|\ubb38\uc758|\uc2dc\uac00|\uc2ef\uac00"
 CURRENCY_ALIASES = {
     "\u20ac": "EUR",
     "$": "USD",
@@ -108,6 +111,21 @@ def fetch_location(slug):
     return location
 
 
+def location_slug_from_result(result, country, city):
+    item = result.get("item") or {}
+    city_obj = result.get("city") or {}
+    region = item.get("region") or {}
+    return city_obj.get("slug") or (slugify(city) if city and city != country else "") or region.get("slug") or slugify(city)
+
+
+def fetch_search_page(query, page):
+    payload = fetch_json(f"{API_URL}?{urlencode({'t': 'wine-list', 'page': page, 's': query})}")
+    lines = [item for item in payload.get("data") or [] if item.get("item_type") == "wine_list_line"]
+    meta = payload.get("meta") or {}
+    last_page = int(meta.get("last_page") or page)
+    return page, lines, last_page
+
+
 def country_city_from_result(result):
     item = result.get("item") or {}
     venue = ((item.get("pw") or {}).get("venue") or {})
@@ -123,10 +141,7 @@ def country_city_from_result(result):
 
 
 def location_from_result(result, country, city):
-    item = result.get("item") or {}
-    city_obj = result.get("city") or {}
-    region = item.get("region") or {}
-    slug = city_obj.get("slug") or (slugify(city) if city and city != country else "") or region.get("slug") or slugify(city)
+    slug = location_slug_from_result(result, country, city)
     location = fetch_location(slug)
     lat = location.get("lat") if location else None
     lng = location.get("lng") if location else None
@@ -140,11 +155,25 @@ def normalize_currency(raw, country=""):
     token = (raw or "").strip()
     if not token:
         return COUNTRY_CURRENCIES.get(country)
+    upper = token.upper()
+    if upper in {"A$", "AU$", "AUD$"}:
+        return "AUD"
+    if upper in {"CA$", "CAD$"}:
+        return "CAD"
+    if upper in {"HK$", "HKD$"}:
+        return "HKD"
+    if upper in {"S$", "SGD$"}:
+        return "SGD"
+    if upper in {"US$", "USD$"}:
+        return "USD"
     return CURRENCY_ALIASES.get(token, token.upper())
 
 
 def parse_price_number(raw):
     compact = re.sub(r"\s+", "", raw or "")
+    compact = re.sub(r"(?<=\d)[oO](?=[,.])", "", compact)
+    compact = re.sub(r"(?<=[,.])[oO]", "0", compact)
+    compact = re.sub(r"(?<=\d)[oO](?=\d)", "0", compact)
     if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d{2})?", compact):
         return float(compact.replace(",", ""))
     if re.fullmatch(r"\d{1,3}(?:\.\d{3})+(?:,\d{2})?", compact):
@@ -160,14 +189,28 @@ def display_price(value):
     return str(int(value)) if float(value).is_integer() else f"{value:.2f}".rstrip("0").rstrip(".")
 
 
-def parse_price(line, country=""):
-    text = re.sub(r"\b(19|20)\d{2}\b", " ", line or "")
-    text = re.sub(r"\b0\s*[,\.]\s*(?:187|375|5|50|70|75|750|150|1500)\b", " ", text)
-    text = re.sub(r"\b(?:187|375|500|750|1500)\s*(?:ml|cl)\b", " ", text, flags=re.I)
+def strip_search_page_suffix(line, page_number=None):
+    text = line or ""
+    if page_number:
+        text = re.sub(rf"[,;]\s*{re.escape(str(page_number))}\s*$", " ", text)
+        text = re.sub(rf"\b(?:page|p\.?)\s*{re.escape(str(page_number))}\s*$", " ", text, flags=re.I)
+    return text
+
+
+def parse_price(line, country="", page_number=None):
+    cleaned = strip_search_page_suffix(line, page_number)
+    no_price = re.search(NO_PRICE_RE, cleaned, re.I) is not None
+    text = re.sub(r"\b(19|20)\d{2}\b", " ", cleaned)
+    text = re.sub(r"\b(?:page|p\.?)\s*\d{1,4}\b", " ", text, flags=re.I)
+    text = re.sub(r"\b0\s*[,\.]\s*(?:187|375|5|50|70|75|750|150|1500)\s*(?:l|lt|liter|litre)?\b", " ", text, flags=re.I)
+    text = re.sub(r"\b(?:37\.?5|75|187|375|500|750|1500)\s*(?:ml|cl)\b", " ", text, flags=re.I)
     patterns = [
+        r"(?<![\w])(?:A\$|AU\$|CA\$|HK\$|S\$|US\$)\s*\d{2,6}(?:\s*[,\.]\s*[oO0]{2})?(?![\w])",
         r"(?<!\d)\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?!\d)",
+        r"(?<!\d)\d{1,3}(?:,\s*\d{3})+(?:\.\d{2})?(?!\d)",
         r"(?<!\d)\d{1,3}(?:[ .]\d{3})+(?:,\d{2})?(?!\d)",
-        r"(?<!\d)\d{2,6}\s*[,\.]\s*\d{2}(?!\d)",
+        r"(?<!\d)\d{2,6}[oO]\s*[,\.]\s*[oO0]{2}(?!\w)",
+        r"(?<!\d)\d{2,6}\s*[,\.]\s*[oO0]{2}(?!\d)",
         r"(?<!\d)\d{2,6}(?!\d)",
     ]
     candidates = []
@@ -177,18 +220,32 @@ def parse_price(line, country=""):
             if any(match.start() < end and match.end() > start for start, end in used_spans):
                 continue
             raw = match.group(0).strip()
+            raw_number = re.sub(PRICE_CURRENCY_RE, "", raw, flags=re.I)
             try:
-                value = parse_price_number(raw)
+                value = parse_price_number(raw_number)
             except ValueError:
                 continue
             if value >= 10:
-                candidates.append((match.start(), display_price(value), value))
+                tail = re.sub(r"[\s,.;:)\]]+$", "", text[match.end():])
+                right_edge = not tail
+                has_currency = re.search(PRICE_CURRENCY_RE, text[max(0, match.start() - 8):match.end() + 8], re.I) is not None
+                candidates.append((match.start(), display_price(value), value, right_edge, has_currency))
                 used_spans.append(match.span())
-    currency_match = re.search(CURRENCY_RE, line or "", re.I)
+    currency_match = re.search(PRICE_CURRENCY_RE, cleaned, re.I)
     currency = normalize_currency(currency_match.group(0), country) if currency_match else normalize_currency("", country)
     if not candidates:
         return "", None, currency
-    _pos, raw, value = sorted(candidates, key=lambda item: item[0])[-1]
+    edge_candidates = [item for item in candidates if item[3]]
+    if edge_candidates:
+        _pos, raw, value, _edge, _currency = sorted(edge_candidates, key=lambda item: item[0])[-1]
+        return raw, value, currency
+    if no_price:
+        return "", None, currency
+    currency_candidates = [item for item in candidates if item[4]]
+    if currency_candidates:
+        _pos, raw, value, _edge, _currency = sorted(currency_candidates, key=lambda item: item[0])[-1]
+        return raw, value, currency
+    _pos, raw, value, _edge, _currency = sorted(candidates, key=lambda item: item[0])[-1]
     return raw, value, currency
 
 
@@ -203,7 +260,7 @@ def normalize_result(result):
     venue_url = venue.get("URL") or ""
     venue_id = venue_slug_from_url(venue_url)
     wine_list_id = str(wine_list.get("id") or f"{venue_id}-{result.get('item_id') or ''}")
-    price_text, price_value, currency = parse_price(raw_text, country)
+    price_text, price_value, currency = parse_price(raw_text, country, result.get("page"))
     return {
         "id": str(result.get("item_id") or f"{wine_list_id}-{raw_text}"),
         "text": raw_text,
@@ -245,6 +302,20 @@ def normalize_result(result):
     }
 
 
+def passes_filters(result, country="", city="", vintage=""):
+    raw_text = ((result.get("item") or {}).get("text") or "")
+    if vintage and not re.search(rf"\b{re.escape(vintage)}\b", raw_text):
+        return False
+    if not country and not city:
+        return True
+    result_country, result_city = country_city_from_result(result)
+    if country and result_country != country:
+        return False
+    if city and city not in (result_city or "").lower():
+        return False
+    return True
+
+
 def numeric_price(result):
     value = result.get("priceValue")
     return value if isinstance(value, (int, float)) and value > 0 else 10**18
@@ -255,38 +326,59 @@ def search(params):
     country = (params.get("country", [""])[0] or "").strip()
     city = (params.get("city", [""])[0] or "").strip().lower()
     vintage = (params.get("vintage", [""])[0] or "").strip()
-    limit = min(int(params.get("limit", ["500"])[0] or 500), 2000)
-    page_cap = max(1, min(int(params.get("livePageCap", ["10"])[0] or 10), 10))
+    limit = min(int(params.get("limit", ["500"])[0] or 500), 5000)
+    page_cap = max(1, min(int(params.get("livePageCap", ["200"])[0] or 200), 300))
     if not query:
         return {"query": query, "count": 0, "results": [], "liveRefresh": None}
+    upstream_query = query
+    if vintage and not re.search(rf"\b{re.escape(vintage)}\b", query):
+        upstream_query = f"{query} {vintage}"
+
+    first_page, first_lines, last_page = fetch_search_page(upstream_query, 1)
+    target_page = min(page_cap, last_page)
+    pages = {first_page: first_lines}
+    if target_page > 1:
+        workers = min(10, target_page - 1)
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(fetch_search_page, upstream_query, page) for page in range(2, target_page + 1)]
+            for future in as_completed(futures):
+                page, lines, seen_last_page = future.result()
+                pages[page] = lines
+                last_page = max(last_page, seen_last_page)
 
     results = []
     source_ids = []
     pdf_urls = set()
     entries = 0
-    last_page = 1
-    for page in range(1, page_cap + 1):
-        payload = fetch_json(f"{API_URL}?{urlencode({'t': 'wine-list', 'page': page, 's': query})}")
-        lines = [item for item in payload.get("data") or [] if item.get("item_type") == "wine_list_line"]
+    filtered_lines = []
+    for page in sorted(pages):
+        lines = pages[page]
         entries += len(lines)
         for line in lines:
             if line.get("item_id"):
                 source_ids.append(str(line.get("item_id")))
-            normalized = normalize_result(line)
-            if normalized["wineList"]["fileUrl"]:
-                pdf_urls.add(normalized["wineList"]["fileUrl"])
-            results.append(normalized)
-        meta = payload.get("meta") or {}
-        last_page = int(meta.get("last_page") or page)
-        if page >= last_page:
-            break
+            if not passes_filters(line, country, city, vintage):
+                continue
+            filtered_lines.append(line)
 
-    if country:
-        results = [item for item in results if item["venue"]["country"] == country]
-    if city:
-        results = [item for item in results if city in (item["venue"].get("city") or "").lower()]
-    if vintage:
-        results = [item for item in results if item.get("vintage") == vintage]
+    slugs = set()
+    for line in filtered_lines:
+        line_country, line_city = country_city_from_result(line)
+        slug = location_slug_from_result(line, line_country, line_city)
+        if slug and slug not in LOCATION_CACHE:
+            slugs.add(slug)
+    if slugs:
+        with ThreadPoolExecutor(max_workers=min(10, len(slugs))) as executor:
+            futures = [executor.submit(fetch_location, slug) for slug in slugs]
+            for future in as_completed(futures):
+                future.result()
+
+    for line in filtered_lines:
+        normalized = normalize_result(line)
+        if normalized["wineList"]["fileUrl"]:
+            pdf_urls.add(normalized["wineList"]["fileUrl"])
+        results.append(normalized)
+
     results.sort(key=lambda item: (numeric_price(item), item["venue"].get("name") or ""))
     results = results[:limit]
     return {
@@ -295,9 +387,9 @@ def search(params):
         "results": results,
         "liveRefresh": {
             "query": query,
-            "pages": page_cap,
+            "pages": target_page,
             "lastPage": last_page,
-            "complete": page_cap >= last_page,
+            "complete": target_page >= last_page,
             "pageCap": page_cap,
             "entries": entries,
             "pdfs": len(pdf_urls),
