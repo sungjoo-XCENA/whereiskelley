@@ -189,6 +189,19 @@ def display_price(value):
     return str(int(value)) if float(value).is_integer() else f"{value:.2f}".rstrip("0").rstrip(".")
 
 
+def split_collapsed_price(value, raw_number, country, has_currency):
+    compact = re.sub(r"\D", "", raw_number or "")
+    currency = normalize_currency("", country)
+    low_denomination = currency in {"EUR", "USD", "GBP", "CHF", "CAD", "AUD", "SGD", "DKK", "SEK", "NOK"}
+    if has_currency or not low_denomination or not compact.isdigit() or len(compact) not in {5, 6}:
+        return value
+    suffix = int(compact[-2:])
+    prefix = int(compact[:-2])
+    if 100 <= prefix <= 5000 and 1 <= suffix <= 80:
+        return float(prefix)
+    return value
+
+
 def strip_search_page_suffix(line, page_number=None):
     text = line or ""
     if page_number:
@@ -204,8 +217,10 @@ def parse_price(line, country="", page_number=None, require_edge=False):
     text = re.sub(r"\b(?:page|p\.?)\s*\d{1,4}\b", " ", text, flags=re.I)
     text = re.sub(r"\b0\s*[,\.]\s*(?:187|375|5|50|70|75|750|150|1500)\s*(?:l|lt|liter|litre)?\b", " ", text, flags=re.I)
     text = re.sub(r"\b(?:37\.?5|75|187|375|500|750|1500)\s*(?:ml|cl)\b", " ", text, flags=re.I)
+    price_number = r"(?:\d{1,3}(?:[,\s.]\d{3})+|\d{2,6}[oO]\s*[,\.]\s*[oO0]{2}|\d{2,6}(?:\s*[,\.]\s*[oO0]{2})?)"
     patterns = [
-        r"(?<![\w])(?:A\$|AU\$|CA\$|HK\$|S\$|US\$)\s*\d{2,6}(?:\s*[,\.]\s*[oO0]{2})?(?![\w])",
+        rf"(?<![\w])(?:{PRICE_CURRENCY_RE})\s*{price_number}(?!\d)",
+        rf"(?<!\d){price_number}\s*(?:{PRICE_CURRENCY_RE})(?![\w])",
         r"(?<!\d)\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?!\d)",
         r"(?<!\d)\d{1,3}(?:,\s*\d{3})+(?:\.\d{2})?(?!\d)",
         r"(?<!\d)\d{1,3}(?:[ .]\d{3})+(?:,\d{2})?(?!\d)",
@@ -221,14 +236,15 @@ def parse_price(line, country="", page_number=None, require_edge=False):
                 continue
             raw = match.group(0).strip()
             raw_number = re.sub(PRICE_CURRENCY_RE, "", raw, flags=re.I)
+            has_currency = re.search(PRICE_CURRENCY_RE, text[max(0, match.start() - 8):match.end() + 8], re.I) is not None
             try:
                 value = parse_price_number(raw_number)
             except ValueError:
                 continue
+            value = split_collapsed_price(value, raw_number, country, has_currency)
             if value >= 10:
                 tail = re.sub(r"[\s,.;:)\]]+$", "", text[match.end():])
                 right_edge = not tail
-                has_currency = re.search(PRICE_CURRENCY_RE, text[max(0, match.start() - 8):match.end() + 8], re.I) is not None
                 candidates.append((match.start(), display_price(value), value, right_edge, has_currency))
                 used_spans.append(match.span())
     currency_match = re.search(PRICE_CURRENCY_RE, cleaned, re.I)
@@ -293,6 +309,7 @@ def normalize_result(result):
         "wineList": {
             "id": wine_list_id,
             "label": f"Wine list {wine_list_id}",
+            "externalUrl": wine_list.get("external") or "",
             "downloadUrl": wine_list.get("download_url") or wine_list.get("file") or "",
             "fileUrl": wine_list.get("file") or "",
             "fileViewUrl": wine_list.get("file_view") or "",
@@ -321,6 +338,24 @@ def passes_filters(result, country="", city="", vintage=""):
 def numeric_price(result):
     value = result.get("priceValue")
     return value if isinstance(value, (int, float)) and value > 0 else 10**18
+
+
+def dedupe_results(results):
+    seen = set()
+    unique = []
+    for result in results:
+        key = (
+            (result.get("text") or "").strip().casefold(),
+            result.get("vintage") or "",
+            result.get("currency") or "",
+            result.get("priceValue"),
+            ((result.get("wineList") or {}).get("id")) or "",
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(result)
+    return unique
 
 
 def search(params):
@@ -381,6 +416,7 @@ def search(params):
             pdf_urls.add(normalized["wineList"]["fileUrl"])
         results.append(normalized)
 
+    results = dedupe_results(results)
     results.sort(key=lambda item: (numeric_price(item), item["venue"].get("name") or ""))
     results = results[:limit]
     return {
