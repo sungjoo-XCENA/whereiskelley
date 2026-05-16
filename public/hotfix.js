@@ -59,6 +59,14 @@ function uniqueResults(results = []) {
   return unique;
 }
 
+function cleanVenueName(value) {
+  return String(value || "").replace(/^[\s\u00d7\u2715\u2716\u2717\u2718\u274c]+/, "").trim();
+}
+
+function displayVenueName(venue = {}) {
+  return cleanVenueName(fallback(venue.name));
+}
+
 function groupPdfLists(group) {
   const seen = new Set();
   const lists = [];
@@ -179,6 +187,23 @@ function sortHeader(label, key) {
   return `<button class="sort-button${active ? " active" : ""}" type="button" data-sort="${escapeHtml(key)}" aria-label="Sort ${escapeHtml(label)}${active ? `, currently ${directionLabel}` : ""}"><span>${escapeHtml(label)}</span>${badge}</button>`;
 }
 
+function renderPlaceRow(group) {
+  const key = group.key;
+  const venue = group.venue || {};
+  const firstList = group.results[0]?.wineList || {};
+  const lowest = groupLowestPriceResult(group);
+  const expanded = key && key === activeVenueKey;
+  return `<tr class="place-row${expanded ? " active" : ""}" data-venue-key="${escapeHtml(key)}">
+      <td class="place-cell"><b>${escapeHtml(displayVenueName(venue))}</b><span>${escapeHtml(venue.type || "Restaurant / wine bar")}</span></td>
+      <td>${escapeHtml(fallback(venue.city))}</td>
+      <td>${escapeHtml(fallback(venue.country))}</td>
+      <td>${escapeHtml(fallback(groupUpdatedValue(group) || firstList.updatedDate || firstList.updatedText))}</td>
+      <td>${escapeHtml(group.results.length)} lines</td>
+      <td class="krw-cell">${krwPriceMarkup(lowest)}</td>
+      <td>${pdfMarkup(groupPdfList(group))}</td>
+    </tr>${expanded ? renderExpandedPlace(group) : ""}`;
+}
+
 function renderExpandedPlace(group) {
   const venue = group.venue || {};
   const pdfLists = groupPdfLists(group);
@@ -211,7 +236,7 @@ function renderExpandedPlace(group) {
       <div class="expanded-place">
         <div class="expanded-head">
           <div>
-            <b>${escapeHtml(fallback(venue.name))}</b>
+            <b>${escapeHtml(displayVenueName(venue))}</b>
             <span>${escapeHtml([venue.city, venue.country].filter(Boolean).join(", "))}</span>
           </div>
           <div class="actions compact">
