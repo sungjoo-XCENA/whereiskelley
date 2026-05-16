@@ -45,15 +45,12 @@
         <div id="worldMap" class="world-map" aria-label="Google map of matching wine lists">
           <div id="googleMap" class="google-map"></div>
           <div id="mapFallback" class="map-fallback">
-            <div>
-              <p class="panel-kicker">Google Maps</p>
-              <h3>API key required</h3>
-              <p>Enter a browser key for the Maps JavaScript API, or set GOOGLE_MAPS_API_KEY before starting the local server.</p>
+            <div class="map-state">
+              <span class="spinner hidden" aria-hidden="true"></span>
+              <p class="panel-kicker">World map</p>
+              <h3>Waiting for results</h3>
+              <p class="map-state-message">The map will appear when matching places have coordinates.</p>
             </div>
-            <form id="mapKeyForm" class="map-key-form">
-              <input id="mapKeyInput" type="password" placeholder="Google Maps API key" autocomplete="off">
-              <button type="submit">Apply</button>
-            </form>
           </div>
         </div>
       </section>
@@ -68,14 +65,6 @@
             <span id="count">0</span>
           </div>
           <div id="results" class="result-stack"></div>
-        </section>
-
-        <section class="detail" id="detail">
-          <div class="empty">
-            <p class="panel-kicker">Selection</p>
-            <h2>No result selected</h2>
-            <p>Country, city, price, update date, venue link, and PDF links appear here.</p>
-          </div>
         </section>
       </section>
     </main>
