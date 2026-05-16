@@ -6,18 +6,18 @@ const vintageInput = document.querySelector("#vintage");
 const submitButton = form.querySelector("button[type='submit']");
 const resultsEl = document.querySelector("#results");
 const countEl = document.querySelector("#count");
-const detailEl = document.querySelector("#detail");
 const googleMapEl = document.querySelector("#googleMap");
 const mapFallbackEl = document.querySelector("#mapFallback");
-const mapKeyForm = document.querySelector("#mapKeyForm");
-const mapKeyInput = document.querySelector("#mapKeyInput");
 const mapSummaryEl = document.querySelector("#mapSummary");
 
 let activeId = "";
 let activeVenueKey = "";
+let sortState = { key: "place", direction: "asc" };
 let latestResults = [];
 let latestLiveRefresh = null;
 let latestMapVenues = [];
+const pdfLineCache = new Map();
+const pdfLineLoading = new Set();
 let googleMap = null;
 let googleInfoWindow = null;
 let googleMarkers = [];
@@ -183,6 +183,95 @@ function sortByCheapest(results) {
   });
 }
 
+function groupUpdatedValue(group) {
+  return group.results
+    .map((result) => result.wineList?.updatedDate || result.wineList?.updatedText || "")
+    .filter(Boolean)
+    .sort()
+    .at(-1) || "";
+}
+
+function groupLowestPriceResult(group) {
+  const cached = pdfLineCache.get(pdfLineCacheKey(group));
+  const candidates = cached?.lines?.length ? cached.lines : group.results;
+  return [...candidates].sort((a, b) => numericPrice(a) - numericPrice(b))[0] || {};
+}
+
+function groupKrwValue(group) {
+  const result = groupLowestPriceResult(group);
+  if (!hasValidPrice(result)) return Number.POSITIVE_INFINITY;
+  const rate = KRW_RATES[currencyCode(result)];
+  return rate ? Number(result.priceValue) * rate : Number.POSITIVE_INFINITY;
+}
+
+function groupPdfList(group) {
+  return group.results.map((result) => result.wineList || {}).find((list) => pdfUrl(list)) || {};
+}
+
+function pdfLineCacheKey(group) {
+  const list = groupPdfList(group);
+  return String(list.id || group.key || "");
+}
+
+async function loadPdfLines(group) {
+  const key = pdfLineCacheKey(group);
+  if (!key || pdfLineCache.has(key) || pdfLineLoading.has(key)) return;
+  const list = groupPdfList(group);
+  pdfLineLoading.add(key);
+  try {
+    const params = new URLSearchParams({
+      wineListId: key,
+      q: queryInput.value.trim(),
+      fileUrl: pdfUrl(list),
+      country: group.venue?.country || ""
+    });
+    const payload = await getJson(`/api/pdf-lines?${params.toString()}`);
+    pdfLineCache.set(key, payload);
+  } catch (error) {
+    pdfLineCache.set(key, { status: "review", reason: error.message, lines: [] });
+  } finally {
+    pdfLineLoading.delete(key);
+    if (activeVenueKey === group.key) renderResultList();
+  }
+}
+
+function sortGroups(groups) {
+  const direction = sortState.direction === "asc" ? 1 : -1;
+  return [...groups].sort((a, b) => {
+    let left = "";
+    let right = "";
+    if (sortState.key === "place") {
+      left = a.venue?.name || "";
+      right = b.venue?.name || "";
+    } else if (sortState.key === "city") {
+      left = a.venue?.city || "";
+      right = b.venue?.city || "";
+    } else if (sortState.key === "country") {
+      left = a.venue?.country || "";
+      right = b.venue?.country || "";
+    } else if (sortState.key === "updated") {
+      left = groupUpdatedValue(a);
+      right = groupUpdatedValue(b);
+    } else if (sortState.key === "matches") {
+      left = a.results.length;
+      right = b.results.length;
+    } else if (sortState.key === "krw") {
+      left = groupKrwValue(a);
+      right = groupKrwValue(b);
+    }
+    if (typeof left === "number" || typeof right === "number") {
+      return ((left || 0) - (right || 0)) * direction;
+    }
+    return String(left).localeCompare(String(right)) * direction;
+  });
+}
+
+function sortHeader(label, key) {
+  const active = sortState.key === key;
+  const arrow = active ? (sortState.direction === "asc" ? " Asc" : " Desc") : "";
+  return `<button class="sort-button${active ? " active" : ""}" type="button" data-sort="${escapeHtml(key)}">${escapeHtml(label)}${arrow}</button>`;
+}
+
 function liveRefreshLine(liveRefresh) {
   if (!liveRefresh) return "";
   const complete = liveRefresh.complete
@@ -197,11 +286,7 @@ function liveRefreshLine(liveRefresh) {
 function renderResults(results, liveRefresh = null) {
   latestResults = sortByCheapest(results);
   latestLiveRefresh = liveRefresh;
-  countEl.textContent = String(latestResults.length);
-  if (!activeId && latestResults.length) {
-    activeId = String(latestResults[0].id);
-    activeVenueKey = venueKey(latestResults[0]);
-  }
+  countEl.textContent = String(groupedVenues(latestResults).length);
   renderMap(latestResults);
   renderResultList();
 }
@@ -213,38 +298,95 @@ function renderResultList() {
     resultsEl.innerHTML = `${liveLine}<div class="empty-list"><h3>No results</h3><p>Try another spelling or a broader query.</p></div>`;
     return;
   }
-  const rows = results.map((result) => {
-    const location = resultLocation(result);
-    const key = venueKey(result);
-    const list = result.wineList || {};
-    return `<tr class="result-row${String(result.id) === String(activeId) ? " active" : ""}${key && key === activeVenueKey ? " venue-active" : ""}" data-id="${escapeHtml(result.id)}" data-venue-key="${escapeHtml(key)}">
-      <td class="price-cell">${originalPriceMarkup(result)}</td>
-      <td class="krw-cell">${krwPriceMarkup(result)}</td>
-      <td class="wine-cell">${escapeHtml(result.text)}</td>
-      <td>${escapeHtml(result.venue?.name || "")}</td>
-      <td>${escapeHtml(location)}</td>
-      <td>${escapeHtml(result.vintage || "")}</td>
-      <td>${escapeHtml(list.updatedDate || list.updatedText || "")}</td>
-      <td>${pdfMarkup(list)}</td>
-    </tr>`;
-  }).join("");
+  const groups = sortGroups(groupedVenues(results));
+  groups.forEach((group) => {
+    if (pdfUrl(groupPdfList(group))) window.setTimeout(() => loadPdfLines(group), 0);
+  });
+  const rows = groups.map((group) => renderPlaceRow(group)).join("");
   resultsEl.innerHTML = `${liveLine}<div class="table-wrap">
     <table class="result-table">
       <thead>
         <tr>
-          <th>Original price</th>
-          <th>KRW</th>
-          <th>Wine</th>
-          <th>Restaurant / bar</th>
-          <th>Location</th>
-          <th>Vintage</th>
-          <th>Updated</th>
+          <th>${sortHeader("Place", "place")}</th>
+          <th>${sortHeader("City", "city")}</th>
+          <th>${sortHeader("Country", "country")}</th>
+          <th>${sortHeader("Updated", "updated")}</th>
+          <th>${sortHeader("Matches", "matches")}</th>
+          <th>${sortHeader("Lowest KRW", "krw")}</th>
           <th>PDF</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
   </div>`;
+}
+
+function renderPlaceRow(group) {
+  const key = group.key;
+  const venue = group.venue || {};
+  const firstList = group.results[0]?.wineList || {};
+  const lowest = groupLowestPriceResult(group);
+  const expanded = key && key === activeVenueKey;
+  return `<tr class="place-row${expanded ? " active" : ""}" data-venue-key="${escapeHtml(key)}">
+      <td class="place-cell"><b>${escapeHtml(fallback(venue.name))}</b><span>${escapeHtml(venue.type || "Restaurant / wine bar")}</span></td>
+      <td>${escapeHtml(fallback(venue.city))}</td>
+      <td>${escapeHtml(fallback(venue.country))}</td>
+      <td>${escapeHtml(fallback(groupUpdatedValue(group) || firstList.updatedDate || firstList.updatedText))}</td>
+      <td>${escapeHtml(group.results.length)} lines</td>
+      <td class="krw-cell">${krwPriceMarkup(lowest)}</td>
+      <td>${pdfMarkup(groupPdfList(group))}</td>
+    </tr>${expanded ? renderExpandedPlace(group) : ""}`;
+}
+
+function renderExpandedPlace(group) {
+  const venue = group.venue || {};
+  const list = groupPdfList(group);
+  const key = pdfLineCacheKey(group);
+  const cached = pdfLineCache.get(key);
+  if (!cached && key && !pdfLineLoading.has(key)) {
+    window.setTimeout(() => loadPdfLines(group), 0);
+  }
+  const sourceLines = cached?.lines?.length ? cached.lines : group.results;
+  const reviewNote = cached?.status === "review"
+    ? `<div class="review-note">${escapeHtml(cached.reason || "Needs review")}</div>`
+    : !cached
+      ? `<div class="review-note">Reading extracted PDF text...</div>`
+      : "";
+  const lines = sourceLines
+    .slice()
+    .sort((a, b) => numericPrice(a) - numericPrice(b))
+    .map((result) => `<tr>
+      <td class="wine-cell">${escapeHtml(result.text)}</td>
+      <td>${escapeHtml(result.vintage || "")}</td>
+      <td class="price-cell">${originalPriceMarkup(result)}</td>
+      <td class="krw-cell">${krwPriceMarkup(result)}</td>
+      <td>${escapeHtml(result.pageNumber || "")}</td>
+    </tr>`)
+    .join("");
+  return `<tr class="expanded-row">
+    <td colspan="7">
+      <div class="expanded-place">
+        <div class="expanded-head">
+          <div>
+            <b>${escapeHtml(fallback(venue.name))}</b>
+            <span>${escapeHtml([venue.city, venue.country].filter(Boolean).join(", "))}</span>
+          </div>
+          <div class="actions compact">
+            ${pdfUrl(list) ? `<a href="${escapeHtml(pdfUrl(list))}" target="_blank" rel="noreferrer">PDF</a>` : ""}
+            ${venue.starWineMapUrl ? `<a class="secondary" href="${escapeHtml(venue.starWineMapUrl)}" target="_blank" rel="noreferrer">Map</a>` : ""}
+            ${venue.url ? `<a class="secondary" href="${escapeHtml(venue.url)}" target="_blank" rel="noreferrer">Star Wine List page</a>` : ""}
+          </div>
+        </div>
+        ${reviewNote}
+        <table class="line-table">
+          <thead>
+            <tr><th>Matched PDF/search line</th><th>Vintage</th><th>Price</th><th>KRW</th><th>Page</th></tr>
+          </thead>
+          <tbody>${lines}</tbody>
+        </table>
+      </div>
+    </td>
+  </tr>`;
 }
 
 function venueKey(result) {
@@ -262,7 +404,7 @@ function groupedVenues(results) {
     }
     groups.get(key).results.push(result);
   }
-  return [...groups.values()].sort((a, b) => numericPrice(a.results[0]) - numericPrice(b.results[0]));
+  return [...groups.values()].sort((a, b) => String(a.venue?.name || "").localeCompare(String(b.venue?.name || "")));
 }
 
 function renderMap(results) {
@@ -276,14 +418,18 @@ function renderMap(results) {
 }
 
 function getGoogleMapsKey() {
-  return localStorage.getItem("googleMapsApiKey") || window.STARWINE_CONFIG?.googleMapsApiKey || "";
+  return window.STARWINE_CONFIG?.googleMapsApiKey || localStorage.getItem("googleMapsApiKey") || "";
 }
 
-function showMapFallback(message = "") {
+function showMapFallback(message = "", title = "Map unavailable", loading = false) {
   googleMapEl.classList.add("hidden");
   mapFallbackEl.classList.remove("hidden");
-  const note = message || "Enter a Google Maps JavaScript API key to display venue pins.";
-  mapFallbackEl.querySelector("p:last-child").textContent = note;
+  const heading = mapFallbackEl.querySelector("h3");
+  const note = mapFallbackEl.querySelector(".map-state-message");
+  const spinner = mapFallbackEl.querySelector(".spinner");
+  if (heading) heading.textContent = title;
+  if (note) note.textContent = message || "The map will appear when matching places have coordinates.";
+  if (spinner) spinner.classList.toggle("hidden", !loading);
 }
 
 function loadGoogleMaps() {
@@ -311,14 +457,14 @@ async function drawGoogleMap(venues) {
   const token = ++mapRenderToken;
   if (!venues.length) {
     clearGoogleMarkers();
-    showMapFallback("No coordinates are available for this result set yet.");
+    showMapFallback("No matching places with coordinates were found for this search.", "No mapped places");
     return;
   }
   try {
     const maps = await loadGoogleMaps();
     if (token !== mapRenderToken) return;
     if (!maps) {
-      showMapFallback("Enter a Google Maps JavaScript API key to display venue pins.");
+      showMapFallback("The map is hidden because the deployed Google Maps key is not configured.", "Map unavailable");
       return;
     }
     mapFallbackEl.classList.add("hidden");
@@ -346,7 +492,6 @@ async function drawGoogleMap(venues) {
       const marker = new maps.Marker({
         map: googleMap,
         position,
-        label: String(group.results.length),
         title: group.venue.name || "Wine venue",
       });
       marker.starWineKey = group.key;
@@ -359,7 +504,7 @@ async function drawGoogleMap(venues) {
     }
     setActiveMapMarker(activeVenueKey);
   } catch (error) {
-    showMapFallback(error.message);
+    showMapFallback(error.message, "Map unavailable");
   }
 }
 
@@ -376,7 +521,6 @@ function selectVenueGroup(group) {
   activeVenueKey = group.key;
   renderResultList();
   setActiveMapMarker(group.key);
-  renderVenueDetail(group);
   scrollToVenue(group.key);
 }
 
@@ -404,97 +548,17 @@ function scrollToVenue(key) {
   }
 }
 
-function renderDetail(result) {
-  if (!result) {
-    detailEl.innerHTML = `<div class="empty">
-      <p class="panel-kicker">Selection</p>
-      <h2>No result selected</h2>
-      <p>Country, city, price, update date, venue link, and PDF links appear here.</p>
-    </div>`;
-    return;
-  }
-  const venue = result.venue || {};
-  const list = result.wineList || {};
-  const location = resultLocation(result);
-  const originalPrice = originalPriceText(result);
-  const krwPrice = krwPriceText(result);
-  detailEl.innerHTML = `<div class="detail-grid">
-    <div class="detail-title">
-      <p class="eyebrow">${escapeHtml(fallback(venue.name))}</p>
-      <h2>${escapeHtml(result.text)}</h2>
-      <div class="detail-meta">
-        <span>${escapeHtml(fallback(location))}</span>
-        ${result.vintage ? `<span>${escapeHtml(result.vintage)}</span>` : ""}
-        <span class="price">${escapeHtml(originalPrice)}</span>
-        <span class="price">${escapeHtml(krwPrice)}</span>
-      </div>
-    </div>
-    <div class="fact-grid">
-      <div class="fact"><span>Country</span><b>${escapeHtml(fallback(venue.country))}</b></div>
-      <div class="fact"><span>City</span><b>${escapeHtml(fallback(venue.city))}</b></div>
-      <div class="fact wide"><span>Address</span><b>${escapeHtml(fallback(venue.address))}</b></div>
-      <div class="fact"><span>List updated</span><b>${escapeHtml(fallback(list.updatedDate || list.updatedText))}</b></div>
-      <div class="fact"><span>Original price</span><b>${escapeHtml(originalPrice)}</b></div>
-      <div class="fact"><span>KRW estimate</span><b>${escapeHtml(krwPrice)}</b></div>
-    </div>
-    <div class="actions">
-      ${pdfUrl(list) ? `<a href="${escapeHtml(pdfUrl(list))}" target="_blank" rel="noreferrer">PDF</a>` : ""}
-      ${venue.googleMapsUrl ? `<a class="secondary" href="${escapeHtml(venue.googleMapsUrl)}" target="_blank" rel="noreferrer">Map</a>` : ""}
-      ${venue.url ? `<a class="secondary" href="${escapeHtml(venue.url)}" target="_blank" rel="noreferrer">Star Wine List page</a>` : ""}
-    </div>
-  </div>`;
-}
-
-function renderVenueDetail(group) {
-  const venue = group.venue || {};
-  const first = group.results[0] || {};
-  const firstList = first.wineList || {};
-  const lines = group.results
-    .slice(0, 80)
-    .map((result) => {
-      return `<li>
-        <span>${escapeHtml(result.text)}</span>
-        <b>${escapeHtml(originalPriceText(result))}<small>${escapeHtml(krwPriceText(result))}</small></b>
-      </li>`;
-    })
-    .join("");
-  detailEl.innerHTML = `<div class="detail-grid">
-    <div class="detail-title">
-      <p class="eyebrow">${escapeHtml([venue.city, venue.country].filter(Boolean).join(", "))}</p>
-      <h2>${escapeHtml(venue.name)}</h2>
-      <div class="detail-meta">
-        <span>${escapeHtml(venue.type || "Wine venue")}</span>
-        <span>${escapeHtml(group.results.length)} matching wines</span>
-        ${Number.isFinite(group.lat) && Number.isFinite(group.lng) ? `<span>${group.lat.toFixed(3)}, ${group.lng.toFixed(3)}</span>` : ""}
-      </div>
-    </div>
-    <div class="fact-grid">
-      <div class="fact"><span>Country</span><b>${escapeHtml(fallback(venue.country))}</b></div>
-      <div class="fact"><span>City</span><b>${escapeHtml(fallback(venue.city))}</b></div>
-      <div class="fact wide"><span>Address</span><b>${escapeHtml(fallback(venue.address))}</b></div>
-      <div class="fact"><span>Latest list update</span><b>${escapeHtml(fallback(firstList.updatedDate || firstList.updatedText))}</b></div>
-      <div class="fact"><span>PDF status</span><b>${escapeHtml(firstList.localFileUrl ? "Saved locally" : firstList.fileUrl ? "Source available" : "No source")}</b></div>
-    </div>
-    <div class="actions">
-      ${pdfUrl(firstList) ? `<a href="${escapeHtml(pdfUrl(firstList))}" target="_blank" rel="noreferrer">PDF</a>` : ""}
-      ${venue.starWineMapUrl ? `<a class="secondary" href="${escapeHtml(venue.starWineMapUrl)}" target="_blank" rel="noreferrer">Star Map</a>` : ""}
-      ${venue.url ? `<a class="secondary" href="${escapeHtml(venue.url)}" target="_blank" rel="noreferrer">Star Wine List page</a>` : ""}
-    </div>
-    <div class="venue-lines">
-      <h3>Matching wines at this venue</h3>
-      <ul>${lines}</ul>
-    </div>
-  </div>`;
-}
-
 async function runSearch() {
   activeId = "";
   activeVenueKey = "";
   latestResults = [];
   latestLiveRefresh = null;
-  resultsEl.innerHTML = `<div class="loading">Collecting every matching page...</div>`;
-  detailEl.innerHTML = `<div class="empty"><p class="panel-kicker">Search</p><h2>Searching...</h2><p>Results will appear after the full pull finishes.</p></div>`;
-  mapSummaryEl.textContent = "Waiting for search to finish";
+  pdfLineCache.clear();
+  pdfLineLoading.clear();
+  countEl.textContent = "0";
+  resultsEl.innerHTML = `<div class="loading"><span class="spinner" aria-hidden="true"></span><div><b>Searching every page...</b><span>Results will appear after the full scan finishes.</span></div></div>`;
+  mapSummaryEl.textContent = "Searching...";
+  showMapFallback("Scanning all matching pages before drawing the map.", "Searching places", true);
   clearGoogleMarkers();
   submitButton.disabled = true;
   const params = new URLSearchParams();
@@ -505,21 +569,13 @@ async function runSearch() {
   if (queryInput.value.trim()) {
     params.set("live", "1");
     params.set("livePages", "all");
-    params.set("livePageCap", "10");
-    params.set("liveMaxPdfs", "10");
+    params.set("livePageCap", "200");
+    params.set("liveMaxPdfs", "50");
   }
-  params.set("limit", "2000");
+  params.set("limit", "5000");
   try {
     const payload = await getJson(`/api/search?${params.toString()}`);
     renderResults(payload.results, payload.liveRefresh);
-    const selected = latestResults.find((result) => String(result.id) === String(activeId)) || latestResults[0];
-    if (selected) {
-      activeId = String(selected.id);
-      activeVenueKey = venueKey(selected);
-      renderResultList();
-      setActiveMapMarker(activeVenueKey);
-    }
-    renderDetail(selected);
   } finally {
     submitButton.disabled = false;
   }
@@ -532,25 +588,24 @@ form.addEventListener("submit", (event) => {
   });
 });
 
-mapKeyForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const key = mapKeyInput.value.trim();
-  if (!key) return;
-  localStorage.setItem("googleMapsApiKey", key);
-  googleMapsPromise = null;
-  drawGoogleMap(latestMapVenues);
-});
-
 resultsEl.addEventListener("click", (event) => {
+  const sortButton = event.target.closest("[data-sort]");
+  if (sortButton) {
+    const key = sortButton.dataset.sort;
+    if (sortState.key === key) {
+      sortState.direction = sortState.direction === "asc" ? "desc" : "asc";
+    } else {
+      sortState = { key, direction: key === "krw" || key === "matches" ? "desc" : "asc" };
+    }
+    renderResultList();
+    return;
+  }
   if (event.target.closest("a")) return;
-  const row = event.target.closest("[data-id]");
+  const row = event.target.closest("[data-venue-key]");
   if (!row) return;
-  activeId = row.dataset.id;
-  const selected = latestResults.find((result) => String(result.id) === String(activeId));
-  activeVenueKey = selected ? venueKey(selected) : "";
+  activeVenueKey = activeVenueKey === row.dataset.venueKey ? "" : row.dataset.venueKey;
   renderResultList();
   setActiveMapMarker(activeVenueKey);
-  renderDetail(selected);
 });
 
 getJson("/api/filters")
