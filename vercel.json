@@ -2,7 +2,10 @@
   "version": 2,
   "functions": {
     "api/search.py": {
-      "maxDuration": 30
+      "maxDuration": 60
+    },
+    "api/pdf-lines.py": {
+      "maxDuration": 60
     }
   }
 }
