@@ -1,7 +1,10 @@
 import re
+import sys
 from http.server import BaseHTTPRequestHandler
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import search as base
 
 
