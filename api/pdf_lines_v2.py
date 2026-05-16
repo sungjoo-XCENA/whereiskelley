@@ -109,9 +109,18 @@ def matched_fragments(raw, query, country):
                 fragments.append((clean_fragment(fragment), price_text, price_value, currency))
                 break
         else:
-            fragment = raw[max(0, position - 40) : min(len(raw), position + 220)]
-            price_text, price_value, currency = parse_price(fragment, country, require_edge=True)
-            fragments.append((clean_fragment(fragment), price_text, price_value, currency))
+            before_start = max(0, position - 90)
+            before_matches = list(PRICE_TOKEN_RE.finditer(raw, before_start, position))
+            for match in reversed(before_matches):
+                fragment = raw[match.start() : min(len(raw), position + 220)]
+                price_text, price_value, currency = parse_price(fragment, country, require_edge=False)
+                if price_value is not None:
+                    fragments.append((clean_fragment(fragment), price_text, price_value, currency))
+                    break
+            else:
+                fragment = raw[max(0, position - 40) : min(len(raw), position + 220)]
+                price_text, price_value, currency = parse_price(fragment, country, require_edge=True)
+                fragments.append((clean_fragment(fragment), price_text, price_value, currency))
     unique = []
     seen = set()
     for fragment in fragments:
