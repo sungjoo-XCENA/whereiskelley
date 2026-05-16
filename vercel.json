@@ -4,7 +4,13 @@
     "api/search.py": {
       "maxDuration": 60
     },
+    "api/search_v2.py": {
+      "maxDuration": 60
+    },
     "api/pdf-lines.py": {
+      "maxDuration": 60
+    },
+    "api/pdf_lines_v2.py": {
       "maxDuration": 60
     }
   }
