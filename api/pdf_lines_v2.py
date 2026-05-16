@@ -1,11 +1,14 @@
 import io
 import json
 import re
+import sys
 import unicodedata
 from http.server import BaseHTTPRequestHandler
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pypdf import PdfReader
 from search_v2 import PRICE_CURRENCY_RE, parse_price
 
