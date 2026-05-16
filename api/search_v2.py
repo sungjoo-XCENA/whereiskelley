@@ -12,6 +12,19 @@ PRICE_CURRENCY_RE = base.PRICE_CURRENCY_RE
 BASE_NORMALIZE_RESULT = base.normalize_result
 
 
+def split_collapsed_price(value, raw_number, country, has_currency):
+    compact = re.sub(r"\D", "", raw_number or "")
+    currency = base.normalize_currency("", country)
+    low_denomination = currency in {"EUR", "USD", "GBP", "CHF", "CAD", "AUD", "SGD", "DKK", "SEK", "NOK"}
+    if has_currency or not low_denomination or not compact.isdigit() or len(compact) not in {5, 6}:
+        return value
+    suffix = int(compact[-2:])
+    prefix = int(compact[:-2])
+    if 100 <= prefix <= 5000 and 1 <= suffix <= 80:
+        return float(prefix)
+    return value
+
+
 def parse_price(line, country="", page_number=None, require_edge=False):
     cleaned = base.strip_search_page_suffix(line, page_number)
     no_price = re.search(base.NO_PRICE_RE, cleaned, re.I) is not None
@@ -38,14 +51,15 @@ def parse_price(line, country="", page_number=None, require_edge=False):
                 continue
             raw = match.group(0).strip()
             raw_number = re.sub(PRICE_CURRENCY_RE, "", raw, flags=re.I)
+            has_currency = re.search(PRICE_CURRENCY_RE, text[max(0, match.start() - 8):match.end() + 8], re.I) is not None
             try:
                 value = base.parse_price_number(raw_number)
             except ValueError:
                 continue
+            value = split_collapsed_price(value, raw_number, country, has_currency)
             if value >= 10:
                 tail = re.sub(r"[\s,.;:)\]]+$", "", text[match.end():])
                 right_edge = not tail
-                has_currency = re.search(PRICE_CURRENCY_RE, text[max(0, match.start() - 8):match.end() + 8], re.I) is not None
                 candidates.append((match.start(), base.display_price(value), value, right_edge, has_currency))
                 used_spans.append(match.span())
     currency_match = re.search(PRICE_CURRENCY_RE, cleaned, re.I)
@@ -80,35 +94,14 @@ def normalize_result(result):
     return data
 
 
-def dedupe_results(results):
-    seen = set()
-    unique = []
-    for result in results:
-        key = (
-            (result.get("text") or "").strip().casefold(),
-            result.get("vintage") or "",
-            result.get("currency") or "",
-            result.get("priceValue"),
-            ((result.get("wineList") or {}).get("id")) or "",
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(result)
-    return unique
-
-
 base.parse_price = parse_price
 base.normalize_result = normalize_result
-base.dedupe_results = dedupe_results
 
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             payload = base.search(parse_qs(urlparse(self.path).query))
-            payload["results"] = dedupe_results(payload.get("results") or [])
-            payload["count"] = len(payload["results"])
             base.json_response(self, payload)
         except Exception as exc:
             base.json_response(self, {"error": str(exc)}, status=500)
