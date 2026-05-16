@@ -153,6 +153,16 @@ function krwPriceText(result) {
   }).format(Math.round(Number(result.priceValue) * rate));
 }
 
+function pdfUrl(list = {}) {
+  return list.localFileUrl || list.fileUrl || list.fileViewUrl || list.downloadUrl || "";
+}
+
+function pdfMarkup(list = {}) {
+  const url = pdfUrl(list);
+  if (!url) return `<span class="pdf-pill muted">No PDF</span>`;
+  return `<a class="pdf-pill pdf-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">PDF</a>`;
+}
+
 function resultLocation(result) {
   return [result.venue?.city, result.venue?.country].filter(Boolean).join(", ");
 }
@@ -206,7 +216,6 @@ function renderResultList() {
   const rows = results.map((result) => {
     const location = resultLocation(result);
     const key = venueKey(result);
-    const pdfState = result.wineList?.localFileUrl ? "PDF saved" : result.wineList?.fileUrl ? "PDF source" : "No PDF";
     const list = result.wineList || {};
     return `<tr class="result-row${String(result.id) === String(activeId) ? " active" : ""}${key && key === activeVenueKey ? " venue-active" : ""}" data-id="${escapeHtml(result.id)}" data-venue-key="${escapeHtml(key)}">
       <td class="price-cell">${originalPriceMarkup(result)}</td>
@@ -216,7 +225,7 @@ function renderResultList() {
       <td>${escapeHtml(location)}</td>
       <td>${escapeHtml(result.vintage || "")}</td>
       <td>${escapeHtml(list.updatedDate || list.updatedText || "")}</td>
-      <td><span class="pdf-pill">${escapeHtml(pdfState)}</span></td>
+      <td>${pdfMarkup(list)}</td>
     </tr>`;
   }).join("");
   resultsEl.innerHTML = `${liveLine}<div class="table-wrap">
@@ -226,7 +235,7 @@ function renderResultList() {
           <th>Original price</th>
           <th>KRW</th>
           <th>Wine</th>
-          <th>Venue</th>
+          <th>Restaurant / bar</th>
           <th>Location</th>
           <th>Vintage</th>
           <th>Updated</th>
@@ -429,12 +438,9 @@ function renderDetail(result) {
       <div class="fact"><span>KRW estimate</span><b>${escapeHtml(krwPrice)}</b></div>
     </div>
     <div class="actions">
-      ${list.localFileUrl ? `<a href="${escapeHtml(list.localFileUrl)}" target="_blank" rel="noreferrer">Local PDF</a>` : ""}
-      ${list.fileUrl ? `<a class="secondary" href="${escapeHtml(list.fileUrl)}" target="_blank" rel="noreferrer">Source PDF</a>` : ""}
-      ${list.fileViewUrl ? `<a class="secondary" href="${escapeHtml(list.fileViewUrl)}" target="_blank" rel="noreferrer">External PDF</a>` : ""}
+      ${pdfUrl(list) ? `<a href="${escapeHtml(pdfUrl(list))}" target="_blank" rel="noreferrer">PDF</a>` : ""}
       ${venue.googleMapsUrl ? `<a class="secondary" href="${escapeHtml(venue.googleMapsUrl)}" target="_blank" rel="noreferrer">Map</a>` : ""}
-      ${venue.url ? `<a class="secondary" href="${escapeHtml(venue.url)}" target="_blank" rel="noreferrer">Venue</a>` : ""}
-      ${list.downloadUrl ? `<a class="ghost" href="${escapeHtml(list.downloadUrl)}" target="_blank" rel="noreferrer">Download page</a>` : ""}
+      ${venue.url ? `<a class="secondary" href="${escapeHtml(venue.url)}" target="_blank" rel="noreferrer">Star Wine List page</a>` : ""}
     </div>
   </div>`;
 }
@@ -470,11 +476,9 @@ function renderVenueDetail(group) {
       <div class="fact"><span>PDF status</span><b>${escapeHtml(firstList.localFileUrl ? "Saved locally" : firstList.fileUrl ? "Source available" : "No source")}</b></div>
     </div>
     <div class="actions">
-      ${firstList.localFileUrl ? `<a href="${escapeHtml(firstList.localFileUrl)}" target="_blank" rel="noreferrer">Local PDF</a>` : ""}
-      ${firstList.fileUrl ? `<a class="secondary" href="${escapeHtml(firstList.fileUrl)}" target="_blank" rel="noreferrer">Source PDF</a>` : ""}
-      ${firstList.fileViewUrl ? `<a class="secondary" href="${escapeHtml(firstList.fileViewUrl)}" target="_blank" rel="noreferrer">External PDF</a>` : ""}
+      ${pdfUrl(firstList) ? `<a href="${escapeHtml(pdfUrl(firstList))}" target="_blank" rel="noreferrer">PDF</a>` : ""}
       ${venue.starWineMapUrl ? `<a class="secondary" href="${escapeHtml(venue.starWineMapUrl)}" target="_blank" rel="noreferrer">Star Map</a>` : ""}
-      ${venue.url ? `<a class="secondary" href="${escapeHtml(venue.url)}" target="_blank" rel="noreferrer">Venue</a>` : ""}
+      ${venue.url ? `<a class="secondary" href="${escapeHtml(venue.url)}" target="_blank" rel="noreferrer">Star Wine List page</a>` : ""}
     </div>
     <div class="venue-lines">
       <h3>Matching wines at this venue</h3>
@@ -538,6 +542,7 @@ mapKeyForm.addEventListener("submit", (event) => {
 });
 
 resultsEl.addEventListener("click", (event) => {
+  if (event.target.closest("a")) return;
   const row = event.target.closest("[data-id]");
   if (!row) return;
   activeId = row.dataset.id;
