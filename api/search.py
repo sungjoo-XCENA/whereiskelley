@@ -197,7 +197,7 @@ def strip_search_page_suffix(line, page_number=None):
     return text
 
 
-def parse_price(line, country="", page_number=None):
+def parse_price(line, country="", page_number=None, require_edge=False):
     cleaned = strip_search_page_suffix(line, page_number)
     no_price = re.search(NO_PRICE_RE, cleaned, re.I) is not None
     text = re.sub(r"\b(19|20)\d{2}\b", " ", cleaned)
@@ -239,6 +239,8 @@ def parse_price(line, country="", page_number=None):
     if edge_candidates:
         _pos, raw, value, _edge, _currency = sorted(edge_candidates, key=lambda item: item[0])[-1]
         return raw, value, currency
+    if require_edge:
+        return "", None, currency
     if no_price:
         return "", None, currency
     currency_candidates = [item for item in candidates if item[4]]
