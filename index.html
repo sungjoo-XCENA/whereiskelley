@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Wine List Search</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">Star Wine List local index</p>
+          <h1>Wine list search</h1>
+        </div>
+        <div id="stats" class="stats"></div>
+      </header>
+
+      <section class="command-bar">
+        <form id="searchForm" class="search-form">
+          <div class="query-wrap">
+            <span class="query-mark">Search</span>
+            <input id="query" name="q" type="search" placeholder="William Kelley, Leflaive, Riesling..." autocomplete="off" autofocus>
+          </div>
+          <select id="country" name="country">
+            <option value="">All countries</option>
+          </select>
+          <input id="city" name="city" type="search" placeholder="City">
+          <input id="vintage" name="vintage" type="search" inputmode="numeric" maxlength="4" placeholder="Vintage">
+          <label class="switch">
+            <input id="liveSearch" type="checkbox" checked>
+            <span>Live</span>
+          </label>
+          <button type="submit">Run</button>
+        </form>
+        <div class="toolbar">
+          <button id="showSearch" type="button" class="tool active">Results</button>
+          <button id="showUnparsed" type="button" class="tool">Review</button>
+        </div>
+      </section>
+
+      <section class="map-panel">
+        <div class="map-head">
+          <div>
+            <p class="panel-kicker">World map</p>
+            <h2>Where the lists are</h2>
+          </div>
+          <div id="mapSummary" class="map-summary">No mapped venues yet</div>
+        </div>
+        <div id="worldMap" class="world-map" aria-label="Google map of matching wine lists">
+          <div id="googleMap" class="google-map"></div>
+          <div id="mapFallback" class="map-fallback">
+            <div>
+              <p class="panel-kicker">Google Maps</p>
+              <h3>API key required</h3>
+              <p>Enter a browser key for the Maps JavaScript API, or set GOOGLE_MAPS_API_KEY before starting the local server.</p>
+            </div>
+            <form id="mapKeyForm" class="map-key-form">
+              <input id="mapKeyInput" type="password" placeholder="Google Maps API key" autocomplete="off">
+              <button type="submit">Apply</button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <section class="result-list">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">Matches</p>
+              <h2>Search results</h2>
+            </div>
+            <span id="count">0</span>
+          </div>
+          <div id="results" class="result-stack"></div>
+        </section>
+
+        <section class="detail" id="detail">
+          <div class="empty">
+            <p class="panel-kicker">Selection</p>
+            <h2>No result selected</h2>
+            <p>Country, city, price, update date, venue link, and PDF links appear here.</p>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script src="/api/config"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

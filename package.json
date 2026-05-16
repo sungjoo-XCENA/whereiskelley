@@ -1,0 +1,14 @@
+{
+  "name": "star-wine-local-search",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "powershell -ExecutionPolicy Bypass -File run-server.ps1",
+    "sync": "powershell -ExecutionPolicy Bypass -File scripts/sync.ps1",
+    "sync:sample": "powershell -ExecutionPolicy Bypass -File scripts/sync.ps1 --countries=germany --limit-venues=5",
+    "sync:api": "powershell -ExecutionPolicy Bypass -File scripts/sync-search-api.ps1",
+    "sync:sweep": "powershell -ExecutionPolicy Bypass -File scripts/sync-search-sweep.ps1",
+    "import-pdf": "powershell -ExecutionPolicy Bypass -File scripts/import-pdf.ps1"
+  }
+}
