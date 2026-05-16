@@ -15,6 +15,10 @@ hotfixStyle.textContent = `
     font-weight: 950;
     line-height: 1;
   }
+  .line-table .muted {
+    color: var(--muted);
+    font-weight: 750;
+  }
 `;
 document.head.appendChild(hotfixStyle);
 
@@ -117,8 +121,18 @@ function groupPdfReviewReason(group) {
 
 function groupLowestPriceResult(group) {
   const pdfLines = groupPdfLines(group);
-  const candidates = pdfLines.length ? pdfLines : group.results;
+  const candidates = pdfLines.length ? pdfLines : fallbackWineLines(group.results);
   return [...candidates].sort((a, b) => numericPrice(a) - numericPrice(b))[0] || {};
+}
+
+function hasWineLineSignal(result = {}) {
+  return Number.isFinite(Number(result.priceValue))
+    || (Array.isArray(result.prices) && result.prices.length > 0)
+    || /\b(?:NV|MV|N\/V|19\d{2}|20\d{2})\b/i.test(String(result.vintage || result.text || ""));
+}
+
+function fallbackWineLines(results = []) {
+  return uniqueResults(results).filter(hasWineLineSignal);
 }
 
 function groupedVenues(results) {
@@ -199,10 +213,18 @@ function renderPlaceRow(group) {
       <td>${escapeHtml(fallback(venue.city))}</td>
       <td>${escapeHtml(fallback(venue.country))}</td>
       <td>${escapeHtml(fallback(groupUpdatedValue(group) || firstList.updatedDate || firstList.updatedText))}</td>
-      <td>${escapeHtml(group.results.length)} lines</td>
+      <td>${escapeHtml(placeLineLabel(group))}</td>
       <td class="krw-cell">${krwPriceMarkup(lowest)}</td>
       <td>${pdfMarkup(groupPdfList(group))}</td>
     </tr>${expanded ? renderExpandedPlace(group) : ""}`;
+}
+
+function placeLineLabel(group) {
+  const pdfLines = groupPdfLines(group);
+  if (pdfLines.length) return `${pdfLines.length} PDF lines`;
+  const fallbackLines = fallbackWineLines(group.results);
+  if (fallbackLines.length) return `${fallbackLines.length} indexed lines`;
+  return "Review";
 }
 
 function renderExpandedPlace(group) {
@@ -212,14 +234,14 @@ function renderExpandedPlace(group) {
   if (groupPdfPending(group)) {
     window.setTimeout(() => loadPdfLines(group), 0);
   }
-  const sourceLines = uniqueResults(pdfLines.length ? pdfLines : group.results);
+  const sourceLines = pdfLines.length ? uniqueResults(pdfLines) : fallbackWineLines(group.results);
   const reviewReason = groupPdfReviewReason(group);
   const reviewNote = pdfLines.length
     ? ""
     : groupPdfPending(group)
       ? `<div class="review-note">Reading the current PDF download...</div>`
       : reviewReason
-        ? `<div class="review-note">${escapeHtml(reviewReason)} Showing Star Wine List search-index lines until this PDF is reviewed.</div>`
+        ? `<div class="review-note">${escapeHtml(reviewReason)} ${sourceLines.length ? "Showing priced/vintage search-index lines until this PDF is reviewed." : "No priced wine line was found in the downloaded PDF or search index, so this needs manual review."}</div>`
         : "";
   const lines = sourceLines
     .slice()
@@ -231,7 +253,7 @@ function renderExpandedPlace(group) {
       <td class="krw-cell">${krwPriceMarkup(result)}</td>
       <td>${escapeHtml(result.pageNumber || "")}</td>
     </tr>`)
-    .join("");
+    .join("") || `<tr><td colspan="5" class="muted">Review needed. The search index matched text for this place, but no priced wine line was verified from the PDF.</td></tr>`;
   return `<tr class="expanded-row">
     <td colspan="7">
       <div class="expanded-place">
