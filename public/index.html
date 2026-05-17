@@ -1,76 +1,77 @@
 <!doctype html>
-<html lang='en'>
+<html lang="en">
   <head>
-    <meta charset='utf-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Where is Kelley</title>
-    <link rel='stylesheet' href='/styles.css'>
-    <link rel='stylesheet' href='/mobile.css'>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/mobile.css">
   </head>
   <body>
-    <main class='app-shell'>
-      <header class='app-header'>
+    <main class="app-shell">
+      <header class="app-header">
         <div>
-          <p class='eyebrow'>Global wine list finder</p>
-          <h1 class='brand-title' aria-label='Where is Kelley'>
+          <p class="eyebrow">Global wine list finder</p>
+          <h1 class="brand-title" aria-label="Where is Kelley">
             <span>Where</span>
-            <span class='brand-soft'>is</span>
-            <span class='brand-accent'>Kelley</span>
+            <span class="brand-soft">is</span>
+            <span class="brand-accent">Kelley</span>
           </h1>
         </div>
       </header>
 
-      <section class='command-bar'>
-        <form id='searchForm' class='search-form'>
-          <div class='query-wrap'>
-            <span class='query-mark'>Search</span>
-            <input id='query' name='q' type='search' placeholder='William Kelley, Leflaive, Riesling...' autocomplete='off' autofocus>
+      <section class="command-bar">
+        <form id="searchForm" class="search-form">
+          <div class="query-wrap">
+            <span class="query-mark">Search</span>
+            <input id="query" name="q" type="search" placeholder="William Kelley, Leflaive, Riesling..." autocomplete="off" autofocus>
           </div>
-          <select id='country' name='country'>
-            <option value=''>All countries</option>
+          <select id="country" name="country">
+            <option value="">All countries</option>
           </select>
-          <input id='city' name='city' type='search' placeholder='City'>
-          <input id='vintage' name='vintage' type='search' inputmode='numeric' maxlength='4' placeholder='Vintage'>
-          <button type='submit'>Search</button>
+          <input id="city" name="city" type="search" placeholder="City">
+          <input id="vintage" name="vintage" type="search" inputmode="numeric" maxlength="4" placeholder="Vintage">
+          <button type="submit">Search</button>
         </form>
       </section>
 
-      <section class='map-panel'>
-        <div class='map-head'>
+      <section class="map-panel">
+        <div class="map-head">
           <div>
-            <p class='panel-kicker'>World map</p>
+            <p class="panel-kicker">World map</p>
             <h2>Where the lists are</h2>
           </div>
-          <div id='mapSummary' class='map-summary'>No mapped venues yet</div>
+          <div id="mapSummary" class="map-summary">No mapped venues yet</div>
         </div>
-        <div id='worldMap' class='world-map' aria-label='Google map of matching wine lists'>
-          <div id='googleMap' class='google-map'></div>
-          <div id='mapFallback' class='map-fallback'>
-            <div class='map-state'>
-              <span class='spinner hidden' aria-hidden='true'></span>
-              <p class='panel-kicker'>World map</p>
+        <div id="worldMap" class="world-map" aria-label="Google map of matching wine lists">
+          <div id="googleMap" class="google-map"></div>
+          <div id="mapFallback" class="map-fallback">
+            <div class="map-state">
+              <span class="spinner hidden" aria-hidden="true"></span>
+              <p class="panel-kicker">World map</p>
               <h3>Waiting for results</h3>
-              <p class='map-state-message'>The map will appear when matching places have coordinates.</p>
+              <p class="map-state-message">The map will appear when matching places have coordinates.</p>
             </div>
           </div>
         </div>
       </section>
 
-      <section class='workspace'>
-        <section class='result-list'>
-          <div class='panel-heading'>
+      <section class="workspace">
+        <section class="result-list">
+          <div class="panel-heading">
             <div>
-              <p class='panel-kicker'>Matches</p>
+              <p class="panel-kicker">Matches</p>
               <h2>Search results</h2>
             </div>
-            <span id='count'>0</span>
+            <span id="count">0</span>
           </div>
-          <div id='results' class='result-stack'></div>
+          <div id="results" class="result-stack"></div>
         </section>
       </section>
     </main>
-    <script src='/api/config'></script>
-    <script src='/app.js'></script>
-    <script src='/hotfix.js'></script>
+    <script src="/api/config"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="/app.js"></script>
+    <script src="/hotfix.js"></script>
   </body>
 </html>
