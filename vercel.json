@@ -15,6 +15,9 @@
     },
     "api/pdf_file.py": {
       "maxDuration": 60
+    },
+    "api/stats.py": {
+      "maxDuration": 10
     }
   }
 }
