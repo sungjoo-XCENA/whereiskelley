@@ -1,0 +1,216 @@
+@media (max-width: 720px) {
+  .app-shell {
+    width: min(100vw - 14px, 720px);
+    padding: 10px 0 18px;
+  }
+
+  .app-header {
+    padding: 14px 2px 12px;
+  }
+
+  h1 {
+    font-size: clamp(38px, 14vw, 54px);
+  }
+
+  .command-bar,
+  .map-panel,
+  .result-list {
+    border-radius: 8px;
+  }
+
+  .world-map {
+    height: 300px;
+    margin: 0 8px 8px;
+  }
+
+  .panel-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 14px;
+  }
+
+  .panel-tools {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .download-results {
+    flex: 1;
+  }
+
+  .result-stack {
+    max-height: none;
+  }
+
+  .table-wrap {
+    overflow: visible;
+  }
+
+  .result-table {
+    min-width: 0;
+    border-spacing: 0;
+  }
+
+  .result-table > thead {
+    display: none;
+  }
+
+  .result-table,
+  .result-table > tbody,
+  .result-table > tbody > tr,
+  .result-table > tbody > tr > td {
+    display: block;
+    width: 100%;
+  }
+
+  .result-table > tbody > tr.place-row {
+    margin: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  .result-table > tbody > tr.place-row.active {
+    box-shadow: inset 4px 0 0 var(--accent);
+  }
+
+  .result-table > tbody > tr.place-row > td {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .result-table > tbody > tr.place-row > td:last-child {
+    border-bottom: 0;
+  }
+
+  .result-table > tbody > tr.place-row > td::before {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .result-table > tbody > tr.place-row > td:nth-child(1)::before {
+    content: 'Place';
+  }
+
+  .result-table > tbody > tr.place-row > td:nth-child(2)::before {
+    content: 'City';
+  }
+
+  .result-table > tbody > tr.place-row > td:nth-child(3)::before {
+    content: 'Country';
+  }
+
+  .result-table > tbody > tr.place-row > td:nth-child(4)::before {
+    content: 'Updated';
+  }
+
+  .result-table > tbody > tr.place-row > td:nth-child(5)::before {
+    content: 'Matches';
+  }
+
+  .result-table > tbody > tr.place-row > td:nth-child(6)::before {
+    content: 'KRW';
+  }
+
+  .result-table > tbody > tr.place-row > td:nth-child(7)::before {
+    content: 'PDF';
+  }
+
+  .place-cell {
+    min-width: 0;
+  }
+
+  .krw-cell,
+  .price-cell {
+    width: auto;
+  }
+
+  .expanded-row {
+    margin: 0 10px 12px;
+  }
+
+  .expanded-place {
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+  }
+
+  .expanded-head {
+    display: grid;
+  }
+
+  .actions.compact {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .actions.compact a {
+    justify-content: center;
+    padding: 0 8px;
+    text-align: center;
+  }
+
+  .line-table,
+  .line-table tbody,
+  .line-table tr,
+  .line-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .line-table thead {
+    display: none;
+  }
+
+  .line-table tr {
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .line-table td {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr);
+    gap: 10px;
+    padding: 5px 0;
+    border-top: 0;
+  }
+
+  .line-table td::before {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .line-table td:nth-child(1)::before {
+    content: 'Line';
+  }
+
+  .line-table td:nth-child(2)::before {
+    content: 'Vintage';
+  }
+
+  .line-table td:nth-child(3)::before {
+    content: 'Price';
+  }
+
+  .line-table td:nth-child(4)::before {
+    content: 'KRW';
+  }
+
+  .line-table td:nth-child(5)::before {
+    content: 'Page';
+  }
+
+  .wine-cell {
+    min-width: 0;
+    width: auto;
+  }
+}
