@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "db" / "starwine.sqlite"
+SNAPSHOT_STATUS_PATH = ROOT / "public" / "data" / "collection-status.json"
 
 
 def json_response(handler, payload, status=200):
@@ -30,6 +31,20 @@ def count(con, sql):
 
 
 def stats_payload():
+    if SNAPSHOT_STATUS_PATH.exists():
+        snapshot = json.loads(SNAPSHOT_STATUS_PATH.read_text(encoding="utf-8"))
+        counts = snapshot.get("counts") or {}
+        return {
+            "countryCount": counts.get("countries", 0),
+            "cityCount": counts.get("cities", 0),
+            "venueCount": counts.get("venues", 0),
+            "wineListCount": counts.get("wineLists", 0),
+            "entryCount": counts.get("wineLines", 0),
+            "watchlistHitCount": counts.get("watchlistHits", 0),
+            "lastRun": snapshot.get("lastRun"),
+            "collectorConfigured": bool(snapshot.get("lastRun")),
+            "snapshot": snapshot,
+        }
     if not DB_PATH.exists():
         return {
             "countryCount": 0,
