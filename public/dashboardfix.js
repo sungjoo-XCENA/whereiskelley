@@ -34,8 +34,7 @@
       padding: 15px;
     }
     .dashboard-card span,
-    .dash-kicker,
-    .dash-table th {
+    .dash-kicker {
       color: var(--muted);
       font-size: 11px;
       font-weight: 900;
@@ -180,46 +179,50 @@
       gap: 14px;
       align-items: start;
     }
-    .dash-table-wrap {
-      max-height: 520px;
-      overflow: auto;
+    .selected-target {
+      display: grid;
+      gap: 14px;
+      padding: 16px;
       border: 1px solid var(--line);
       border-radius: 8px;
+      background: #fff;
     }
-    .dash-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-    .dash-table th,
-    .dash-table td {
-      padding: 10px 9px;
-      border-top: 1px solid var(--line);
-      text-align: left;
-      vertical-align: middle;
-    }
-    .dash-table thead th {
-      position: sticky;
-      top: 0;
-      z-index: 1;
-      background: #f8fafc;
-    }
-    .target-row {
-      cursor: pointer;
-    }
-    .target-row:hover,
-    .target-row.active {
-      background: #fff5f7;
-    }
-    .target-place b,
-    .target-place span {
-      display: block;
-    }
-    .target-place span {
-      margin-top: 3px;
+    .selected-target.empty {
       color: var(--muted);
-      font-size: 12px;
+    }
+    .selected-target h3 {
+      font-size: 24px;
+    }
+    .selected-target p {
+      color: var(--muted);
       font-weight: 750;
+    }
+    .selected-target-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .selected-target-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .selected-target-actions a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 36px;
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      padding: 0 12px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 850;
+      text-decoration: none;
+    }
+    .selected-target-actions a.secondary {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--ink);
     }
     @media (max-width: 980px) {
       .dashboard-grid,
@@ -421,16 +424,6 @@
       .filter((target) => Number.isFinite(target.lat) && Number.isFinite(target.lng));
   }
 
-  function targetRows(payload) {
-    const rows = payload?.mapTargets || [];
-    return [...rows].sort((a, b) => {
-      const rank = { found: 0, review: 1, pending: 2, none: 3 };
-      const diff = (rank[targetKind(a)] ?? 9) - (rank[targetKind(b)] ?? 9);
-      if (diff) return diff;
-      return String(a.name || "").localeCompare(String(b.name || ""));
-    });
-  }
-
   function markerColor(kind) {
     if (kind === "found") return "#16a34a";
     if (kind === "none") return "#dc2626";
@@ -486,10 +479,13 @@
 
   function infoHtml(target) {
     const location = [target.city, target.country].filter(Boolean).join(", ");
-    const website = target.websiteUrl
-      ? `<br><a href="${html(target.websiteUrl)}" target="_blank" rel="noreferrer">Website</a>`
+    const wineList = target.wineListUrl
+      ? `<br><a href="${html(target.wineListUrl)}" target="_blank" rel="noreferrer">Wine list</a>`
       : "";
-    return `<strong>${html(target.name || "Unknown")}</strong><br>${html(location || "Unknown location")}<br>${html(statusLabel(target.status))}<br>${html(fmtInt(target.wineListCount))} wine-list source(s), ${html(fmtInt(target.wineLineCount))} wine lines${website}`;
+    const website = target.websiteUrl && target.websiteUrl !== target.wineListUrl
+      ? `<br><a href="${html(target.websiteUrl)}" target="_blank" rel="noreferrer">Official website</a>`
+      : "";
+    return `<strong>${html(target.name || "Unknown")}</strong><br>${html(location || "Unknown location")}<br>${html(statusLabel(target.status))}${wineList}${website}`;
   }
 
   async function renderDashboardMap(payload) {
@@ -532,13 +528,13 @@
       targets.slice(0, 2500).forEach((target) => {
         const position = { lat: target.lat, lng: target.lng };
         bounds.extend(position);
-        const marker = new maps.Marker({
+      const marker = new maps.Marker({
           map: state.dashboardMap,
           position,
           title: target.name || "Restaurant",
           icon: markerIcon(maps, markerColor(targetKind(target)))
         });
-        marker.addListener("click", () => selectDashboardTarget(target.id, true));
+        marker.addListener("click", () => selectDashboardTarget(target.id));
         state.dashboardMarkers.set(String(target.id), marker);
       });
       state.dashboardMap.fitBounds(bounds, 56);
@@ -550,13 +546,10 @@
     }
   }
 
-  function selectDashboardTarget(id, scroll) {
+  function selectDashboardTarget(id) {
     state.activeTargetId = String(id || "");
     const payload = state.guidePayload || {};
     const target = (payload.mapTargets || []).find((item) => String(item.id) === state.activeTargetId);
-    document.querySelectorAll(".target-row").forEach((row) => {
-      row.classList.toggle("active", row.dataset.targetId === state.activeTargetId);
-    });
     if (!target) return;
     const marker = state.dashboardMarkers.get(String(target.id));
     if (marker && state.dashboardMap) {
@@ -565,25 +558,44 @@
       state.dashboardInfoWindow?.setContent(infoHtml(target));
       state.dashboardInfoWindow?.open({ map: state.dashboardMap, anchor: marker });
     }
-    if (scroll) {
-      document.querySelector(`[data-target-id="${CSS.escape(String(target.id))}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
+    renderSelectedTarget(payload);
+    document.querySelector("#selectedRestaurant")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  function renderTargetTable(payload) {
-    const rows = targetRows(payload).slice(0, 500).map((target) => `<tr class="target-row${String(target.id) === state.activeTargetId ? " active" : ""}" data-target-id="${html(target.id)}">
-      <td class="target-place"><b>${html(target.name || "Unknown")}</b><span>${html([target.city, target.country].filter(Boolean).join(", ") || "-")}</span></td>
-      <td>${targetPill(target)}</td>
-      <td>${html(fmtInt(target.wineListCount))}</td>
-      <td>${html(fmtInt(target.wineLineCount))}</td>
-      <td>${target.websiteUrl ? `<a href="${html(target.websiteUrl)}" target="_blank" rel="noreferrer">Open</a>` : "-"}</td>
-    </tr>`).join("");
-    return `<div class="dash-table-wrap">
-      <table class="dash-table">
-        <thead><tr><th>Restaurant</th><th>Status</th><th>Wine-list files</th><th>Parsed wine lines</th><th>Website</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="5">No restaurants have been collected yet.</td></tr>`}</tbody>
-      </table>
+  function selectedTargetMarkup(payload) {
+    const target = (payload?.mapTargets || []).find((item) => String(item.id) === String(state.activeTargetId || ""));
+    if (!target) {
+      return `<div class="selected-target empty">
+        <h3>No restaurant selected</h3>
+        <p>Click a marker on the map to inspect one restaurant.</p>
+      </div>`;
+    }
+    const location = [target.city, target.country].filter(Boolean).join(", ");
+    const googleMapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([target.name, target.city, target.country].filter(Boolean).join(" "))}`;
+    const wineListLabel = /pdf|file/i.test(String(target.wineListType || target.wineListUrl || ""))
+      ? "Wine list file"
+      : "Wine list";
+    return `<div class="selected-target">
+      <div>
+        <p class="dash-kicker">Selected restaurant</p>
+        <h3>${html(target.name || "Unknown")}</h3>
+        <p>${html(location || "Unknown location")}</p>
+      </div>
+      <div class="selected-target-grid">
+        <div class="metric-box"><span>Status</span><b>${targetPill(target)}</b></div>
+        <div class="metric-box"><span>Last checked</span><b>${html(target.lastCheckedAt || "-")}</b></div>
+      </div>
+      <div class="selected-target-actions">
+        ${target.wineListUrl ? `<a href="${html(target.wineListUrl)}" target="_blank" rel="noreferrer">${html(wineListLabel)}</a>` : ""}
+        ${target.websiteUrl && target.websiteUrl !== target.wineListUrl ? `<a class="secondary" href="${html(target.websiteUrl)}" target="_blank" rel="noreferrer">Official website</a>` : ""}
+        <a class="secondary" href="${html(googleMapUrl)}" target="_blank" rel="noreferrer">Google Maps</a>
+      </div>
     </div>`;
+  }
+
+  function renderSelectedTarget(payload) {
+    const container = document.querySelector("#selectedRestaurant");
+    if (container) container.innerHTML = selectedTargetMarkup(payload);
   }
 
   function renderDashboard() {
@@ -660,11 +672,10 @@
       </div>
     </section>
 
-    <section class="dash-panel">
-      <p class="dash-kicker">Collected restaurants</p>
-      <h2>Restaurant list</h2>
-      ${renderTargetTable(payload)}
-    </section>`;
+    <section class="dash-panel" id="selectedRestaurant">
+      ${selectedTargetMarkup(payload)}
+    </section>
+`;
     renderDashboardMap(payload);
   }
 
@@ -681,12 +692,6 @@
       if (!button) return;
       window.setTimeout(() => activate(button.dataset.view), 0);
     }, true);
-    document.body.addEventListener("click", (event) => {
-      const row = event.target.closest(".target-row");
-      if (!row) return;
-      if (event.target.closest("a")) return;
-      selectDashboardTarget(row.dataset.targetId, false);
-    });
     activate("search");
     loadGuideStats();
     window.setInterval(loadGuideStats, 5000);

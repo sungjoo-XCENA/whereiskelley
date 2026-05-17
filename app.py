@@ -280,6 +280,32 @@ def guide_collection_status():
                   select target_id, count(1) as line_count
                   from guide_wine_entries
                   group by target_id
+                ),
+                wine_choices as (
+                  select target_id, url, source_type
+                  from (
+                    select
+                      s.target_id,
+                      s.url,
+                      s.source_type,
+                      row_number() over (
+                        partition by s.target_id
+                        order by
+                          case when rt.website_url is not null and rt.website_url != '' and s.url = rt.website_url then 1 else 0 end,
+                          case when s.source_type = 'pdf' then 0 else 1 end,
+                          case
+                            when lower(s.url) like '%wine%' or lower(s.url) like '%vin%' or lower(s.url) like '%wein%'
+                              or lower(s.url) like '%drink%' or lower(s.url) like '%beverage%' or lower(s.url) like '%pdf%'
+                            then 0 else 1
+                          end,
+                          coalesce(s.line_count, 0) desc,
+                          s.last_checked_at desc,
+                          s.discovered_at desc
+                      ) as choice_rank
+                    from wine_list_sources s
+                    join restaurant_targets rt on rt.id = s.target_id
+                  )
+                  where choice_rank = 1
                 )
                 select
                   t.id,
@@ -293,12 +319,15 @@ def guide_collection_status():
                   t.status,
                   t.last_checked_at as lastCheckedAt,
                   t.last_error as lastError,
+                  wc.url as wineListUrl,
+                  wc.source_type as wineListType,
                   coalesce(sc.source_count, 0) as wineListCount,
                   coalesce(sc.review_source_count, 0) as reviewSourceCount,
                   coalesce(ec.line_count, 0) as wineLineCount
                 from restaurant_targets t
                 left join source_counts sc on sc.target_id = t.id
                 left join entry_counts ec on ec.target_id = t.id
+                left join wine_choices wc on wc.target_id = t.id
                 order by
                   case
                     when t.status = 'found' then 0
