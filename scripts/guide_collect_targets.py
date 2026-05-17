@@ -3,6 +3,8 @@ import json
 import re
 import sqlite3
 import ssl
+import subprocess
+import tempfile
 import time
 from html import unescape
 from html.parser import HTMLParser
@@ -40,7 +42,7 @@ GUIDE_SOURCES = {
     "michelin": {
         "name": "MICHELIN Guide",
         "urls": [
-            "https://guide.michelin.com/us/en/restaurants/1-star-michelin/2-stars-michelin/3-stars-michelin/page/1",
+            "https://guide.michelin.com/kr/ko/restaurants/all-starred/page/1",
         ],
     },
 }
@@ -112,6 +114,48 @@ def fetch_text(url, timeout=30):
             raise RuntimeError(f"HTTP {response.status}: expected a normal HTML page")
         data = response.read()
     return data.decode("utf-8", errors="replace")
+
+
+def collect_michelin_browser_places(max_source_items, run_id):
+    output = Path(tempfile.gettempdir()) / f"whereiskelley-michelin-{int(time.time())}.json"
+    script = ROOT / "scripts" / "collect_michelin_browser.mjs"
+    max_pages = 1 if max_source_items and max_source_items <= 5 else 100
+    result = subprocess.run(
+        [
+            "node",
+            str(script),
+            "--output",
+            str(output),
+            "--max-pages",
+            str(max_pages),
+            "--progress",
+            str(PUBLIC_DATA_DIR / "guide-progress.json"),
+            "--run-id",
+            str(run_id),
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        timeout=900,
+    )
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "Michelin browser collection failed").strip())
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    places = []
+    for item in payload.get("places", []):
+        places.append({
+            "name": clean_text(item.get("name")),
+            "city": clean_text(item.get("city")),
+            "country": clean_text(item.get("country")),
+            "address": clean_text(item.get("address")),
+            "place_url": clean_text(item.get("place_url")),
+            "website_url": "",
+            "rank": item.get("rank"),
+            "score": None,
+            "stars": item.get("stars"),
+            "metadata": {"price_cuisine": item.get("price_cuisine"), "browser_pages": len(payload.get("pages", []))},
+        })
+    return places[:max_source_items or None], int(payload.get("reportedTotal") or len(places))
 
 
 def write_progress(**payload):
@@ -341,11 +385,22 @@ def upsert_place(con, source_code, source_url, place):
     guide_place_id = cur.fetchone()["id"]
     con.execute(
         """
-        insert into guide_rankings(guide_place_id, source_id, guide_year, list_name, rank, score, source_url)
-        values(?, ?, ?, ?, ?, ?, ?)
+        insert into guide_rankings(guide_place_id, source_id, guide_year, list_name, rank, score, distinction, stars, metadata_json, source_url)
+        values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict do nothing
         """,
-        (guide_place_id, sid, None, GUIDE_SOURCES[source_code]["name"], place.get("rank"), place.get("score"), source_url),
+        (
+            guide_place_id,
+            sid,
+            None,
+            GUIDE_SOURCES[source_code]["name"],
+            place.get("rank"),
+            place.get("score"),
+            "starred" if source_code == "michelin" else "",
+            place.get("stars"),
+            json.dumps(place.get("metadata") or {}, ensure_ascii=False) if place.get("metadata") else None,
+            source_url,
+        ),
     )
     return guide_place_id
 
@@ -412,11 +467,36 @@ def export_status(con, run_id):
     ]
     run = con.execute("select * from guide_collection_runs where id=?", (run_id,)).fetchone()
     source_issues = []
+    metrics = {}
     if run and run["notes"]:
         try:
-            source_issues = json.loads(run["notes"])
+            note_payload = json.loads(run["notes"])
+            if isinstance(note_payload, dict):
+                source_issues = note_payload.get("issues", [])
+                metrics = note_payload.get("metrics", {})
+            else:
+                source_issues = note_payload
         except json.JSONDecodeError:
             source_issues = [{"code": "collector", "message": run["notes"]}]
+    source_stats = []
+    for source in source_counts:
+        raw = int((metrics.get(source["code"]) or {}).get("raw", source["places"] or 0))
+        unique = int(source["places"] or 0)
+        source_stats.append({
+            "code": source["code"],
+            "name": source["name"],
+            "raw": raw,
+            "sourceUnique": unique,
+            "sourceDuplicates": max(raw - unique, 0),
+        })
+    total_raw = sum(item["raw"] for item in source_stats)
+    total_source_unique = sum(item["sourceUnique"] for item in source_stats)
+    total_stats = {
+        "raw": total_raw,
+        "sourceUnique": total_source_unique,
+        "mergedUnique": counts["targets"],
+        "crossSourceDuplicates": max(total_source_unique - counts["targets"], 0),
+    }
     targets = [
         dict(row)
         for row in con.execute(
@@ -429,7 +509,15 @@ def export_status(con, run_id):
         )
     ]
     (PUBLIC_DATA_DIR / "guide-status.json").write_text(
-        json.dumps({"generatedAt": now_sql(), "counts": counts, "sourceCounts": source_counts, "sourceIssues": source_issues, "lastRun": dict(run) if run else None}, ensure_ascii=False, separators=(",", ":")) + "\n",
+        json.dumps({
+            "generatedAt": now_sql(),
+            "counts": counts,
+            "sourceCounts": source_counts,
+            "sourceStats": source_stats,
+            "totalStats": total_stats,
+            "sourceIssues": source_issues,
+            "lastRun": dict(run) if run else None,
+        }, ensure_ascii=False, separators=(",", ":")) + "\n",
         encoding="utf-8",
     )
     (PUBLIC_DATA_DIR / "guide-targets.json").write_text(
@@ -445,6 +533,40 @@ def collect_targets(con, sources, max_source_items, run_id):
     source_issues = []
     for code in sources:
         source = GUIDE_SOURCES[code]
+        if code == "michelin":
+            write_progress(
+                runId=run_id,
+                phase="reading_guides",
+                source=code,
+                currentUrl=source["urls"][0],
+                targetsCollected=collected,
+                errors=errors,
+                message="Reading MICHELIN starred restaurants in a browser.",
+            )
+            try:
+                places, raw_seen = collect_michelin_browser_places(max_source_items, run_id)
+            except Exception as exc:
+                errors += 1
+                source_issues.append({"code": code, "url": source["urls"][0], "message": str(exc)})
+                continue
+            source_seen[code] += raw_seen
+            for place in places:
+                collected += 1
+                write_progress(
+                    runId=run_id,
+                    phase="saving_targets",
+                    source=code,
+                    currentTarget=place.get("name", ""),
+                    currentUrl=place.get("place_url", ""),
+                    targetsCollected=collected,
+                    errors=errors,
+                    message="Saving MICHELIN restaurant candidates.",
+                )
+                upsert_place(con, code, source["urls"][0], place)
+                upsert_target(con, code, place)
+                if collected % 25 == 0:
+                    con.commit()
+            continue
         for url in source["urls"]:
             write_progress(
                 runId=run_id,
@@ -463,8 +585,9 @@ def collect_targets(con, sources, max_source_items, run_id):
                 write_progress(runId=run_id, phase="reading_guides", source=code, currentUrl=url, targetsCollected=collected, errors=errors, message=str(exc))
                 continue
             places = extract_places(code, html, url)
+            selected_places = places[:max_source_items or None]
             source_seen[code] += len(places)
-            for place in places[:max_source_items or None]:
+            for place in selected_places:
                 collected += 1
                 write_progress(
                     runId=run_id,
@@ -487,7 +610,8 @@ def collect_targets(con, sources, max_source_items, run_id):
                 "url": GUIDE_SOURCES[code]["urls"][0],
                 "message": "No parseable restaurant cards were found. The source may be blocked, challenged, or rendered only after browser scripts.",
             })
-    return collected, errors, source_issues
+    source_metrics = {code: {"raw": count} for code, count in source_seen.items()}
+    return collected, errors, source_issues, source_metrics
 
 
 def main():
@@ -506,9 +630,9 @@ def main():
         )
         run_id = cur.lastrowid
         try:
-            collected, errors, source_issues = collect_targets(con, sources, args.max_source_items, run_id)
+            collected, errors, source_issues, source_metrics = collect_targets(con, sources, args.max_source_items, run_id)
             target_total = con.execute("select count(*) from restaurant_targets").fetchone()[0]
-            notes = json.dumps(source_issues, ensure_ascii=False) if source_issues else None
+            notes = json.dumps({"issues": source_issues, "metrics": source_metrics}, ensure_ascii=False)
             con.execute(
                 """
                 update guide_collection_runs
