@@ -10,8 +10,12 @@ API_URL = "https://starwinelist.com/api/search"
 LOCATION_API_URL = "https://starwinelist.com/api/location/search"
 LOCATION_CACHE = {}
 CITY_COORDS = {
-    ("Norway", "Tromsø"): (69.6492, 18.9553),
+    ("Norway", "Troms\u00f8"): (69.6492, 18.9553),
     ("Norway", "Tromso"): (69.6492, 18.9553),
+}
+PLACE_COORDS = {
+    ("Fiskekompaniet", "Troms\u00f8", "Norway"): (69.6487, 18.9581),
+    ("Fiskekompaniet", "Tromso", "Norway"): (69.6487, 18.9581),
 }
 CURRENCY_RE = r"\u20ac|\$|\u00a3|\u00a5|\u20a9|CHF|DKK|SEK|NOK|USD|EUR|GBP|CAD|AUD|SGD|HKD|AED|CNY|CZK|ARS|JPY|KRW"
 PRICE_CURRENCY_RE = r"A\$|AU\$|CA\$|HK\$|S\$|US\$|" + CURRENCY_RE
@@ -102,6 +106,21 @@ def location_slug_from_result(result, country, city):
     return city_obj.get("slug") or (slugify(city) if city and city != country else "") or region.get("slug") or slugify(city)
 
 
+def normalized_lookup(value):
+    return re.sub(r"\s+", " ", value or "").strip()
+
+
+def missing_coordinates(lat, lng):
+    if lat in (None, "") or lng in (None, ""):
+        return True
+    try:
+        lat_value = float(lat)
+        lng_value = float(lng)
+    except (TypeError, ValueError):
+        return True
+    return lat_value == 0 and lng_value == 0
+
+
 def fetch_search_page(query, page):
     payload = fetch_json(f"{API_URL}?{urlencode({'t': 'wine-list', 'page': page, 's': query})}")
     lines = [item for item in payload.get("data") or [] if item.get("item_type") == "wine_list_line"]
@@ -130,8 +149,14 @@ def location_from_result(result, country, city):
     lat = location.get("lat") if location else None
     lng = location.get("lng") if location else None
     star_map_url = ((location or {}).get("urls") or {}).get("map")
-    if lat is None or lng is None:
-        lat, lng = CITY_COORDS.get((country, city), (lat, lng))
+    venue = (((result.get("item") or {}).get("pw") or {}).get("venue") or {})
+    venue_name = normalized_lookup(venue.get("name") or venue.get("title") or "")
+    country_key = normalized_lookup(country)
+    city_key = normalized_lookup(city)
+    if missing_coordinates(lat, lng):
+        lat, lng = PLACE_COORDS.get((venue_name, city_key, country_key), (lat, lng))
+    if missing_coordinates(lat, lng):
+        lat, lng = CITY_COORDS.get((country_key, city_key), (lat, lng))
     return slug, lat, lng, star_map_url or ""
 
 
