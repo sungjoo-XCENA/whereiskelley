@@ -208,7 +208,8 @@
       flex-wrap: wrap;
       gap: 10px;
     }
-    .selected-target-actions a {
+    .selected-target-actions a,
+    .selected-target-actions button {
       display: inline-flex;
       align-items: center;
       min-height: 36px;
@@ -220,7 +221,8 @@
       font-weight: 850;
       text-decoration: none;
     }
-    .selected-target-actions a.secondary {
+    .selected-target-actions a.secondary,
+    .selected-target-actions button.secondary {
       border-color: var(--line);
       background: #fff;
       color: var(--ink);
@@ -308,13 +310,13 @@
   }
 
   async function fetchLiveGuideCollection() {
-    const proxied = await fetchJson("/api/guide-collection", null);
-    if (!isEmptyGuidePayload(proxied)) return proxied;
     const local = await fetchJson("http://localhost:4317/api/guide-collection", null);
-    if (local && !local.error) {
+    if (!isEmptyGuidePayload(local)) {
       local.source = "browser_localhost";
       return local;
     }
+    const proxied = await fetchJson("/api/guide-collection", null);
+    if (!isEmptyGuidePayload(proxied)) return proxied;
     return proxied;
   }
 
@@ -495,6 +497,7 @@
     if (!mapEl || !fallbackEl) return;
     const targets = visibleMapTargets(payload);
     if (!targets.length) {
+      if (state.dashboardMarkers.size) return;
       for (const marker of state.dashboardMarkers.values()) marker.setMap(null);
       state.dashboardMarkers.clear();
       fallbackEl.classList.remove("hidden");
@@ -586,6 +589,14 @@
     }
   }
 
+  function clearDashboardSelection() {
+    state.activeTargetId = null;
+    state.dashboardInfoWindow?.close();
+    renderSelectedTarget(state.guidePayload || {});
+    renderDashboardMap(state.guidePayload || {}, { fit: true });
+    document.querySelector('[data-dashboard-section="map"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   function selectedTargetMarkup(payload) {
     const target = (payload?.mapTargets || []).find((item) => String(item.id) === String(state.activeTargetId || ""));
     if (!target) {
@@ -613,6 +624,7 @@
         ${target.wineListUrl ? `<a href="${html(target.wineListUrl)}" target="_blank" rel="noreferrer">${html(wineListLabel)}</a>` : ""}
         ${target.websiteUrl && target.websiteUrl !== target.wineListUrl ? `<a class="secondary" href="${html(target.websiteUrl)}" target="_blank" rel="noreferrer">Official website</a>` : ""}
         <a class="secondary" href="${html(googleMapUrl)}" target="_blank" rel="noreferrer">Google Maps</a>
+        <button class="secondary" type="button" data-clear-dashboard-selection>Close</button>
       </div>
     </div>`;
   }
@@ -729,6 +741,11 @@
       if (!button) return;
       window.setTimeout(() => activate(button.dataset.view), 0);
     }, true);
+    document.body.addEventListener("click", (event) => {
+      if (!event.target.closest("[data-clear-dashboard-selection]")) return;
+      event.preventDefault();
+      clearDashboardSelection();
+    });
     activate("search");
     loadGuideStats();
     window.setInterval(loadGuideStats, 5000);
