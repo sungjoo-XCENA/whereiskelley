@@ -319,7 +319,7 @@ function groupNeedsReview(group) {
 
 function reviewBadgeMarkup(group) {
   if (!groupNeedsReview(group)) return "";
-  return `<span class="review-badge" title="PDF needs review">Review</span>`;
+  return `<span class="review-badge" title="Source list needs review">Review</span>`;
 }
 
 function friendlyPdfReviewReason(reason = "") {
@@ -705,7 +705,7 @@ function placeLineLabel(group) {
   if (foundLines.length && verified) return `${foundLines.length} found / ${verified} verified`;
   if (foundLines.length) return `${foundLines.length} found`;
   const pdfLines = groupPdfLines(group);
-  if (pdfLines.length) return `${pdfLines.length} source-only found`;
+  if (pdfLines.length) return `${pdfLines.length} verified from source`;
   return "Review";
 }
 
@@ -720,7 +720,7 @@ function renderExpandedPlace(group) {
   const reviewReason = groupPdfReviewReason(group);
   const heldPdfExtras = groupHeldPdfExtras(group);
   const reviewNote = heldPdfExtras
-    ? `<div class="review-note">Showing Star Wine List found rows first. ${escapeHtml(String(heldPdfExtras))} source-only rows were held for review instead of being added automatically.</div>`
+    ? `<div class="review-note">Showing Star Wine List found rows first. ${escapeHtml(String(heldPdfExtras))} extra source-list rows were held for review instead of being added automatically.</div>`
     : pdfLines.length
       ? ""
     : groupPdfPending(group)
@@ -738,7 +738,7 @@ function renderExpandedPlace(group) {
       <td class="krw-cell">${krwPriceMarkup(result)}</td>
       <td>${escapeHtml(result.pageNumber || "")}</td>
     </tr>`)
-    .join("") || `<tr><td colspan="5" class="muted">Review needed. The search index matched text for this place, but no priced wine line was verified from the PDF.</td></tr>`;
+    .join("") || `<tr><td colspan="5" class="muted">Review needed. The search result matched this place, but no priced wine line was verified from the source list.</td></tr>`;
   return `<tr class="expanded-row">
     <td colspan="7">
       <div class="expanded-place">
