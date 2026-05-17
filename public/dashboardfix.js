@@ -2,6 +2,7 @@
   const state = {
     guidePayload: null,
     dashboardMap: null,
+    dashboardMapEl: null,
     dashboardInfoWindow: null,
     dashboardMarkers: new Map(),
     dashboardMapPromise: null,
@@ -219,24 +220,6 @@
       color: var(--muted);
       font-size: 12px;
       font-weight: 750;
-    }
-    .error-list {
-      display: grid;
-      gap: 8px;
-      margin-top: 10px;
-    }
-    .error-row {
-      display: grid;
-      grid-template-columns: 56px minmax(0, 1fr);
-      gap: 10px;
-      padding: 10px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-      font-size: 13px;
-    }
-    .error-row b {
-      color: var(--accent);
     }
     @media (max-width: 980px) {
       .dashboard-grid,
@@ -466,15 +449,25 @@
     if (state.dashboardMapPromise) return state.dashboardMapPromise;
     state.dashboardMapPromise = new Promise((resolve, reject) => {
       const callbackName = `initDashboardMap${Date.now()}`;
+      const previousAuthFailure = window.gm_authFailure;
+      window.gm_authFailure = () => {
+        window.gm_authFailure = previousAuthFailure;
+        if (typeof previousAuthFailure === "function") previousAuthFailure();
+        reject(new Error("Google Maps key does not allow this site."));
+      };
       window[callbackName] = () => {
         delete window[callbackName];
+        window.gm_authFailure = previousAuthFailure;
         resolve(window.google.maps);
       };
       const script = document.createElement("script");
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=${callbackName}&v=weekly`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=${callbackName}&v=weekly&loading=async`;
       script.async = true;
       script.defer = true;
-      script.onerror = () => reject(new Error("Google Maps failed to load."));
+      script.onerror = () => {
+        window.gm_authFailure = previousAuthFailure;
+        reject(new Error("Google Maps failed to load."));
+      };
       document.head.appendChild(script);
     });
     return state.dashboardMapPromise;
@@ -517,7 +510,8 @@
         return;
       }
       fallbackEl.classList.add("hidden");
-      if (!state.dashboardMap) {
+      if (!state.dashboardMap || state.dashboardMapEl !== mapEl) {
+        state.dashboardMapEl = mapEl;
         state.dashboardMap = new maps.Map(mapEl, {
           center: { lat: 30, lng: 8 },
           zoom: 2,
@@ -552,7 +546,7 @@
       if (state.activeTargetId) selectDashboardTarget(state.activeTargetId, false);
     } catch (error) {
       fallbackEl.classList.remove("hidden");
-      fallbackEl.innerHTML = `<b>Map unavailable</b><span>${html(error.message)}</span>`;
+      fallbackEl.innerHTML = `<b>Map unavailable</b><span>${html(error.message)} Add http://localhost:4317/* and http://127.0.0.1:4317/* to the Google Maps key referrers for local dashboard use.</span>`;
     }
   }
 
@@ -582,21 +576,14 @@
       <td>${targetPill(target)}</td>
       <td>${html(fmtInt(target.wineListCount))}</td>
       <td>${html(fmtInt(target.wineLineCount))}</td>
-      <td>${html(target.lastError || "-")}</td>
       <td>${target.websiteUrl ? `<a href="${html(target.websiteUrl)}" target="_blank" rel="noreferrer">Open</a>` : "-"}</td>
     </tr>`).join("");
     return `<div class="dash-table-wrap">
       <table class="dash-table">
-        <thead><tr><th>Restaurant</th><th>Status</th><th>Lists</th><th>Lines</th><th>Note</th><th>Website</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6">No restaurants have been collected yet.</td></tr>`}</tbody>
+        <thead><tr><th>Restaurant</th><th>Status</th><th>Wine-list files</th><th>Parsed wine lines</th><th>Website</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5">No restaurants have been collected yet.</td></tr>`}</tbody>
       </table>
     </div>`;
-  }
-
-  function renderErrorList(payload) {
-    const errors = payload?.recentErrors || [];
-    if (!errors.length) return `<div class="error-row"><b>0</b><span>No collector errors recorded.</span></div>`;
-    return errors.map((error) => `<div class="error-row"><b>${html(fmtInt(error.count))}</b><span>${html(error.error)}</span></div>`).join("");
   }
 
   function renderDashboard() {
@@ -653,7 +640,6 @@
         <div class="metric-box"><span>Parsing review</span><b>${html(fmtInt(reviewSources))}</b></div>
         <div class="metric-box"><span>Mapped</span><b>${html(fmtInt(mapped))}</b></div>
       </div>
-      <div class="error-list">${renderErrorList(payload)}</div>
     </section>
 
     <section class="dash-panel">
