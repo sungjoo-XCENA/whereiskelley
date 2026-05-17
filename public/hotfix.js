@@ -357,11 +357,10 @@ function mergeIndexedWithPdf(indexLine, pdfLine) {
   return {
     ...indexLine,
     vintage: indexLine.vintage || pdfLine.vintage || "",
-    priceValue: hasValidPrice(indexLine) ? indexLine.priceValue : pdfLine.priceValue,
-    currency: indexLine.currency || pdfLine.currency || "",
-    prices: Array.isArray(indexLine.prices) && indexLine.prices.length ? indexLine.prices : (pdfLine.prices || []),
+    priceValue: indexLine.priceValue,
+    currency: indexLine.currency || "",
+    prices: Array.isArray(indexLine.prices) ? indexLine.prices : [],
     pageNumber: pdfLine.pageNumber || indexLine.pageNumber || "",
-    pdfText: pdfLine.text || "",
     pdfVerified: true,
     source: "PDF verified"
   };
@@ -576,7 +575,7 @@ function renderExpandedPlace(group) {
     .slice()
     .sort((a, b) => numericPrice(a) - numericPrice(b))
     .map((result) => `<tr>
-      <td class="wine-cell">${escapeHtml(result.text)}${result.pdfText && result.pdfText !== result.text ? `<span class="muted">PDF: ${escapeHtml(result.pdfText)}</span>` : ""}</td>
+      <td class="wine-cell">${escapeHtml(result.text)}</td>
       <td>${escapeHtml(result.vintage || "")}</td>
       <td class="price-cell">${originalPriceMarkup(result)}</td>
       <td class="krw-cell">${krwPriceMarkup(result)}</td>
