@@ -60,14 +60,23 @@
     const city = venue.city || "";
     const country = venue.country || "";
     const address = venue.address && venue.address !== `${city}, ${country}` ? venue.address : "";
-    const queries = [
-      [name, address, city, country].filter(Boolean).join(", "),
-      [name, "restaurant", city, country].filter(Boolean).join(", "),
-      [name, city, country].filter(Boolean).join(", "),
-      [asciiFold(name), "restaurant", asciiFold(city), country].filter(Boolean).join(", "),
-      [asciiFold(name), asciiFold(city), country].filter(Boolean).join(", ")
+    const placeQueries = [
+      { address: [name, address, city, country].filter(Boolean).join(", "), approximate: false },
+      { address: [name, "restaurant", city, country].filter(Boolean).join(", "), approximate: false },
+      { address: [name, city, country].filter(Boolean).join(", "), approximate: false },
+      { address: [asciiFold(name), "restaurant", asciiFold(city), country].filter(Boolean).join(", "), approximate: false },
+      { address: [asciiFold(name), asciiFold(city), country].filter(Boolean).join(", "), approximate: false }
     ];
-    return [...new Set(queries.filter(Boolean))];
+    const cityQueries = [
+      { address: [city, country].filter(Boolean).join(", "), approximate: true },
+      { address: [asciiFold(city), country].filter(Boolean).join(", "), approximate: true }
+    ];
+    const seen = new Set();
+    return [...placeQueries, ...cityQueries].filter((query) => {
+      if (!query.address || seen.has(query.address)) return false;
+      seen.add(query.address);
+      return true;
+    });
   }
 
   function countryRestriction(country) {
@@ -103,7 +112,7 @@
     if (hasCoordinates(group)) return Promise.resolve(group);
     const queries = geocodeQueriesForGroup(group);
     if (!queries.length || !maps?.Geocoder) return Promise.resolve(group);
-    const cacheKey = group.key || queries[0];
+    const cacheKey = group.key || queries[0].address;
     if (geocodeCache.has(cacheKey)) {
       const cached = geocodeCache.get(cacheKey);
       return Promise.resolve(cached ? { ...group, ...cached } : group);
@@ -111,7 +120,8 @@
     const geocoder = new maps.Geocoder();
     const restriction = countryRestriction(group.venue?.country);
     const statuses = [];
-    for (const address of queries) {
+    for (const query of queries) {
+      const address = query.address;
       const request = restriction
         ? { address, componentRestrictions: { country: restriction } }
         : { address };
@@ -125,7 +135,8 @@
           lng: location.lng(),
           geocoded: true,
           geocodedAddress: result.formatted_address || address,
-          geocodeQuery: address
+          geocodeQuery: address,
+          approximate: query.approximate
         };
         geocodeCache.set(cacheKey, coordinates);
         return { ...group, ...coordinates };
@@ -170,8 +181,9 @@
       latestMapVenues = mappedVenues;
       const totalLines = mappedVenues.reduce((sum, group) => sum + group.results.length, 0);
       const geocodedCount = mappedVenues.filter((group) => group.geocoded).length;
+      const approximateCount = mappedVenues.filter((group) => group.approximate).length;
       mapSummaryEl.textContent = mappedVenues.length
-        ? `${mappedVenues.length} places on map / ${totalLines} matching wines${geocodedCount ? `, ${geocodedCount} found by Google` : ""}${failedCount ? `, ${failedCount} not located` : ""}`
+        ? `${mappedVenues.length} places on map / ${totalLines} matching wines${geocodedCount ? `, ${geocodedCount} found by Google` : ""}${approximateCount ? `, ${approximateCount} city-level` : ""}${failedCount ? `, ${failedCount} not located` : ""}`
         : "No mapped places yet";
       if (!mappedVenues.length) {
         clearGoogleMarkers();
@@ -204,7 +216,7 @@
         const marker = new maps.Marker({
           map: googleMap,
           position,
-          title: displayVenueName(group.venue) || "Wine venue",
+          title: `${displayVenueName(group.venue) || "Wine venue"}${group.approximate ? " (city-level)" : ""}`,
         });
         marker.starWineKey = group.key;
         marker.addListener("click", () => selectVenueGroup(group));
