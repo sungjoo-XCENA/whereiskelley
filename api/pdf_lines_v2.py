@@ -86,12 +86,35 @@ def matching_positions(raw, tokens):
     return positions
 
 
+def line_has_tokens(raw, tokens):
+    folded = fold_text(raw)
+    return bool(tokens) and all(token in folded for token in tokens)
+
+
 def is_probable_wine_row(line, has_price=False):
     text = line.strip()
     return (
         has_price
         or re.search(r"^(?:NV|MV|N/V|\d{4})\b", text, re.I)
         or (text.count(",") >= 2 and len(text) <= 180)
+    )
+
+
+def is_section_price_row(line):
+    return re.search(r"\b(?:NV|MV|N/V|19\d{2}|20\d{2})\b", line, re.I) and PRICE_TOKEN_RE.search(line)
+
+
+def is_likely_section_break(line):
+    text = clean_fragment(line)
+    if not text:
+        return False
+    if is_section_price_row(text):
+        return False
+    folded = fold_text(text)
+    letters = re.sub(r"[^a-z]", "", folded)
+    return len(text) <= 90 and len(letters) >= 4 and (
+        text.isupper()
+        or re.search(r"^(?:francia|france|italia|italy|spain|espana|germany|austria|champagne|burgundy|borgo)", folded, re.I)
     )
 
 
@@ -102,6 +125,19 @@ def vintage_near(raw, position, fragment):
     window = raw[max(0, position - 120) : min(len(raw), position + 260)]
     window_match = re.search(r"\b(19|20)\d{2}\b", window)
     return window_match.group(0) if window_match else None
+
+
+def section_fragment(header, raw, country):
+    if not is_section_price_row(raw):
+        return None
+    fragment = clean_fragment(f"{header}, {raw}")
+    price_text, price_value, currency = parse_price(raw, country, require_edge=True)
+    if price_value is None:
+        price_text, price_value, currency = parse_price(fragment, country, require_edge=False)
+    if price_value is None:
+        return None
+    vintage = vintage_near(raw, 0, raw) or vintage_near(fragment, 0, fragment)
+    return fragment, price_text, price_value, currency, vintage
 
 
 def matched_fragments(raw, query, country):
@@ -142,9 +178,22 @@ def matched_fragments(raw, query, country):
 
 def match_lines(text, query, country, limit=200):
     matches = []
+    tokens = query_tokens(query)
+    active_header = ""
+    active_remaining = 0
+    section_hits = 0
     for index, raw in enumerate(line.strip() for line in (text or "").splitlines()):
         if not raw:
+            if active_header:
+                active_remaining -= 1
+                if active_remaining <= 0:
+                    active_header = ""
+                    section_hits = 0
             continue
+        if line_has_tokens(raw, tokens):
+            active_header = clean_fragment(raw)
+            active_remaining = 80
+            section_hits = 0
         for fragment_index, (fragment, price_text, price_value, currency, nearby_vintage) in enumerate(matched_fragments(raw, query, country)):
             if not is_probable_wine_row(fragment, price_value is not None):
                 continue
@@ -163,9 +212,44 @@ def match_lines(text, query, country, limit=200):
             )
             if len(matches) >= limit:
                 break
+        if active_header and not line_has_tokens(raw, tokens):
+            section = section_fragment(active_header, raw, country)
+            if section:
+                fragment, price_text, price_value, currency, nearby_vintage = section
+                matches.append(
+                    {
+                        "id": f"pdf-section-{index}",
+                        "text": fragment,
+                        "vintage": nearby_vintage,
+                        "priceValue": price_value,
+                        "currency": currency,
+                        "prices": [price_text] if price_text else [],
+                        "pageNumber": None,
+                        "review": False,
+                    }
+                )
+                section_hits += 1
+                active_remaining = 80
+            elif section_hits and is_likely_section_break(raw):
+                active_header = ""
+                active_remaining = 0
+                section_hits = 0
+            else:
+                active_remaining -= 1
+                if active_remaining <= 0:
+                    active_header = ""
+                    section_hits = 0
         if len(matches) >= limit:
             break
-    return matches
+    unique = []
+    seen = set()
+    for item in matches:
+        key = (item.get("text"), item.get("vintage"), item.get("priceValue"), item.get("currency"))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
 
 
 def handle(params):
