@@ -427,12 +427,16 @@ function csvCell(value) {
   return `"${String(value ?? "").replace(/"/g, '""')}"`;
 }
 
-function exportRows() {
+function exportRows(pdfStatusByUrl = new Map()) {
   return groupedVenues(latestResults).flatMap((group) => {
     const venue = group.venue || {};
     const pdfLists = groupPdfLists(group);
     const lines = reconciledGroupLines(group);
-    const pdfUrls = pdfLists.map((list) => pdfUrl(list)).filter(Boolean).join(" | ");
+    const pdfUrlsArray = pdfLists.map((list) => pdfUrl(list)).filter(Boolean);
+    const pdfUrls = pdfUrlsArray.join(" | ");
+    const pdfZipPaths = pdfUrlsArray.map((url) => pdfStatusByUrl.get(url)?.path || "").filter(Boolean).join(" | ");
+    const pdfDownloadStatus = pdfUrlsArray.map((url) => pdfStatusByUrl.get(url)?.status || (pdfStatusByUrl.size ? "Not attempted" : "")).filter(Boolean).join(" | ");
+    const pdfDownloadError = pdfUrlsArray.map((url) => pdfStatusByUrl.get(url)?.error || "").filter(Boolean).join(" | ");
     return (lines.length ? lines : [{ text: "", vintage: "", priceValue: "", currency: "", review: true }]).map((line) => ({
       place: displayVenueName(venue),
       type: venue.type || "Restaurant / wine bar",
@@ -445,16 +449,32 @@ function exportRows() {
       krw: krwPriceText(line),
       source: line.source || "Search index",
       pdfUrls,
+      pdfZipPaths,
+      pdfDownloadStatus,
+      pdfDownloadError,
       starWineListUrl: venue.url || "",
       mapUrl: venue.starWineMapUrl || ""
     }));
   });
 }
 
-function downloadSearchResults() {
-  const headers = ["Place", "Type", "City", "Country", "Updated", "Matched line", "Vintage", "Original price", "KRW", "Source", "PDF URLs", "Star Wine List URL", "Map URL"];
-  const rows = exportRows();
-  const csv = [headers, ...rows.map((row) => [
+function safeZipName(value, fallback = "item") {
+  const cleaned = String(value || fallback)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return cleaned || fallback;
+}
+
+function csvForRows(headers, rows) {
+  return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+}
+
+function resultsCsv(pdfStatusByUrl = new Map()) {
+  const headers = ["Place", "Type", "City", "Country", "Updated", "Matched line", "Vintage", "Original price", "KRW", "Source", "PDF URLs", "PDF ZIP paths", "PDF download status", "PDF download error", "Star Wine List URL", "Map URL"];
+  const rows = exportRows(pdfStatusByUrl);
+  return csvForRows(headers, rows.map((row) => [
     row.place,
     row.type,
     row.city,
@@ -466,19 +486,111 @@ function downloadSearchResults() {
     row.krw,
     row.source,
     row.pdfUrls,
+    row.pdfZipPaths,
+    row.pdfDownloadStatus,
+    row.pdfDownloadError,
     row.starWineListUrl,
     row.mapUrl
-  ])].map((row) => row.map(csvCell).join(",")).join("\r\n");
-  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  ]));
+}
+
+function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  const stamp = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `whereiskelley-results-${stamp}.csv`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+function uniquePdfDownloads() {
+  const seen = new Set();
+  const downloads = [];
+  for (const group of groupedVenues(latestResults)) {
+    const venue = group.venue || {};
+    groupPdfLists(group).forEach((list, index) => {
+      const url = pdfUrl(list);
+      if (!url) return;
+      const key = String(list.id || url);
+      if (seen.has(key)) return;
+      seen.add(key);
+      const place = displayVenueName(venue);
+      const filename = `${safeZipName(place, "place")}-${safeZipName(list.id || index + 1, "list")}.pdf`;
+      const path = [
+        "pdfs",
+        safeZipName(venue.country || "unknown-country", "unknown-country"),
+        safeZipName(venue.city || "unknown-city", "unknown-city"),
+        filename
+      ].join("/");
+      downloads.push({
+        place,
+        city: venue.city || "",
+        country: venue.country || "",
+        url,
+        fallbackUrls: pdfFallbackUrls(list),
+        filename,
+        path
+      });
+    });
+  }
+  return downloads;
+}
+
+async function fetchPdfForZip(item) {
+  const params = new URLSearchParams({
+    url: item.url,
+    fallbackUrls: item.fallbackUrls.join("|"),
+    filename: item.filename
+  });
+  const response = await fetch(`/api/pdf_file?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error((await response.text()) || `HTTP ${response.status}`);
+  }
+  const blob = await response.blob();
+  if (!blob.size) throw new Error("Empty PDF response");
+  return blob;
+}
+
+async function downloadSearchResults() {
+  const stamp = new Date().toISOString().slice(0, 10);
+  const button = document.querySelector("#downloadResults");
+  const originalLabel = button?.textContent || "Download results";
+  const csv = resultsCsv();
+  if (!window.JSZip) {
+    downloadBlob(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }), `whereiskelley-results-${stamp}.csv`);
+    return;
+  }
+
+  const zip = new JSZip();
+  const pdfs = uniquePdfDownloads();
+  const pdfStatusByUrl = new Map();
+  if (button) {
+    button.disabled = true;
+    button.textContent = pdfs.length ? `Packing PDFs 0/${pdfs.length}` : "Packing results";
+  }
+  try {
+    for (let index = 0; index < pdfs.length; index += 1) {
+      const item = pdfs[index];
+      if (button) button.textContent = `Packing PDFs ${index + 1}/${pdfs.length}`;
+      try {
+        zip.file(item.path, await fetchPdfForZip(item));
+        pdfStatusByUrl.set(item.url, { status: "Downloaded", path: item.path, error: "" });
+      } catch (error) {
+        pdfStatusByUrl.set(item.url, { status: "Failed", path: "", error: error.message });
+      }
+    }
+    zip.file("whereiskelley-results.csv", `\uFEFF${resultsCsv(pdfStatusByUrl)}`);
+    if (button) button.textContent = "Creating ZIP";
+    const blob = await zip.generateAsync({ type: "blob" });
+    downloadBlob(blob, `whereiskelley-results-${stamp}.zip`);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  }
 }
 
 async function loadPdfLines(group) {
