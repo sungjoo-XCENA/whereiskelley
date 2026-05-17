@@ -215,16 +215,47 @@
     localStorage.setItem("whereiskelley.watchlist", JSON.stringify(state.watchlist));
   }
 
+  async function fetchJson(path, fallback) {
+    try {
+      const response = await fetch(path, { cache: "no-store" });
+      return response.ok ? response.json() : fallback;
+    } catch (_error) {
+      return fallback;
+    }
+  }
+
+  function progressFromStatus(status) {
+    const run = status?.lastRun;
+    const counts = status?.counts || {};
+    if (!run) return null;
+    return {
+      generatedAt: status.generatedAt || "",
+      status: run.status || "completed",
+      phase: run.status || "completed",
+      message: run.status === "running" ? "Guide collection is running." : "Latest collection snapshot.",
+      runId: run.id || null,
+      source: run.sources_requested || "",
+      currentTarget: "",
+      currentUrl: "",
+      targetsCollected: run.target_count || counts.targets || 0,
+      websitesChecked: run.websites_checked || 0,
+      totalWebsites: run.websites_checked || 0,
+      wineListsFound: run.wine_lists_found || counts.sources || 0,
+      wineLinesFound: run.wine_lines_found || counts.wineLines || 0,
+      errors: run.errors || 0
+    };
+  }
+
   async function loadGuideStats() {
     try {
       const [status, progress, targets, hits] = await Promise.all([
-        fetch("/data/guide-status.json", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
-        fetch("/data/guide-progress.json", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
-        fetch("/data/guide-targets.json", { cache: "no-store" }).then((response) => response.ok ? response.json() : []),
-        fetch("/data/guide-watch-hits.json", { cache: "no-store" }).then((response) => response.ok ? response.json() : [])
+        fetchJson("/data/guide-status.json", null),
+        fetchJson("/data/guide-progress.json", null),
+        fetchJson("/data/guide-targets.json", []),
+        fetchJson("/data/guide-watch-hits.json", [])
       ]);
       state.guide = status;
-      state.guideProgress = progress;
+      state.guideProgress = progress || progressFromStatus(status);
       state.guideTargets = Array.isArray(targets) ? targets : [];
       state.guideHits = Array.isArray(hits) ? hits : [];
     } catch (_error) {
@@ -296,7 +327,7 @@
     const progressRunning = progress.status === "running";
     const guideStatus = progressRunning ? "running" : guideRun?.status || (guide ? "ready" : "waiting");
     const guideDetail = progressRunning
-      ? `${html(progress.phase || "collecting")} · ${html(progress.message || "Collection is running.")}`
+      ? `${html(progress.phase || "collecting")} - ${html(progress.message || "Collection is running.")}`
       : guideRun
       ? `${html(guideRun.sources_requested || "Guides")} checked. ${html(guideCounts.targets || 0)} restaurant targets, ${html(guideCounts.sources || 0)} wine-list sources.`
       : "Michelin, La Liste, and World's 50 Best collector has not exported a guide snapshot yet.";
