@@ -104,6 +104,31 @@ def now_sql():
     return time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
 
 
+def write_progress(**payload):
+    PUBLIC_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    current = {
+        "generatedAt": now_sql(),
+        "status": "running",
+        "phase": "",
+        "message": "",
+        "runId": None,
+        "source": "",
+        "currentTarget": "",
+        "currentUrl": "",
+        "targetsCollected": 0,
+        "websitesChecked": 0,
+        "totalWebsites": 0,
+        "wineListsFound": 0,
+        "wineLinesFound": 0,
+        "errors": 0,
+    }
+    current.update(payload)
+    (PUBLIC_DATA_DIR / "guide-progress.json").write_text(
+        json.dumps(current, ensure_ascii=False, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+
 def connect():
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
@@ -606,28 +631,56 @@ def scan_wine_source(con, target, url, watches):
         return 0, 0, str(exc)
 
 
-def collect_sources(con, sources, max_source_items):
+def collect_sources(con, sources, max_source_items, run_id):
     collected = 0
     for code in sources:
         source = GUIDE_SOURCES[code]
         for url in source["urls"]:
+            write_progress(
+                runId=run_id,
+                phase="reading_guides",
+                source=code,
+                currentUrl=url,
+                targetsCollected=collected,
+                message=f"Reading {source['name']} candidates.",
+            )
             try:
                 html, content_type = fetch_text(url)
-            except Exception:
+            except Exception as exc:
+                write_progress(
+                    runId=run_id,
+                    phase="reading_guides",
+                    source=code,
+                    currentUrl=url,
+                    targetsCollected=collected,
+                    errors=1,
+                    message=f"Could not read {source['name']}: {exc}",
+                )
                 continue
             if not isinstance(html, str):
                 continue
             places, _parser = extract_places_from_html(html, url)
             for place in places[:max_source_items or None]:
+                write_progress(
+                    runId=run_id,
+                    phase="saving_targets",
+                    source=code,
+                    currentTarget=place.get("name", ""),
+                    currentUrl=place.get("place_url", "") or url,
+                    targetsCollected=collected,
+                    message="Saving guide place candidates.",
+                )
                 if not place.get("website_url"):
                     place["website_url"] = discover_website_from_place_page(place.get("place_url", ""))
                 upsert_guide_place(con, code, url, place)
                 upsert_target(con, place, code)
                 collected += 1
+                if collected % 10 == 0:
+                    con.commit()
     return collected
 
 
-def discover_targets(con, max_targets):
+def discover_targets(con, max_targets, run_id, target_count):
     watches = load_watchlist()
     rows = con.execute(
         """
@@ -642,9 +695,30 @@ def discover_targets(con, max_targets):
     sources_found = 0
     lines_found = 0
     errors = 0
+    total_websites = len(rows)
+    write_progress(
+        runId=run_id,
+        phase="checking_websites",
+        targetsCollected=target_count,
+        totalWebsites=total_websites,
+        message=f"Checking {total_websites} official websites for wine lists.",
+    )
     for row in rows:
         target = dict(row)
         websites += 1
+        write_progress(
+            runId=run_id,
+            phase="checking_websites",
+            currentTarget=target.get("name", ""),
+            currentUrl=target.get("website_url", ""),
+            targetsCollected=target_count,
+            websitesChecked=websites,
+            totalWebsites=total_websites,
+            wineListsFound=sources_found,
+            wineLinesFound=lines_found,
+            errors=errors,
+            message="Opening official website and looking for wine-related links.",
+        )
         try:
             html, content_type = fetch_text(target["website_url"], timeout=25)
             if not isinstance(html, str):
@@ -659,6 +733,19 @@ def discover_targets(con, max_targets):
             target_sources = 0
             target_lines = 0
             for link in links[:5]:
+                write_progress(
+                    runId=run_id,
+                    phase="scanning_wine_lists",
+                    currentTarget=target.get("name", ""),
+                    currentUrl=link["url"],
+                    targetsCollected=target_count,
+                    websitesChecked=websites,
+                    totalWebsites=total_websites,
+                    wineListsFound=sources_found,
+                    wineLinesFound=lines_found,
+                    errors=errors,
+                    message="Reading a candidate wine list.",
+                )
                 found, lines, error = scan_wine_source(con, target, link["url"], watches)
                 target_sources += found
                 target_lines += lines
@@ -671,11 +758,37 @@ def discover_targets(con, max_targets):
             )
             sources_found += target_sources
             lines_found += target_lines
+            write_progress(
+                runId=run_id,
+                phase="checking_websites",
+                currentTarget=target.get("name", ""),
+                currentUrl=target.get("website_url", ""),
+                targetsCollected=target_count,
+                websitesChecked=websites,
+                totalWebsites=total_websites,
+                wineListsFound=sources_found,
+                wineLinesFound=lines_found,
+                errors=errors,
+                message="Finished this website.",
+            )
         except Exception as exc:
             errors += 1
             con.execute(
                 "update restaurant_targets set status='error', last_error=?, last_checked_at=current_timestamp where id=?",
                 (str(exc), target["id"]),
+            )
+            write_progress(
+                runId=run_id,
+                phase="checking_websites",
+                currentTarget=target.get("name", ""),
+                currentUrl=target.get("website_url", ""),
+                targetsCollected=target_count,
+                websitesChecked=websites,
+                totalWebsites=total_websites,
+                wineListsFound=sources_found,
+                wineLinesFound=lines_found,
+                errors=errors,
+                message=f"Website check failed: {exc}",
             )
     return websites, sources_found, lines_found, errors
 
@@ -739,11 +852,18 @@ def main():
         )
         run_id = cur.lastrowid
         errors = 0
+        write_progress(
+            runId=run_id,
+            status="running",
+            phase="starting",
+            source=",".join(sources),
+            message="Starting guide collection.",
+        )
         try:
-            target_count = collect_sources(con, sources, args.max_source_items)
+            target_count = collect_sources(con, sources, args.max_source_items, run_id)
             websites_checked = wine_lists_found = wine_lines_found = 0
             if args.discover and not args.no_discover:
-                websites_checked, wine_lists_found, wine_lines_found, errors = discover_targets(con, args.max_targets)
+                websites_checked, wine_lists_found, wine_lines_found, errors = discover_targets(con, args.max_targets, run_id, target_count)
             con.execute(
                 """
                 update guide_collection_runs
@@ -753,10 +873,29 @@ def main():
                 """,
                 (now_sql(), target_count, websites_checked, wine_lists_found, wine_lines_found, errors, run_id),
             )
+            write_progress(
+                runId=run_id,
+                status="completed",
+                phase="completed",
+                targetsCollected=target_count,
+                websitesChecked=websites_checked,
+                totalWebsites=websites_checked,
+                wineListsFound=wine_lists_found,
+                wineLinesFound=wine_lines_found,
+                errors=errors,
+                message="Guide collection completed.",
+            )
         except Exception as exc:
             con.execute(
                 "update guide_collection_runs set finished_at=?, status='error', errors=errors+1, notes=? where id=?",
                 (now_sql(), str(exc), run_id),
+            )
+            write_progress(
+                runId=run_id,
+                status="error",
+                phase="error",
+                errors=errors + 1,
+                message=str(exc),
             )
             raise
         finally:
