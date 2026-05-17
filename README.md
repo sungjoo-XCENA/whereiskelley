@@ -45,6 +45,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover
 
 The first command builds the restaurant target list from Michelin, La Liste, and World's 50 Best. The second command checks official restaurant websites for wine-list pages or PDFs.
 
+Current collection is intentionally target-first:
+
+- `collect-guides.ps1` collects and deduplicates restaurant targets only.
+- `collect-guides.ps1 -Discover` is the later website/wine-list discovery stage.
+- If a guide source is blocked or renders no parseable restaurant cards, the Dashboard shows it under `Source notes` instead of silently pretending it worked.
+
 Install the weekly Windows task:
 
 ```powershell
