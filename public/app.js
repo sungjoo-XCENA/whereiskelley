@@ -154,13 +154,51 @@ function krwPriceText(result) {
 }
 
 function pdfUrl(list = {}) {
-  return list.localFileUrl || list.fileUrl || list.fileViewUrl || list.downloadUrl || "";
+  return list.downloadUrl || list.fileViewUrl || list.fileUrl || list.externalUrl || list.localFileUrl || "";
 }
 
 function pdfMarkup(list = {}) {
   const url = pdfUrl(list);
   if (!url) return `<span class="pdf-pill muted">No PDF</span>`;
   return `<a class="pdf-pill pdf-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">PDF</a>`;
+}
+
+function pdfFallbackUrls(list = {}) {
+  return [list.fileViewUrl, list.fileUrl, list.externalUrl, list.localFileUrl]
+    .filter((url) => url && url !== pdfUrl(list));
+}
+
+function resultDedupKey(result = {}) {
+  return [
+    String(result.text || "").trim().toLowerCase(),
+    result.vintage || "",
+    result.currency || "",
+    result.priceValue ?? "",
+    result.wineList?.id || ""
+  ].join("|");
+}
+
+function uniqueResults(results = []) {
+  const seen = new Set();
+  const unique = [];
+  for (const result of results) {
+    const key = resultDedupKey(result);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(result);
+  }
+  return unique;
+}
+
+function pdfLinksMarkup(lists = []) {
+  const validLists = lists.filter((list) => pdfUrl(list));
+  return validLists
+    .slice(0, 3)
+    .map((list, index) => {
+      const label = validLists.length === 1 ? "PDF" : `PDF ${index + 1}`;
+      return `<a href="${escapeHtml(pdfUrl(list))}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>`;
+    })
+    .join("");
 }
 
 function resultLocation(result) {
@@ -192,9 +230,20 @@ function groupUpdatedValue(group) {
 }
 
 function groupLowestPriceResult(group) {
-  const cached = pdfLineCache.get(pdfLineCacheKey(group));
-  const candidates = cached?.lines?.length ? cached.lines : group.results;
+  const pdfLines = groupPdfLines(group);
+  const candidates = pdfLines.length ? pdfLines : fallbackWineLines(group.results);
   return [...candidates].sort((a, b) => numericPrice(a) - numericPrice(b))[0] || {};
+}
+
+function hasWineLineSignal(result = {}) {
+  const price = Number(result.priceValue);
+  return (Number.isFinite(price) && price > 0)
+    || (Array.isArray(result.prices) && result.prices.some((priceText) => String(priceText || "").trim()))
+    || /\b(?:NV|MV|N\/V|19\d{2}|20\d{2})\b/i.test(String(result.vintage || result.text || ""));
+}
+
+function fallbackWineLines(results = []) {
+  return uniqueResults(results).filter(hasWineLineSignal);
 }
 
 function groupKrwValue(group) {
@@ -205,34 +254,92 @@ function groupKrwValue(group) {
 }
 
 function groupPdfList(group) {
-  return group.results.map((result) => result.wineList || {}).find((list) => pdfUrl(list)) || {};
+  return groupPdfLists(group)[0] || {};
 }
 
-function pdfLineCacheKey(group) {
-  const list = groupPdfList(group);
-  return String(list.id || group.key || "");
+function groupPdfLists(group) {
+  const seen = new Set();
+  const lists = [];
+  for (const result of group.results) {
+    const list = result.wineList || {};
+    const url = pdfUrl(list);
+    if (!url) continue;
+    const key = String(list.id || url);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lists.push(list);
+  }
+  return lists;
+}
+
+function pdfLineCacheKeyForList(list = {}, group = {}) {
+  return String(list.id || pdfUrl(list) || group.key || "");
+}
+
+function groupPdfPayloads(group) {
+  return groupPdfLists(group)
+    .map((list) => pdfLineCache.get(pdfLineCacheKeyForList(list, group)))
+    .filter(Boolean);
+}
+
+function groupPdfLines(group) {
+  return groupPdfPayloads(group).flatMap((payload) => payload.lines || []);
+}
+
+function groupPdfPending(group) {
+  return groupPdfLists(group).some((list) => {
+    const key = pdfLineCacheKeyForList(list, group);
+    return key && !pdfLineCache.has(key);
+  });
+}
+
+function groupPdfReviewReason(group) {
+  const reasons = groupPdfPayloads(group)
+    .filter((payload) => payload.status === "review" && payload.reason)
+    .map((payload) => friendlyPdfReviewReason(payload.reason));
+  return [...new Set(reasons)].join(" ");
+}
+
+function friendlyPdfReviewReason(reason = "") {
+  const text = String(reason || "");
+  if (/403|forbidden|not a pdf file|pdf response was not a pdf/i.test(text)) {
+    return "PDF check unavailable. Showing indexed results until the PDF can be reviewed.";
+  }
+  if (/no matching text/i.test(text)) {
+    return "No matching text was verified in the downloaded PDF.";
+  }
+  if (/ocr|extractable text/i.test(text)) {
+    return "PDF text could not be extracted automatically. Manual review is needed.";
+  }
+  return "PDF check needs manual review.";
 }
 
 async function loadPdfLines(group) {
-  const key = pdfLineCacheKey(group);
-  if (!key || pdfLineCache.has(key) || pdfLineLoading.has(key)) return;
-  const list = groupPdfList(group);
-  pdfLineLoading.add(key);
-  try {
-    const params = new URLSearchParams({
-      wineListId: key,
-      q: queryInput.value.trim(),
-      fileUrl: pdfUrl(list),
-      country: group.venue?.country || ""
-    });
-    const payload = await getJson(`/api/pdf-lines?${params.toString()}`);
-    pdfLineCache.set(key, payload);
-  } catch (error) {
-    pdfLineCache.set(key, { status: "review", reason: error.message, lines: [] });
-  } finally {
-    pdfLineLoading.delete(key);
-    if (activeVenueKey === group.key) renderResultList();
-  }
+  const pendingLists = groupPdfLists(group).filter((list) => {
+    const key = pdfLineCacheKeyForList(list, group);
+    return key && !pdfLineCache.has(key) && !pdfLineLoading.has(key);
+  });
+  if (!pendingLists.length) return;
+  pendingLists.forEach((list) => pdfLineLoading.add(pdfLineCacheKeyForList(list, group)));
+  await Promise.all(pendingLists.map(async (list) => {
+    const key = pdfLineCacheKeyForList(list, group);
+    try {
+      const params = new URLSearchParams({
+        wineListId: String(list.id || key),
+        q: queryInput.value.trim(),
+        fileUrl: pdfUrl(list),
+        fallbackUrls: pdfFallbackUrls(list).join("|"),
+        country: group.venue?.country || ""
+      });
+      const payload = await getJson(`/api/pdf-lines?${params.toString()}`);
+      pdfLineCache.set(key, payload);
+    } catch (error) {
+      pdfLineCache.set(key, { status: "review", reason: error.message, lines: [] });
+    } finally {
+      pdfLineLoading.delete(key);
+    }
+  }));
+  if (activeVenueKey === group.key) renderResultList();
 }
 
 function sortGroups(groups) {
@@ -268,8 +375,11 @@ function sortGroups(groups) {
 
 function sortHeader(label, key) {
   const active = sortState.key === key;
-  const arrow = active ? (sortState.direction === "asc" ? " Asc" : " Desc") : "";
-  return `<button class="sort-button${active ? " active" : ""}" type="button" data-sort="${escapeHtml(key)}">${escapeHtml(label)}${arrow}</button>`;
+  const directionLabel = sortState.direction === "asc" ? "ascending" : "descending";
+  const badge = active
+    ? `<span class="sort-badge" aria-hidden="true">${sortState.direction === "asc" ? "&#8593;" : "&#8595;"}</span>`
+    : "";
+  return `<button class="sort-button${active ? " active" : ""}" type="button" data-sort="${escapeHtml(key)}" aria-label="Sort ${escapeHtml(label)}${active ? `, currently ${directionLabel}` : ""}"><span>${escapeHtml(label)}</span>${badge}</button>`;
 }
 
 function liveRefreshLine(liveRefresh) {
@@ -284,7 +394,7 @@ function liveRefreshLine(liveRefresh) {
 }
 
 function renderResults(results, liveRefresh = null) {
-  latestResults = sortByCheapest(results);
+  latestResults = sortByCheapest(uniqueResults(results));
   latestLiveRefresh = liveRefresh;
   countEl.textContent = String(groupedVenues(latestResults).length);
   renderMap(latestResults);
@@ -300,7 +410,7 @@ function renderResultList() {
   }
   const groups = sortGroups(groupedVenues(results));
   groups.forEach((group) => {
-    if (pdfUrl(groupPdfList(group))) window.setTimeout(() => loadPdfLines(group), 0);
+    if (groupPdfLists(group).length) window.setTimeout(() => loadPdfLines(group), 0);
   });
   const rows = groups.map((group) => renderPlaceRow(group)).join("");
   resultsEl.innerHTML = `${liveLine}<div class="table-wrap">
@@ -332,26 +442,36 @@ function renderPlaceRow(group) {
       <td>${escapeHtml(fallback(venue.city))}</td>
       <td>${escapeHtml(fallback(venue.country))}</td>
       <td>${escapeHtml(fallback(groupUpdatedValue(group) || firstList.updatedDate || firstList.updatedText))}</td>
-      <td>${escapeHtml(group.results.length)} lines</td>
+      <td>${escapeHtml(placeLineLabel(group))}</td>
       <td class="krw-cell">${krwPriceMarkup(lowest)}</td>
       <td>${pdfMarkup(groupPdfList(group))}</td>
     </tr>${expanded ? renderExpandedPlace(group) : ""}`;
 }
 
+function placeLineLabel(group) {
+  const pdfLines = groupPdfLines(group);
+  if (pdfLines.length) return `${pdfLines.length} PDF lines`;
+  const fallbackLines = fallbackWineLines(group.results);
+  if (fallbackLines.length) return `${fallbackLines.length} indexed lines`;
+  return "Review";
+}
+
 function renderExpandedPlace(group) {
   const venue = group.venue || {};
-  const list = groupPdfList(group);
-  const key = pdfLineCacheKey(group);
-  const cached = pdfLineCache.get(key);
-  if (!cached && key && !pdfLineLoading.has(key)) {
+  const pdfLists = groupPdfLists(group);
+  const pdfLines = groupPdfLines(group);
+  if (groupPdfPending(group)) {
     window.setTimeout(() => loadPdfLines(group), 0);
   }
-  const sourceLines = cached?.lines?.length ? cached.lines : group.results;
-  const reviewNote = cached?.status === "review"
-    ? `<div class="review-note">${escapeHtml(cached.reason || "Needs review")}</div>`
-    : !cached
-      ? `<div class="review-note">Reading extracted PDF text...</div>`
-      : "";
+  const sourceLines = pdfLines.length ? uniqueResults(pdfLines) : fallbackWineLines(group.results);
+  const reviewReason = groupPdfReviewReason(group);
+  const reviewNote = pdfLines.length
+    ? ""
+    : groupPdfPending(group)
+      ? `<div class="review-note">Reading the current PDF download...</div>`
+      : reviewReason
+        ? `<div class="review-note">${escapeHtml(reviewReason)} ${sourceLines.length ? "The rows below are from the Star Wine List search index." : "No priced wine line was found in the downloaded PDF or search index."}</div>`
+        : "";
   const lines = sourceLines
     .slice()
     .sort((a, b) => numericPrice(a) - numericPrice(b))
@@ -362,7 +482,7 @@ function renderExpandedPlace(group) {
       <td class="krw-cell">${krwPriceMarkup(result)}</td>
       <td>${escapeHtml(result.pageNumber || "")}</td>
     </tr>`)
-    .join("");
+    .join("") || `<tr><td colspan="5" class="muted">Review needed. The search index matched text for this place, but no priced wine line was verified from the PDF.</td></tr>`;
   return `<tr class="expanded-row">
     <td colspan="7">
       <div class="expanded-place">
@@ -372,7 +492,7 @@ function renderExpandedPlace(group) {
             <span>${escapeHtml([venue.city, venue.country].filter(Boolean).join(", "))}</span>
           </div>
           <div class="actions compact">
-            ${pdfUrl(list) ? `<a href="${escapeHtml(pdfUrl(list))}" target="_blank" rel="noreferrer">PDF</a>` : ""}
+            ${pdfLinksMarkup(pdfLists)}
             ${venue.starWineMapUrl ? `<a class="secondary" href="${escapeHtml(venue.starWineMapUrl)}" target="_blank" rel="noreferrer">Map</a>` : ""}
             ${venue.url ? `<a class="secondary" href="${escapeHtml(venue.url)}" target="_blank" rel="noreferrer">Star Wine List page</a>` : ""}
           </div>
@@ -403,6 +523,9 @@ function groupedVenues(results) {
       groups.set(key, { key, venue, results: [], lat: Number(venue.lat), lng: Number(venue.lng) });
     }
     groups.get(key).results.push(result);
+  }
+  for (const group of groups.values()) {
+    group.results = uniqueResults(group.results);
   }
   return [...groups.values()].sort((a, b) => String(a.venue?.name || "").localeCompare(String(b.venue?.name || "")));
 }
