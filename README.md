@@ -42,9 +42,18 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-weekly-task.ps1
 The Dashboard shows:
 
 - collection status from the latest guide run
+- live progress while collection is running
 - restaurants being tracked from the three guide sources
 - wine-list pages or PDFs found from official restaurant websites
 - watchlist hits from saved guide data and from the current search
+
+During collection, this file is updated continuously:
+
+```powershell
+Get-Content .\public\data\guide-progress.json
+```
+
+It shows the current phase, current restaurant or wine-list URL, checked websites, found wine lists, parsed wine lines, and errors.
 
 Watchlist keywords live in:
 
@@ -57,7 +66,7 @@ Edit that file, then run `collect-guides.ps1 -Discover` again. The generated `pu
 The web search merges both sources in one result list:
 
 - `Guide DB`: result came from the collected guide restaurant DB.
-- `DB`: result came from an exported local snapshot.
+- `DB`: result came from the exported Star Wine snapshot.
 - `Live`: result came from the live Star Wine List API.
 - `DB + Live`: the same result was found in more than one source.
 
