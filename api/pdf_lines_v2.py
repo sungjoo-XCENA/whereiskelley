@@ -127,11 +127,21 @@ def vintage_near(raw, position, fragment):
     return window_match.group(0) if window_match else None
 
 
+def section_row_price(raw, country):
+    for match in reversed(list(PRICE_TOKEN_RE.finditer(raw or ""))):
+        price_text, price_value, currency = parse_price(match.group(0), country, require_edge=False)
+        if price_value is not None:
+            return price_text, price_value, currency
+    return "", None, None
+
+
 def section_fragment(header, raw, country):
     if not is_section_price_row(raw):
         return None
     fragment = clean_fragment(f"{header}, {raw}")
-    price_text, price_value, currency = parse_price(raw, country, require_edge=True)
+    price_text, price_value, currency = section_row_price(raw, country)
+    if price_value is None:
+        price_text, price_value, currency = parse_price(raw, country, require_edge=True)
     if price_value is None:
         price_text, price_value, currency = parse_price(fragment, country, require_edge=False)
     if price_value is None:
