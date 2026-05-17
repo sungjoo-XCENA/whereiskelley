@@ -9,6 +9,10 @@ from urllib.request import Request, urlopen
 API_URL = "https://starwinelist.com/api/search"
 LOCATION_API_URL = "https://starwinelist.com/api/location/search"
 LOCATION_CACHE = {}
+CITY_COORDS = {
+    ("Norway", "Tromsø"): (69.6492, 18.9553),
+    ("Norway", "Tromso"): (69.6492, 18.9553),
+}
 CURRENCY_RE = r"\u20ac|\$|\u00a3|\u00a5|\u20a9|CHF|DKK|SEK|NOK|USD|EUR|GBP|CAD|AUD|SGD|HKD|AED|CNY|CZK|ARS|JPY|KRW"
 PRICE_CURRENCY_RE = r"A\$|AU\$|CA\$|HK\$|S\$|US\$|" + CURRENCY_RE
 NO_PRICE_RE = r"\b(?:ask\s+(?:your\s+)?sommelier|ask\s+(?:us|staff)|on\s+request|upon\s+request|price\s+on\s+request|market\s+price|enquire|inquire|poa|n/?a|sold\s+out)\b|\ubb38\uc758|\uc2dc\uac00|\uc2ef\uac00"
@@ -126,6 +130,8 @@ def location_from_result(result, country, city):
     lat = location.get("lat") if location else None
     lng = location.get("lng") if location else None
     star_map_url = ((location or {}).get("urls") or {}).get("map")
+    if lat is None or lng is None:
+        lat, lng = CITY_COORDS.get((country, city), (lat, lng))
     return slug, lat, lng, star_map_url or ""
 
 
