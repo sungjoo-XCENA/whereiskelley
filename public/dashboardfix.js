@@ -49,6 +49,19 @@
       font-weight: 750;
       line-height: 1.35;
     }
+    .dash-progress {
+      height: 9px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e5e7eb;
+    }
+    .dash-progress > i {
+      display: block;
+      width: var(--dash-progress, 0%);
+      height: 100%;
+      border-radius: inherit;
+      background: var(--accent);
+    }
     .dashboard-main {
       display: grid;
       grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
@@ -150,6 +163,32 @@
     return div.innerHTML;
   }
 
+  function secondsBetween(start, finish) {
+    if (!start) return null;
+    const startMs = Date.parse(String(start).replace("+00:00", "Z"));
+    const finishMs = finish ? Date.parse(String(finish).replace("+00:00", "Z")) : Date.now();
+    if (!Number.isFinite(startMs) || !Number.isFinite(finishMs)) return null;
+    return Math.max(0, Math.round((finishMs - startMs) / 1000));
+  }
+
+  function formatDuration(seconds) {
+    if (seconds == null || seconds === "" || Number.isNaN(Number(seconds))) return "-";
+    const value = Math.max(0, Math.round(Number(seconds)));
+    const hours = Math.floor(value / 3600);
+    const minutes = Math.floor((value % 3600) / 60);
+    const secs = value % 60;
+    if (hours) return `${hours}h ${minutes}m`;
+    if (minutes) return `${minutes}m ${secs}s`;
+    return `${secs}s`;
+  }
+
+  function formatTime(value) {
+    if (!value) return "-";
+    const date = new Date(String(value).replace("+00:00", "Z"));
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString();
+  }
+
   function getResults() {
     try {
       return typeof latestResults === "undefined" ? [] : latestResults || [];
@@ -196,6 +235,17 @@
     return getResults().filter((result) => String(result.text || "").toLowerCase().includes(needle));
   }
 
+  function collectedWatchHits(keyword, vintage = "") {
+    const needle = String(keyword || "").toLowerCase();
+    const year = String(vintage || "").trim();
+    if (!needle) return [];
+    return state.guideHits.filter((hit) => {
+      const text = String(hit.raw_text || hit.text || "").toLowerCase();
+      if (!text.includes(needle)) return false;
+      return !year || String(hit.vintage || "").includes(year) || text.includes(year);
+    });
+  }
+
   function loadWatchlist() {
     try {
       state.watchlist = JSON.parse(localStorage.getItem("whereiskelley.watchlist") || "[]");
@@ -238,11 +288,17 @@
       currentTarget: "",
       currentUrl: "",
       targetsCollected: run.target_count || counts.targets || 0,
+      processedTargets: run.websites_checked || 0,
       websitesChecked: run.websites_checked || 0,
       totalWebsites: run.websites_checked || 0,
       wineListsFound: run.wine_lists_found || counts.sources || 0,
       wineLinesFound: run.wine_lines_found || counts.wineLines || 0,
-      errors: run.errors || 0
+      errors: run.errors || 0,
+      startedAt: run.started_at || "",
+      finishedAt: run.finished_at || "",
+      elapsedSeconds: secondsBetween(run.started_at, run.finished_at),
+      durationSeconds: run.finished_at ? secondsBetween(run.started_at, run.finished_at) : null,
+      estimatedRemainingSeconds: 0
     };
   }
 
@@ -321,60 +377,43 @@
     const guide = state.guide || {};
     const progress = state.guideProgress || {};
     const guideCounts = guide.counts || {};
-    const sourceCounts = Array.isArray(guide.sourceCounts) ? guide.sourceCounts : [];
-    const sourceStats = Array.isArray(guide.sourceStats) ? guide.sourceStats : [];
-    const totalStats = guide.totalStats || {};
-    const sourceIssues = Array.isArray(guide.sourceIssues) ? guide.sourceIssues : [];
-    const watchHitCount = state.watchlist.reduce((sum, watch) => sum + watchHits(watch.keyword).length, 0);
-    const guideHitCount = state.guideHits.length;
     const guideRun = guide.lastRun || null;
     const progressRunning = progress.status === "running";
     const discoveryChecked = Boolean((guideRun?.websites_checked || progress.websitesChecked || 0) > 0 || (guideRun?.wine_lists_found || 0) > 0);
-    const displayedWineLists = discoveryChecked ? (guideRun?.wine_lists_found || guideCounts.sources || 0) : 0;
-    const displayedWineLines = discoveryChecked ? (guideRun?.wine_lines_found || guideCounts.wineLines || 0) : 0;
-    const guideStatus = progressRunning ? "running" : guideRun?.status || (guide ? "ready" : "waiting");
-    const guideDetail = progressRunning
-      ? `${html(progress.phase || "collecting")} - ${html(progress.message || "Collection is running.")}`
-      : guideRun
-      ? `${html(guideRun.sources_requested || "Guides")} checked. ${html(guideCounts.targets || 0)} restaurant targets.`
-      : "Michelin, La Liste, and World's 50 Best collector has not exported a guide snapshot yet.";
-    const websiteProgress = progress.totalWebsites
-      ? `${html(progress.websitesChecked || 0)} / ${html(progress.totalWebsites)}`
-      : html(progress.websitesChecked || 0);
-    const sourceBreakdown = sourceStats.length
-      ? sourceStats.map((source) => `${html(source.code)} ${html(source.raw || 0)} reviewed, ${html(source.sourceUnique || 0)} unique, ${html(source.sourceDuplicates || 0)} dupes`).join("<br>")
-      : sourceCounts.length
-      ? sourceCounts.map((source) => `${html(source.code)} ${html(source.places || 0)} unique`).join(" / ")
-      : "-";
-    const totalBreakdown = totalStats.raw
-      ? `${html(totalStats.raw)} reviewed / ${html(totalStats.sourceUnique)} source-unique / ${html(totalStats.mergedUnique)} merged unique / ${html(totalStats.crossSourceDuplicates)} cross-source dupes`
-      : "-";
-    const sourceIssueText = sourceIssues.length
-      ? sourceIssues.map((issue) => `${html(issue.code || "source")}: ${html(issue.message || "Needs review")}`).join("<br>")
-      : "None";
-    const progressRows = `<tr><td>Phase</td><td><span class="dash-pill${progressRunning ? " live" : ""}">${html(progress.phase || guideStatus)}</span></td><td>${html(progress.message || "No collection is running right now.")}</td></tr>
-      <tr><td>Current place</td><td colspan="2">${html(progress.currentTarget || "-")}</td></tr>
-      <tr><td>Current URL</td><td colspan="2">${progress.currentUrl ? `<a href="${html(progress.currentUrl)}" target="_blank" rel="noreferrer">${html(progress.currentUrl)}</a>` : "-"}</td></tr>
-      <tr><td>Guide places</td><td colspan="2">${html(progress.targetsCollected || guideCounts.targets || 0)} collected</td></tr>
-      <tr><td>Total dedupe</td><td colspan="2">${totalBreakdown}</td></tr>
-      <tr><td>Sources</td><td colspan="2">${sourceBreakdown}</td></tr>
-      <tr><td>Source notes</td><td colspan="2">${sourceIssueText}</td></tr>
-      <tr><td>Websites checked</td><td colspan="2">${websiteProgress}</td></tr>
-      <tr><td>Wine lists / lines</td><td colspan="2">${discoveryChecked ? `${html(displayedWineLists)} lists / ${html(displayedWineLines)} lines` : "Not checked yet"}</td></tr>
-      <tr><td>Errors</td><td colspan="2">${html(progress.errors || 0)}</td></tr>`;
-    const watchDetail = `${html(state.watchlist.length)} watched keywords. ${html(watchHitCount)} current-search hits / ${html(guideHitCount)} collected-guide hits.`;
-    const alertDetail = guideHitCount || watchHitCount
-      ? `${html(guideHitCount + watchHitCount)} matches can be reviewed from this dashboard.`
-      : "New matches will appear here after a search or after a scheduled guide collection runs.";
+    const savedRestaurants = Number(guideCounts.targets || progress.targetsCollected || guideRun?.target_count || 0);
+    const processedTargets = Number(progress.processedTargets ?? progress.websitesChecked ?? guideRun?.websites_checked ?? 0);
+    const totalTargets = Number(progress.totalWebsites || progress.targetsCollected || guideCounts.targets || guideRun?.target_count || 0);
+    const runPercent = totalTargets ? Math.min(100, Math.max(0, Number(progress.progressPercent || ((processedTargets / totalTargets) * 100)))) : 0;
+    const websitesChecked = Number(progress.websitesChecked || guideRun?.websites_checked || 0);
+    const wineListsSaved = discoveryChecked ? Number(progress.wineListsFound || guideRun?.wine_lists_found || guideCounts.sources || 0) : 0;
+    const wineLinesSaved = discoveryChecked ? Number(progress.wineLinesFound || guideRun?.wine_lines_found || guideCounts.wineLines || 0) : 0;
+    const watchLiveHits = state.watchlist.reduce((sum, watch) => sum + watchHits(watch.keyword).length, 0);
+    const watchDbHits = state.watchlist.reduce((sum, watch) => sum + collectedWatchHits(watch.keyword, watch.vintage).length, 0);
+    const elapsedSeconds = progress.elapsedSeconds ?? secondsBetween(progress.startedAt || guideRun?.started_at, progress.finishedAt || guideRun?.finished_at);
+    const durationSeconds = progress.durationSeconds ?? (progress.finishedAt || guideRun?.finished_at ? secondsBetween(progress.startedAt || guideRun?.started_at, progress.finishedAt || guideRun?.finished_at) : null);
+    const currentRunRows = `<tr><td>Status</td><td><span class="dash-pill${progressRunning ? " live" : ""}">${html(progressRunning ? "Collecting" : (guideRun?.status || "Ready"))}</span></td><td>${html(progressRunning ? "Checking official restaurant websites in the background." : "No background collection is running.")}</td></tr>
+      <tr><td>This run</td><td colspan="2"><div class="dash-progress" style="--dash-progress:${html(runPercent)}%"><i></i></div><small>${html(processedTargets)} / ${html(totalTargets || "-")} restaurants (${html(runPercent.toFixed(1))}%)</small></td></tr>
+      <tr><td>Current restaurant</td><td colspan="2">${html(progress.currentTarget || "-")}</td></tr>
+      <tr><td>Current website</td><td colspan="2">${progress.currentUrl ? `<a href="${html(progress.currentUrl)}" target="_blank" rel="noreferrer">${html(progress.currentUrl)}</a>` : "-"}</td></tr>
+      <tr><td>Started</td><td colspan="2">${html(formatTime(progress.startedAt || guideRun?.started_at))}</td></tr>
+      <tr><td>Elapsed</td><td colspan="2">${html(formatDuration(elapsedSeconds))}</td></tr>
+      <tr><td>ETA / total time</td><td colspan="2">${progressRunning ? `${html(formatDuration(progress.estimatedRemainingSeconds))}${progress.estimatedFinishAt ? ` - ${html(formatTime(progress.estimatedFinishAt))}` : ""}` : html(formatDuration(durationSeconds))}</td></tr>
+      <tr><td>Errors</td><td colspan="2">${html(progress.errors || guideRun?.errors || 0)}</td></tr>`;
+    const resultRows = `<tr><td>Restaurants in DB</td><td colspan="2">${html(savedRestaurants)}</td></tr>
+      <tr><td>Official websites checked</td><td colspan="2">${html(websitesChecked)}</td></tr>
+      <tr><td>Wine-list pages/PDFs saved</td><td colspan="2">${html(wineListsSaved)}</td></tr>
+      <tr><td>Wine text lines saved</td><td colspan="2">${html(wineLinesSaved)}</td></tr>
+      <tr><td>Watched wine hits</td><td colspan="2">${html(watchDbHits)} from saved DB / ${html(watchLiveHits)} from current search</td></tr>`;
     const watchRows = state.watchlist.map((watch, index) => {
-      const hits = watchHits(watch.keyword);
+      const liveHits = watchHits(watch.keyword);
+      const dbHits = collectedWatchHits(watch.keyword, watch.vintage);
+      const found = liveHits.length || dbHits.length;
       return `<div class="watch-row">
-        <div><b>${html(watch.keyword)}</b><span>${html(watch.vintage || "Any vintage")} / ${html(hits.length)} live hits in the current search</span></div>
-        <span class="dash-pill${hits.length ? " live" : ""}">${hits.length ? "Found" : "Watching"}</span>
+        <div><b>${html(watch.keyword)}</b><span>${html(watch.vintage || "Any vintage")} / DB ${html(dbHits.length)} / current search ${html(liveHits.length)}</span></div>
+        <span class="dash-pill${found ? " live" : ""}">${found ? "Found" : "Watching"}</span>
         <button class="dash-remove" type="button" data-dashboard-remove="${index}">Remove</button>
       </div>`;
     }).join("");
-
     const targetRows = state.guideTargets.slice(0, 12).map((target) => {
       let sources = [];
       try { sources = JSON.parse(target.sources_json || "[]"); } catch (_error) {}
@@ -393,10 +432,10 @@
     </tr>`).join("");
 
     root.innerHTML = `<div class="dashboard-grid">
-      <div class="dashboard-card"><span>Guide collection</span><b>${html(guideStatus)}</b><small>${guideDetail}</small></div>
-      <div class="dashboard-card"><span>Places tracked</span><b>${html(guideCounts.targets || progress.targetsCollected || 0)}</b><small>Restaurants and wine-list places from Michelin, La Liste, and World's 50 Best.</small></div>
-      <div class="dashboard-card"><span>Wine lists found</span><b>${html(displayedWineLists)}</b><small>${discoveryChecked ? `${html(displayedWineLines)} collected wine lines.` : "Restaurant websites have not been checked in the latest target run."}</small></div>
-      <div class="dashboard-card"><span>Watchlist hits</span><b>${html(guideHitCount + watchHitCount)}</b><small>${watchDetail}</small></div>
+      <div class="dashboard-card"><span>Restaurants in DB</span><b>${html(savedRestaurants)}</b><small>Michelin, La Liste, and World's 50 Best restaurant candidates saved locally.</small></div>
+      <div class="dashboard-card"><span>Websites checked</span><b>${html(websitesChecked)}</b><small>${progressRunning ? `${html(processedTargets)} / ${html(totalTargets)} handled in the current run.` : "Latest saved website-scan count."}</small></div>
+      <div class="dashboard-card"><span>Wine lists saved</span><b>${html(wineListsSaved)}</b><small>${html(wineLinesSaved)} wine lines saved to the DB.</small></div>
+      <div class="dashboard-card"><span>Watched wines found</span><b>${html(watchDbHits + watchLiveHits)}</b><small>${html(watchDbHits)} DB hits / ${html(watchLiveHits)} current-search hits.</small></div>
     </div>
     <div class="dashboard-main">
       <section class="dash-panel">
@@ -410,26 +449,29 @@
         <div class="watch-items">${watchRows || `<div class="watch-row"><div><b>No keywords yet</b><span>Add one here.</span></div></div>`}</div>
       </section>
       <section class="dash-panel">
-        <p class="dash-kicker">Live progress</p>
-        <h2>Collection progress</h2>
+        <p class="dash-kicker">DB collection result</p>
+        <h2>What is saved?</h2>
+        <table class="dash-table"><tbody>${resultRows}</tbody></table>
+      </section>
+      <section class="dash-panel">
+        <p class="dash-kicker">Background run</p>
+        <h2>Current collection</h2>
+        <table class="dash-table"><tbody>${currentRunRows}</tbody></table>
+      </section>
+      <section class="dash-panel">
+        <p class="dash-kicker">Restaurant DB sample</p>
+        <h2>Restaurants being checked</h2>
         <table class="dash-table">
-          <tbody>${progressRows}</tbody>
+          <thead><tr><th>Restaurant</th><th>Sources</th><th>Status</th><th>Website</th></tr></thead>
+          <tbody>${targetRows || `<tr><td colspan="4">No restaurant targets have been exported to this dashboard yet.</td></tr>`}</tbody>
         </table>
       </section>
       <section class="dash-panel">
-        <p class="dash-kicker">Guide collection</p>
-        <h2>Place targets</h2>
-        <table class="dash-table">
-          <thead><tr><th>Place</th><th>Sources</th><th>Status</th><th>Website</th></tr></thead>
-          <tbody>${targetRows || `<tr><td colspan="4">No guide targets collected yet.</td></tr>`}</tbody>
-        </table>
-      </section>
-      <section class="dash-panel">
-        <p class="dash-kicker">Alerts</p>
-        <h2>Collected watch hits</h2>
+        <p class="dash-kicker">Watchlist matches</p>
+        <h2>Found in saved DB</h2>
         <table class="dash-table">
           <thead><tr><th>Wine line</th><th>Vintage</th><th>Price</th><th>Restaurant</th></tr></thead>
-          <tbody>${hitRows || `<tr><td colspan="4">${alertDetail}</td></tr>`}</tbody>
+          <tbody>${hitRows || `<tr><td colspan="4">No saved DB matches yet. Matches appear here after collection or a search snapshot.</td></tr>`}</tbody>
         </table>
       </section>
     </div>`;
