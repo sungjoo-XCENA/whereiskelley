@@ -16,6 +16,9 @@
     "api/pdf_file.py": {
       "maxDuration": 60
     },
+    "api/guide-collection.py": {
+      "maxDuration": 10
+    },
     "api/stats.py": {
       "maxDuration": 10
     }

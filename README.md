@@ -10,6 +10,20 @@ powershell -ExecutionPolicy Bypass -File .\run-server.ps1
 
 Open `http://localhost:4317`.
 
+To use this PC as the collection monitor/server, keep the local server running while collection runs:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-server.ps1
+```
+
+For LAN access from another device on the same network:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-server.ps1 -Public
+```
+
+The local Dashboard reads live collection state from `/api/guide-collection`, which reads SQLite and `public/data/guide-progress.json` directly. This does not require GitHub or Vercel.
+
 ## Guide collection and watchlist
 
 The collector now follows this flow:
@@ -63,6 +77,16 @@ You can also save the key in `.env.local`:
 ```text
 GOOGLE_MAPS_API_KEY=your_google_maps_key
 ```
+
+For remote monitoring after the local PC stops, set Firebase Realtime Database env vars locally and in Vercel:
+
+```text
+FIREBASE_DATABASE_URL=https://your-project-default-rtdb.firebaseio.com
+FIREBASE_COLLECTION_PATH=whereiskelley/guideCollection
+FIREBASE_AUTH_TOKEN=optional_database_secret_or_id_token
+```
+
+During collection the local collector writes live progress to Firebase when `FIREBASE_DATABASE_URL` is set. When collection finishes it writes the DB summary and watched-wine matches there. Vercel reads the same `/api/guide-collection` route, but that route reads Firebase instead of local SQLite.
 
 The annual candidate refresh and the weekly wine-list refresh are intentionally separate:
 

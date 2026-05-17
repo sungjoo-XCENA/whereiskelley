@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlencode, urljoin, urlparse
 
 import guide_collect as guide
+import firebase_sync
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -252,6 +253,24 @@ def write_watch_hits(con):
     return len(hits)
 
 
+def db_counts(con):
+    return {
+        "targets": con.execute("select count(1) from restaurant_targets").fetchone()[0],
+        "withWebsite": con.execute(
+            "select count(1) from restaurant_targets where website_url is not null and length(website_url)>0"
+        ).fetchone()[0],
+        "wineListSources": con.execute("select count(1) from wine_list_sources").fetchone()[0],
+        "wineLines": con.execute("select count(1) from guide_wine_entries").fetchone()[0],
+        "review": con.execute("select count(1) from restaurant_targets where status in ('review','error')").fetchone()[0],
+    }
+
+
+def write_live_progress(con, **payload):
+    payload["dbCounts"] = db_counts(con)
+    guide.write_progress(**payload)
+    firebase_sync.publish_progress(payload)
+
+
 def sql_time_to_epoch(value):
     if not value:
         return time.time()
@@ -332,7 +351,8 @@ def main():
                 "update guide_collection_runs set finished_at=?, status='error', target_count=(select count(*) from restaurant_targets), errors=1, notes=? where id=?",
                 (guide.now_sql(), message, run_id),
             )
-            guide.write_progress(
+            write_live_progress(
+                con,
                 runId=run_id,
                 status="error",
                 phase="missing_google_key",
@@ -375,7 +395,8 @@ def main():
 
         for index, row in enumerate(rows, start=1):
             target = dict(row)
-            guide.write_progress(
+            write_live_progress(
+                con,
                 runId=run_id,
                 phase="resolving_websites",
                 currentTarget=target.get("name", ""),
@@ -460,7 +481,8 @@ def main():
                 run_id,
             ),
         )
-        guide.write_progress(
+        write_live_progress(
+            con,
             runId=run_id,
             status="completed",
             phase="completed",
@@ -475,6 +497,17 @@ def main():
             **timing_payload(started_at, len(rows), len(rows), completed=True),
         )
         export_status(con, run_id, watch_hits)
+        result_payload = {}
+        for filename in ["guide-status.json", "guide-watch-hits.json"]:
+            path = PUBLIC_DATA_DIR / filename
+            if path.exists():
+                try:
+                    result_payload[filename.removesuffix(".json").replace("-", "_")] = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+        result_payload["dbCounts"] = db_counts(con)
+        result_payload["completedAt"] = guide.now_sql()
+        firebase_sync.publish_result(result_payload)
         con.commit()
         print(
             f"targets={targets_total} checked={websites_checked} "
