@@ -43,7 +43,13 @@ Run the website/wine-list discovery stage separately:
 powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover
 ```
 
-Use this as the weekly wine-list refresh. It reuses the saved restaurant candidates, resolves missing official websites through Google Places, then checks those official restaurant websites for wine-list pages or PDFs.
+Use this to resume wine-list discovery. It reuses the saved restaurant candidates, skips restaurants already marked `found` or `no_wine_list`, resolves missing official websites through Google Places, then checks official restaurant websites for wine-list pages or PDFs.
+
+For a weekly full refresh, recheck every saved restaurant:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover -RecheckAll
+```
 
 Local discovery needs a Google key with `Places API` enabled because the weekly job needs official restaurant websites, not just map pins:
 
@@ -61,7 +67,8 @@ GOOGLE_MAPS_API_KEY=your_google_maps_key
 The annual candidate refresh and the weekly wine-list refresh are intentionally separate:
 
 - annual: `collect-guides.ps1` refreshes Michelin, La Liste, and World's 50 Best restaurant candidates.
-- weekly: `collect-guides.ps1 -Discover` uses the saved candidates, finds/updates official websites, scans wine-list HTML/PDF sources, and updates watchlist hits.
+- resume: `collect-guides.ps1 -Discover` continues only unfinished or review/error targets.
+- weekly: `collect-guides.ps1 -Discover -RecheckAll` uses the saved candidates, finds/updates official websites, scans wine-list HTML/PDF sources, and updates watchlist hits.
 
 Current collection is intentionally target-first:
 
@@ -79,9 +86,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-weekly-task.ps1
 
 The Dashboard shows:
 
-- collection status from the latest guide run
-- live progress while collection is running
-- restaurants being tracked from the three guide sources
+- DB collection result from the latest exported guide run
+- current background collection status when a local run is active
+- restaurants saved from the three guide sources
 - wine-list pages or PDFs found from official restaurant websites
 - watchlist hits from saved guide data and from the current search
 
@@ -92,6 +99,7 @@ Get-Content .\public\data\guide-progress.json
 ```
 
 It shows the current phase, current restaurant or wine-list URL, checked websites, found wine lists, parsed wine lines, and errors.
+For wine-list discovery runs it also records `startedAt`, `elapsedSeconds`, `processedTargets`, `progressPercent`, `estimatedRemainingSeconds`, and `estimatedFinishAt`. When a run completes, the final snapshot keeps the run's `started_at` and `finished_at`, so the Dashboard can show the total duration.
 
 Watchlist keywords live in:
 
