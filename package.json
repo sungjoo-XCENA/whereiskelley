@@ -5,12 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "powershell -ExecutionPolicy Bypass -File run-server.ps1",
-    "sync": "powershell -ExecutionPolicy Bypass -File scripts/sync.ps1",
-    "sync:sample": "powershell -ExecutionPolicy Bypass -File scripts/sync.ps1 --countries=germany --limit-venues=5",
-    "sync:api": "powershell -ExecutionPolicy Bypass -File scripts/sync-search-api.ps1",
-    "sync:sweep": "powershell -ExecutionPolicy Bypass -File scripts/sync-search-sweep.ps1",
     "snapshot": "powershell -ExecutionPolicy Bypass -File scripts/export-snapshot.ps1",
-    "weekly-refresh": "powershell -ExecutionPolicy Bypass -File scripts/weekly-refresh.ps1",
     "collect:guides": "powershell -ExecutionPolicy Bypass -File scripts/collect-guides.ps1",
     "collect:guides:quick": "powershell -ExecutionPolicy Bypass -File scripts/collect-guides.ps1 -Quick",
     "import-pdf": "powershell -ExecutionPolicy Bypass -File scripts/import-pdf.ps1"
