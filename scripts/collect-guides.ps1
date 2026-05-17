@@ -3,6 +3,7 @@ param(
   [switch]$Discover,
   [switch]$SkipGoogle,
   [switch]$RefreshWebsites,
+  [switch]$RecheckAll,
   [switch]$NoSnapshot,
   [switch]$Snapshot,
   [int]$MaxSourceItems = 0,
@@ -45,6 +46,9 @@ try {
     }
     if ($RefreshWebsites) {
       $args += "--refresh-websites"
+    }
+    if ($RecheckAll) {
+      $args += "--recheck-all"
     }
   } else {
     $args = @(
