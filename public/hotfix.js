@@ -115,8 +115,22 @@ function groupPdfPending(group) {
 function groupPdfReviewReason(group) {
   const reasons = groupPdfPayloads(group)
     .filter((payload) => payload.status === "review" && payload.reason)
-    .map((payload) => payload.reason);
+    .map((payload) => friendlyPdfReviewReason(payload.reason));
   return [...new Set(reasons)].join(" ");
+}
+
+function friendlyPdfReviewReason(reason = "") {
+  const text = String(reason || "");
+  if (/403|forbidden|not a pdf file|pdf response was not a pdf/i.test(text)) {
+    return "PDF check unavailable. Showing indexed results until the PDF can be reviewed.";
+  }
+  if (/no matching text/i.test(text)) {
+    return "No matching text was verified in the downloaded PDF.";
+  }
+  if (/ocr|extractable text/i.test(text)) {
+    return "PDF text could not be extracted automatically. Manual review is needed.";
+  }
+  return "PDF check needs manual review.";
 }
 
 function groupLowestPriceResult(group) {
@@ -126,8 +140,9 @@ function groupLowestPriceResult(group) {
 }
 
 function hasWineLineSignal(result = {}) {
-  return Number.isFinite(Number(result.priceValue))
-    || (Array.isArray(result.prices) && result.prices.length > 0)
+  const price = Number(result.priceValue);
+  return (Number.isFinite(price) && price > 0)
+    || (Array.isArray(result.prices) && result.prices.some((priceText) => String(priceText || "").trim()))
     || /\b(?:NV|MV|N\/V|19\d{2}|20\d{2})\b/i.test(String(result.vintage || result.text || ""));
 }
 
@@ -241,7 +256,7 @@ function renderExpandedPlace(group) {
     : groupPdfPending(group)
       ? `<div class="review-note">Reading the current PDF download...</div>`
       : reviewReason
-        ? `<div class="review-note">${escapeHtml(reviewReason)} ${sourceLines.length ? "Showing priced/vintage search-index lines until this PDF is reviewed." : "No priced wine line was found in the downloaded PDF or search index, so this needs manual review."}</div>`
+        ? `<div class="review-note">${escapeHtml(reviewReason)} ${sourceLines.length ? "The rows below are from the Star Wine List search index." : "No priced wine line was found in the downloaded PDF or search index."}</div>`
         : "";
   const lines = sourceLines
     .slice()
