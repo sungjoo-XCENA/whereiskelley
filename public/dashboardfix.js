@@ -294,16 +294,23 @@
     const stats = dashboardStats();
     const db = state.db || {};
     const dbConnected = state.dbStatus === "connected";
-    const dbLabel = dbConnected ? "SQLite connected" : "Cloud DB not connected";
     const watchHitCount = state.watchlist.reduce((sum, watch) => sum + watchHits(watch.keyword).length, 0);
     const lastRun = db.lastRun || null;
     const lastRunText = lastRun?.finished_at || lastRun?.started_at || "";
-    const dbDetail = dbConnected
-      ? `${html(db.venueCount || 0)} places / ${html(db.entryCount || 0)} stored wine lines`
-      : "Live search works now. Weekly persistent collection still needs a production DB.";
-    const lastRunDetail = lastRun
-      ? `${html(lastRunText || "Unknown time")} / downloaded ${html(lastRun.downloaded || 0)} / parsed ${html(lastRun.parsed_entries || 0)} / errors ${html(lastRun.errors || 0)}`
-      : "No local collection run recorded yet.";
+    const running = Boolean(lastRun?.started_at && !lastRun?.finished_at);
+    const collectionStatus = running ? "Running" : lastRun ? "Completed" : dbConnected ? "Ready" : "Waiting";
+    const collectionDetail = running
+      ? "A background collection is running now."
+      : lastRun
+        ? `Last checked ${html(lastRunText || "unknown time")}. Saved ${html(lastRun.parsed_entries || 0)} wine lines with ${html(lastRun.errors || 0)} issues.`
+        : "No background collection has run yet.";
+    const savedDetail = dbConnected
+      ? `${html(db.venueCount || 0)} places / ${html(db.wineListCount || 0)} wine lists / ${html(db.entryCount || 0)} wine lines`
+      : "No saved collection is available yet.";
+    const watchDetail = `${html(state.watchlist.length)} watched keywords. ${html(watchHitCount)} matches are visible in the current search.`;
+    const alertDetail = watchHitCount
+      ? `${html(watchHitCount)} current matches can be reviewed from this dashboard.`
+      : "New matches will appear here after a search or after a scheduled collection runs.";
     const watchRows = state.watchlist.map((watch, index) => {
       const hits = watchHits(watch.keyword);
       return `<div class="watch-row">
@@ -314,10 +321,10 @@
     }).join("");
 
     root.innerHTML = `<div class="dashboard-grid">
-      <div class="dashboard-card"><span>Database</span><b>${dbConnected ? html(db.entryCount || 0) : "--"}</b><small>${html(dbLabel)}. ${dbDetail}</small></div>
-      <div class="dashboard-card"><span>Watchlist</span><b>${html(state.watchlist.length)}</b><small>${html(watchHitCount)} hits in the current live search.</small></div>
-      <div class="dashboard-card"><span>Guide sources</span><b>3</b><small>Michelin, World's 50 Best, and La Liste schema are ready.</small></div>
-      <div class="dashboard-card"><span>Review</span><b>${html(stats.reviews)}</b><small>Places needing price/PDF/manual checks from the current search.</small></div>
+      <div class="dashboard-card"><span>Collection</span><b>${html(collectionStatus)}</b><small>${collectionDetail}</small></div>
+      <div class="dashboard-card"><span>Saved wines</span><b>${dbConnected ? html(db.entryCount || 0) : "--"}</b><small>${savedDetail}</small></div>
+      <div class="dashboard-card"><span>Watchlist hits</span><b>${html(watchHitCount)}</b><small>${watchDetail}</small></div>
+      <div class="dashboard-card"><span>Needs review</span><b>${html(stats.reviews)}</b><small>Places needing price, PDF, or manual checks from the current search.</small></div>
     </div>
     <div class="dashboard-main">
       <section class="dash-panel">
@@ -331,17 +338,16 @@
         <div class="watch-items">${watchRows || `<div class="watch-row"><div><b>No keywords yet</b><span>Add one here.</span></div></div>`}</div>
       </section>
       <section class="dash-panel">
-        <p class="dash-kicker">Collection and alerts</p>
-        <h2>DB collection</h2>
+        <p class="dash-kicker">Collection status</p>
+        <h2>Background collection</h2>
         <table class="dash-table">
           <tbody>
             <tr><th>Item</th><th>Status</th><th>Detail</th></tr>
-            <tr><td>Local SQLite</td><td><span class="dash-pill${dbConnected ? " live" : ""}">${html(dbLabel)}</span></td><td>${dbDetail}</td></tr>
-            <tr><td>Last collection run</td><td><span class="dash-pill">${lastRun ? "Recorded" : "Not running"}</span></td><td>${lastRunDetail}</td></tr>
-            <tr><td>Star Wine live search</td><td><span class="dash-pill live">Working</span></td><td>${html(stats.lines)} live wine lines loaded in the current search.</td></tr>
-            <tr><td>External guide DB</td><td><span class="dash-pill">Schema ready</span></td><td>Michelin, World's 50 Best, and La Liste tables are prepared, but collectors are not wired yet.</td></tr>
-            <tr><td>Keyword alerts</td><td><span class="dash-pill">Dashboard only</span></td><td>Keywords are saved in this browser now. Weekly alerts need production DB plus scheduled collector.</td></tr>
-            <tr><td>Production DB</td><td><span class="dash-pill review">Not connected</span></td><td>Vercel live search is working, but weekly persistent collection still needs Supabase/Firebase/Postgres wiring.</td></tr>
+            <tr><td>Collector</td><td><span class="dash-pill${running || lastRun ? " live" : ""}">${html(collectionStatus)}</span></td><td>${collectionDetail}</td></tr>
+            <tr><td>Saved results</td><td><span class="dash-pill${dbConnected ? " live" : ""}">${dbConnected ? "Available" : "Waiting"}</span></td><td>${savedDetail}</td></tr>
+            <tr><td>Watchlist scan</td><td><span class="dash-pill${watchHitCount ? " live" : ""}">${watchHitCount ? "Matches found" : "Watching"}</span></td><td>${watchDetail}</td></tr>
+            <tr><td>Alerts</td><td><span class="dash-pill${watchHitCount ? " review" : ""}">${watchHitCount ? "Review" : "Waiting"}</span></td><td>${alertDetail}</td></tr>
+            <tr><td>Guide lists</td><td><span class="dash-pill">Planned</span></td><td>Michelin, World's 50 Best, and La Liste collection will feed this same dashboard once the scheduled collector is connected.</td></tr>
           </tbody>
         </table>
       </section>
