@@ -88,7 +88,38 @@ This repo includes a lightweight Vercel version:
 - serverless live search at `api/search.py`
 - Google Maps config at `api/config.js`
 
-The Vercel version does not persist SQLite/PDF data yet. It searches the public Star Wine List search API live and returns the same result shape as the local UI. Persistent cloud storage should move to Turso/libSQL plus Vercel Blob later.
+The Vercel version does not persist SQLite/PDF data yet. It searches the public Star Wine List search API live and returns the same result shape as the local UI.
+
+For persistent weekly collection, keep local development on `db/starwine.sqlite`, then move production data to a managed Postgres database such as Supabase Postgres or Neon Postgres. Store PDF/source files separately in Vercel Blob or Supabase Storage, and keep only URLs, checksums, parse status, and review flags in Postgres. This avoids relying on Vercel's ephemeral filesystem for SQLite/PDF storage.
+
+Michelin collection is modeled separately:
+
+- `michelin_places`: canonical restaurant/place metadata
+- `michelin_awards`: year-by-year guide status, stars, Bib Gourmand, Green Star, or selected status
+- `michelin_starwine_matches`: candidate or confirmed matches to Star Wine List venues
+- `michelin_sync_runs`: weekly collection run history
+
+External guide collection is also modeled generically so Michelin, The World's 50 Best Restaurants, and La Liste can feed the same matching pipeline:
+
+- `guide_sources`: `michelin`, `worlds50best`, `laliste`
+- `guide_places`: source-specific restaurant metadata and URLs
+- `guide_rankings`: yearly rank, score, distinction, stars, and list metadata
+- `guide_starwine_matches`: candidate or confirmed matches to Star Wine List venues
+
+Keyword monitoring is stored in:
+
+- `wine_keyword_watches`: registered wine keywords and optional filters
+- `wine_keyword_hits`: detected matches from parsed wine-list entries
+- `notification_events`: pending/sent alert summaries for email, dashboard cards, or webhook delivery
+
+The weekly flow should be:
+
+1. Refresh external restaurant guides.
+2. Match guide restaurants to Star Wine List venues by name, city, country, URL, and coordinates.
+3. Refresh wine-list metadata and source PDFs for matched venues.
+4. Parse wine lines, prices, vintage, source status, and review flags.
+5. Run active keyword watches.
+6. Create dashboard rows and notification events for new matches.
 
 Set this environment variable in Vercel Project Settings:
 
