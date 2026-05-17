@@ -19,6 +19,24 @@ hotfixStyle.textContent = `
     color: var(--muted);
     font-weight: 750;
   }
+  .download-results {
+    min-height: 34px;
+    border-color: var(--line);
+    background: #fff;
+    color: var(--ink);
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .download-results:hover {
+    border-color: rgba(159, 18, 57, 0.35);
+    background: #fff5f7;
+    color: var(--accent);
+  }
+  .panel-tools {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
 `;
 document.head.appendChild(hotfixStyle);
 
@@ -168,11 +186,87 @@ function groupedVenues(results) {
 }
 
 function renderResults(results, liveRefresh = null) {
+  ensureDownloadButton();
   latestResults = sortByCheapest(uniqueResults(results));
   latestLiveRefresh = liveRefresh;
   countEl.textContent = String(groupedVenues(latestResults).length);
   renderMap(latestResults);
   renderResultList();
+}
+
+function ensureDownloadButton() {
+  if (document.querySelector("#downloadResults")) return;
+  const heading = document.querySelector(".result-list .panel-heading");
+  if (!heading || !countEl) return;
+  const tools = document.createElement("div");
+  tools.className = "panel-tools";
+  const button = document.createElement("button");
+  button.id = "downloadResults";
+  button.className = "download-results";
+  button.type = "button";
+  button.textContent = "Download results";
+  button.addEventListener("click", downloadSearchResults);
+  heading.insertBefore(tools, countEl);
+  tools.appendChild(button);
+  tools.appendChild(countEl);
+}
+
+function csvCell(value) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
+}
+
+function exportRows() {
+  return groupedVenues(latestResults).flatMap((group) => {
+    const venue = group.venue || {};
+    const pdfLists = groupPdfLists(group);
+    const lines = groupPdfLines(group).length ? groupPdfLines(group) : fallbackWineLines(group.results);
+    const pdfUrls = pdfLists.map((list) => pdfUrl(list)).filter(Boolean).join(" | ");
+    return (lines.length ? lines : [{ text: "", vintage: "", priceValue: "", currency: "", review: true }]).map((line) => ({
+      place: displayVenueName(venue),
+      type: venue.type || "Restaurant / wine bar",
+      city: venue.city || "",
+      country: venue.country || "",
+      updated: groupUpdatedValue(group) || group.results[0]?.wineList?.updatedDate || group.results[0]?.wineList?.updatedText || "",
+      matchedLine: line.text || "",
+      vintage: line.vintage || "",
+      originalPrice: originalPriceText(line),
+      krw: krwPriceText(line),
+      source: groupPdfLines(group).length ? "PDF" : "Search index",
+      pdfUrls,
+      starWineListUrl: venue.url || "",
+      mapUrl: venue.starWineMapUrl || ""
+    }));
+  });
+}
+
+function downloadSearchResults() {
+  const headers = ["Place", "Type", "City", "Country", "Updated", "Matched line", "Vintage", "Original price", "KRW", "Source", "PDF URLs", "Star Wine List URL", "Map URL"];
+  const rows = exportRows();
+  const csv = [headers, ...rows.map((row) => [
+    row.place,
+    row.type,
+    row.city,
+    row.country,
+    row.updated,
+    row.matchedLine,
+    row.vintage,
+    row.originalPrice,
+    row.krw,
+    row.source,
+    row.pdfUrls,
+    row.starWineListUrl,
+    row.mapUrl
+  ])].map((row) => row.map(csvCell).join(",")).join("\r\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `whereiskelley-results-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 async function loadPdfLines(group) {
