@@ -5,7 +5,8 @@
     guideTargets: [],
     guideHits: [],
     guideWatch: null,
-    watchlist: []
+    watchlist: [],
+    watchDraft: { keyword: "", vintage: "" }
   };
 
   const css = document.createElement("style");
@@ -449,6 +450,9 @@
 
   function renderDashboard() {
     const root = ensureDashboardView();
+    const focusedId = document.activeElement?.id || "";
+    const cursorStart = document.activeElement?.selectionStart ?? null;
+    const cursorEnd = document.activeElement?.selectionEnd ?? null;
     const guide = state.guide || {};
     const progress = state.guideProgress || {};
     const guideCounts = guide.counts || {};
@@ -530,8 +534,8 @@
         <p class="dash-kicker">Watchlist</p>
         <h2>Watched wines</h2>
         <form class="watch-form" id="dashboardWatchForm">
-          <input id="dashboardWatchKeyword" type="search" placeholder="Romanee-Conti, Coche-Dury, Raveneau..." autocomplete="off">
-          <input id="dashboardWatchVintage" type="search" placeholder="Vintage" maxlength="4">
+          <input id="dashboardWatchKeyword" type="search" placeholder="Romanee-Conti, Coche-Dury, Raveneau..." autocomplete="off" value="${html(state.watchDraft.keyword)}">
+          <input id="dashboardWatchVintage" type="search" placeholder="Vintage" maxlength="4" value="${html(state.watchDraft.vintage)}">
           <button type="submit">Add</button>
         </form>
         <div class="watch-items">${watchRows || `<div class="watch-row"><div><b>No watched wines yet</b><span>Add a producer, cuvee, or keyword.</span></div></div>`}</div>
@@ -547,6 +551,15 @@
         </div>
       </section>
     </div>`;
+    if (focusedId === "dashboardWatchKeyword" || focusedId === "dashboardWatchVintage") {
+      const input = document.querySelector(`#${focusedId}`);
+      input?.focus();
+      if (input && cursorStart != null && cursorEnd != null) {
+        try {
+          input.setSelectionRange(cursorStart, cursorEnd);
+        } catch (_error) {}
+      }
+    }
   }
 
   function boot() {
@@ -565,8 +578,17 @@
       const vintage = document.querySelector("#dashboardWatchVintage")?.value?.trim() || "";
       if (!keyword) return;
       state.watchlist.push({ keyword, vintage });
+      state.watchDraft = { keyword: "", vintage: "" };
       saveWatchlist();
       renderDashboard();
+    });
+    document.body.addEventListener("input", (event) => {
+      if (event.target?.id === "dashboardWatchKeyword") {
+        state.watchDraft.keyword = event.target.value;
+      }
+      if (event.target?.id === "dashboardWatchVintage") {
+        state.watchDraft.vintage = event.target.value;
+      }
     });
     document.body.addEventListener("click", (event) => {
       const remove = event.target.closest("[data-dashboard-remove]");
