@@ -27,11 +27,23 @@ Run a small smoke test:
 powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Quick -Discover
 ```
 
-Run the normal collector:
+`-Quick` is only for local smoke testing. It checks a tiny sample and does not overwrite the public `public/data/` snapshot unless `-Snapshot` is also passed.
+
+Run the guide master-list collector:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover -MaxSourceItems 1000 -MaxTargets 1000
+powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1
 ```
+
+For guide collection, `MaxSourceItems=0` and `MaxTargets=0` mean no artificial limit.
+
+Run the website/wine-list discovery stage separately:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover
+```
+
+The first command builds the restaurant target list from Michelin, La Liste, and World's 50 Best. The second command checks official restaurant websites for wine-list pages or PDFs.
 
 Install the weekly Windows task:
 
