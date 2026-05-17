@@ -37,6 +37,29 @@ hotfixStyle.textContent = `
     align-items: center;
     gap: 10px;
   }
+  .place-name-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .place-name-line b {
+    min-width: 0;
+  }
+  .review-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 22px;
+    padding: 0 9px;
+    border-radius: 999px;
+    background: #fff7ed;
+    color: #b45309;
+    font-size: 11px;
+    font-weight: 950;
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
   @media (max-width: 720px) {
     .app-shell {
       width: min(100vw - 14px, 720px);
@@ -280,6 +303,23 @@ function groupPdfReviewReason(group) {
     .filter((payload) => payload.status === "review" && payload.reason)
     .map((payload) => friendlyPdfReviewReason(payload.reason));
   return [...new Set(reasons)].join(" ");
+}
+
+function groupHeldPdfExtras(group) {
+  const indexedLines = fallbackWineLines(group.results);
+  if (!indexedLines.length) return 0;
+  const pdfLines = groupPdfLines(group);
+  const verifiedCount = reconciledGroupLines(group).filter((line) => line.pdfVerified).length;
+  return Math.max(0, pdfLines.length - verifiedCount);
+}
+
+function groupNeedsReview(group) {
+  return groupHeldPdfExtras(group) > 0 || Boolean(groupPdfReviewReason(group));
+}
+
+function reviewBadgeMarkup(group) {
+  if (!groupNeedsReview(group)) return "";
+  return `<span class="review-badge" title="PDF needs review">Review</span>`;
 }
 
 function friendlyPdfReviewReason(reason = "") {
@@ -623,7 +663,7 @@ async function loadPdfLines(group) {
       pdfLineLoading.delete(key);
     }
   }));
-  if (activeVenueKey === group.key) renderResultList();
+  renderResultList();
 }
 
 function sortHeader(label, key) {
@@ -641,8 +681,11 @@ function renderPlaceRow(group) {
   const firstList = group.results[0]?.wineList || {};
   const lowest = groupLowestPriceResult(group);
   const expanded = key && key === activeVenueKey;
+  if (groupPdfLists(group).length && groupPdfPending(group)) {
+    window.setTimeout(() => loadPdfLines(group), 0);
+  }
   return `<tr class="place-row${expanded ? " active" : ""}" data-venue-key="${escapeHtml(key)}">
-      <td class="place-cell"><b>${escapeHtml(displayVenueName(venue))}</b><span>${escapeHtml(venue.type || "Restaurant / wine bar")}</span></td>
+      <td class="place-cell"><div class="place-name-line"><b>${escapeHtml(displayVenueName(venue))}</b>${reviewBadgeMarkup(group)}</div><span>${escapeHtml(venue.type || "Restaurant / wine bar")}</span></td>
       <td>${escapeHtml(fallback(venue.city))}</td>
       <td>${escapeHtml(fallback(venue.country))}</td>
       <td>${escapeHtml(fallback(groupUpdatedValue(group) || firstList.updatedDate || firstList.updatedText))}</td>
@@ -671,9 +714,7 @@ function renderExpandedPlace(group) {
   }
   const sourceLines = reconciledGroupLines(group);
   const reviewReason = groupPdfReviewReason(group);
-  const indexedLines = fallbackWineLines(group.results);
-  const verifiedCount = sourceLines.filter((line) => line.pdfVerified).length;
-  const heldPdfExtras = indexedLines.length ? Math.max(0, pdfLines.length - verifiedCount) : 0;
+  const heldPdfExtras = groupHeldPdfExtras(group);
   const reviewNote = heldPdfExtras
     ? `<div class="review-note">Showing Star Wine List indexed rows first. ${escapeHtml(String(heldPdfExtras))} PDF-only rows were held for review instead of being added automatically.</div>`
     : pdfLines.length
