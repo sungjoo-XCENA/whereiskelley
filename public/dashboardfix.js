@@ -322,6 +322,8 @@
     const progress = state.guideProgress || {};
     const guideCounts = guide.counts || {};
     const sourceCounts = Array.isArray(guide.sourceCounts) ? guide.sourceCounts : [];
+    const sourceStats = Array.isArray(guide.sourceStats) ? guide.sourceStats : [];
+    const totalStats = guide.totalStats || {};
     const sourceIssues = Array.isArray(guide.sourceIssues) ? guide.sourceIssues : [];
     const watchHitCount = state.watchlist.reduce((sum, watch) => sum + watchHits(watch.keyword).length, 0);
     const guideHitCount = state.guideHits.length;
@@ -339,8 +341,13 @@
     const websiteProgress = progress.totalWebsites
       ? `${html(progress.websitesChecked || 0)} / ${html(progress.totalWebsites)}`
       : html(progress.websitesChecked || 0);
-    const sourceBreakdown = sourceCounts.length
-      ? sourceCounts.map((source) => `${html(source.code)} ${html(source.places || 0)}`).join(" / ")
+    const sourceBreakdown = sourceStats.length
+      ? sourceStats.map((source) => `${html(source.code)} ${html(source.raw || 0)} reviewed, ${html(source.sourceUnique || 0)} unique, ${html(source.sourceDuplicates || 0)} dupes`).join("<br>")
+      : sourceCounts.length
+      ? sourceCounts.map((source) => `${html(source.code)} ${html(source.places || 0)} unique`).join(" / ")
+      : "-";
+    const totalBreakdown = totalStats.raw
+      ? `${html(totalStats.raw)} reviewed / ${html(totalStats.sourceUnique)} source-unique / ${html(totalStats.mergedUnique)} merged unique / ${html(totalStats.crossSourceDuplicates)} cross-source dupes`
       : "-";
     const sourceIssueText = sourceIssues.length
       ? sourceIssues.map((issue) => `${html(issue.code || "source")}: ${html(issue.message || "Needs review")}`).join("<br>")
@@ -349,6 +356,7 @@
       <tr><td>Current place</td><td colspan="2">${html(progress.currentTarget || "-")}</td></tr>
       <tr><td>Current URL</td><td colspan="2">${progress.currentUrl ? `<a href="${html(progress.currentUrl)}" target="_blank" rel="noreferrer">${html(progress.currentUrl)}</a>` : "-"}</td></tr>
       <tr><td>Guide places</td><td colspan="2">${html(progress.targetsCollected || guideCounts.targets || 0)} collected</td></tr>
+      <tr><td>Total dedupe</td><td colspan="2">${totalBreakdown}</td></tr>
       <tr><td>Sources</td><td colspan="2">${sourceBreakdown}</td></tr>
       <tr><td>Source notes</td><td colspan="2">${sourceIssueText}</td></tr>
       <tr><td>Websites checked</td><td colspan="2">${websiteProgress}</td></tr>
