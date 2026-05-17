@@ -1,4 +1,5 @@
 import argparse
+import calendar
 import json
 import os
 import re
@@ -251,6 +252,41 @@ def write_watch_hits(con):
     return len(hits)
 
 
+def sql_time_to_epoch(value):
+    if not value:
+        return time.time()
+    try:
+        return calendar.timegm(time.strptime(value.replace("+00:00", ""), "%Y-%m-%dT%H:%M:%S"))
+    except ValueError:
+        return time.time()
+
+
+def timing_payload(started_at, checked=0, total=0, completed=False):
+    started_epoch = sql_time_to_epoch(started_at)
+    now_epoch = time.time()
+    elapsed = max(0, int(now_epoch - started_epoch))
+    checked = int(checked or 0)
+    total = int(total or 0)
+    payload = {
+        "startedAt": started_at,
+        "elapsedSeconds": elapsed,
+        "progressPercent": round((checked / total) * 100, 1) if total else 0,
+    }
+    if completed:
+        payload["finishedAt"] = guide.now_sql()
+        payload["durationSeconds"] = elapsed
+        payload["estimatedRemainingSeconds"] = 0
+        return payload
+    if checked > 0 and total > checked and elapsed > 0:
+        remaining = int((total - checked) * (elapsed / checked))
+        payload["estimatedRemainingSeconds"] = remaining
+        payload["estimatedFinishAt"] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(now_epoch + remaining))
+    else:
+        payload["estimatedRemainingSeconds"] = None
+        payload["estimatedFinishAt"] = ""
+    return payload
+
+
 def export_status(con, run_id, watch_hits=0):
     previous = {}
     status_path = PUBLIC_DATA_DIR / "guide-status.json"
@@ -274,15 +310,17 @@ def main():
     parser.add_argument("--max-links", type=int, default=8)
     parser.add_argument("--skip-google", action="store_true")
     parser.add_argument("--refresh-websites", action="store_true", help="Resolve Google Places even if website_url already exists.")
+    parser.add_argument("--recheck-all", action="store_true", help="Recheck targets that were already found or already had no wine list.")
     parser.add_argument("--sleep", type=float, default=0.18)
     args = parser.parse_args()
 
     guide.init_db()
     api_key = "" if args.skip_google else load_env_key()
     with guide.connect() as con:
+        started_at = guide.now_sql()
         run = con.execute(
             "insert into guide_collection_runs(started_at, status, sources_requested) values(?, 'running', ?)",
-            (guide.now_sql(), "existing_targets_google_places_wine_lists"),
+            (started_at, "existing_targets_google_places_wine_lists"),
         )
         run_id = run.lastrowid
         if not api_key and not args.skip_google:
@@ -301,18 +339,29 @@ def main():
                 targetsCollected=con.execute("select count(*) from restaurant_targets").fetchone()[0],
                 errors=1,
                 message=message,
+                **timing_payload(started_at, 0, 0, completed=True),
             )
             export_status(con, run_id, 0)
             con.commit()
             raise SystemExit(message)
         watches = guide.load_watchlist()
-        rows = con.execute(
-            """
-            select *
-            from restaurant_targets
-            order by priority desc, last_checked_at is not null, name
-            """
-        ).fetchall()
+        if args.recheck_all:
+            rows = con.execute(
+                """
+                select *
+                from restaurant_targets
+                order by priority desc, last_checked_at is not null, name
+                """
+            ).fetchall()
+        else:
+            rows = con.execute(
+                """
+                select *
+                from restaurant_targets
+                where coalesce(status, 'not_checked') not in ('found', 'no_wine_list')
+                order by priority desc, last_checked_at is not null, name
+                """
+            ).fetchall()
         if args.max_targets and args.max_targets > 0:
             rows = rows[: args.max_targets]
 
@@ -332,12 +381,14 @@ def main():
                 currentTarget=target.get("name", ""),
                 currentUrl=target.get("website_url") or "",
                 targetsCollected=targets_total,
+                processedTargets=index - 1,
                 websitesChecked=websites_checked,
                 totalWebsites=len(rows),
                 wineListsFound=wine_lists_found,
                 wineLinesFound=wine_lines_found,
                 errors=errors,
                 message="Resolving official website from Google Places, then checking it for wine lists.",
+                **timing_payload(started_at, index - 1, len(rows)),
             )
 
             needs_google = args.refresh_websites or not target.get("website_url")
@@ -402,6 +453,7 @@ def main():
                         "googleResolved": google_resolved,
                         "googleMissingWebsite": google_missing,
                         "googleEnabled": bool(api_key) and not args.skip_google,
+                        "durationSeconds": timing_payload(started_at, len(rows), len(rows), completed=True)["durationSeconds"],
                     },
                     ensure_ascii=False,
                 ),
@@ -413,12 +465,14 @@ def main():
             status="completed",
             phase="completed",
             targetsCollected=targets_total,
+            processedTargets=len(rows),
             websitesChecked=websites_checked,
             totalWebsites=len(rows),
             wineListsFound=wine_lists_found,
             wineLinesFound=wine_lines_found,
             errors=errors,
             message="Wine-list discovery completed.",
+            **timing_payload(started_at, len(rows), len(rows), completed=True),
         )
         export_status(con, run_id, watch_hits)
         con.commit()
