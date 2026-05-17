@@ -56,6 +56,83 @@
   observer.observe(document.body, { childList: true, subtree: true });
   tagMapLinks();
 
+  function downloadSafeName(value, fallback = "search") {
+    const safeName = typeof safeZipName === "function"
+      ? safeZipName(value, fallback)
+      : String(value || fallback)
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^A-Za-z0-9._-]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+    return safeName || fallback;
+  }
+
+  function currentSearchSnapshot() {
+    const query = queryInput?.value?.trim() || "";
+    const country = countryInput?.value?.trim() || "";
+    const city = cityInput?.value?.trim() || "";
+    const vintage = vintageInput?.value?.trim() || "";
+    const parts = [query, country, city, vintage].filter(Boolean);
+    return {
+      query,
+      country,
+      city,
+      vintage,
+      filenamePart: downloadSafeName(parts.join("-") || "all-results", "all-results"),
+      text: [
+        `Query: ${query || "All"}`,
+        `Country: ${country || "All"}`,
+        `City: ${city || "All"}`,
+        `Vintage: ${vintage || "All"}`,
+        `Downloaded at: ${new Date().toISOString()}`,
+        `Visible result lines: ${latestResults?.length || 0}`
+      ].join("\r\n")
+    };
+  }
+
+  downloadSearchResults = async function patchedDownloadSearchResults() {
+    const stamp = new Date().toISOString().slice(0, 10);
+    const search = currentSearchSnapshot();
+    const basename = `whereiskelley-${search.filenamePart}-${stamp}`;
+    const button = document.querySelector("#downloadResults");
+    const originalLabel = button?.textContent || "Download results";
+    const csv = resultsCsv();
+    if (!window.JSZip) {
+      downloadBlob(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }), `${basename}.csv`);
+      return;
+    }
+
+    const zip = new JSZip();
+    const pdfs = uniquePdfDownloads();
+    const pdfStatusByUrl = new Map();
+    if (button) {
+      button.disabled = true;
+      button.textContent = pdfs.length ? `Packing PDFs 0/${pdfs.length}` : "Packing results";
+    }
+    try {
+      for (let index = 0; index < pdfs.length; index += 1) {
+        const item = pdfs[index];
+        if (button) button.textContent = `Packing PDFs ${index + 1}/${pdfs.length}`;
+        try {
+          zip.file(item.path, await fetchPdfForZip(item));
+          pdfStatusByUrl.set(item.url, { status: "Downloaded", path: item.path, error: "" });
+        } catch (error) {
+          pdfStatusByUrl.set(item.url, { status: "Failed", path: "", error: error.message });
+        }
+      }
+      zip.file(`${basename}.csv`, `\uFEFF${resultsCsv(pdfStatusByUrl)}`);
+      zip.file("search-query.txt", search.text);
+      if (button) button.textContent = "Creating ZIP";
+      const blob = await zip.generateAsync({ type: "blob" });
+      downloadBlob(blob, `${basename}.zip`);
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalLabel;
+      }
+    }
+  };
+
   function cleanMapVenueName(venue = {}) {
     if (typeof displayVenueName === "function") return displayVenueName(venue);
     return String(venue.name || "Unknown")
