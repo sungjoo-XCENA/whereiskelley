@@ -49,7 +49,9 @@ Current collection is intentionally target-first:
 
 - `collect-guides.ps1` collects and deduplicates restaurant targets only.
 - `collect-guides.ps1 -Discover` is the later website/wine-list discovery stage.
+- MICHELIN uses the rendered `https://guide.michelin.com/kr/ko/restaurants/all-starred/page/N` pages through a local browser because plain HTTP requests return an empty challenge response.
 - If a guide source is blocked or renders no parseable restaurant cards, the Dashboard shows it under `Source notes` instead of silently pretending it worked.
+- Dashboard progress separates `reviewed`, source-level unique restaurants, and merged unique restaurants after cross-source dedupe.
 
 Install the weekly Windows task:
 
