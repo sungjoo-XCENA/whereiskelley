@@ -158,6 +158,38 @@
     }
   }
 
+  function getGroups() {
+    try {
+      return typeof groupedVenues === "function" ? groupedVenues(getResults()) : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  function priceIsValid(result) {
+    try {
+      return typeof hasValidPrice === "function" ? hasValidPrice(result) : Boolean(result?.price);
+    } catch (_error) {
+      return Boolean(result?.price);
+    }
+  }
+
+  function lowestResult(group) {
+    try {
+      return typeof groupLowestPriceResult === "function" ? groupLowestPriceResult(group) : group?.results?.[0];
+    } catch (_error) {
+      return group?.results?.[0];
+    }
+  }
+
+  function reviewReason(group) {
+    try {
+      return typeof groupPdfReviewReason === "function" ? groupPdfReviewReason(group) : "";
+    } catch (_error) {
+      return "";
+    }
+  }
+
   function watchHits(keyword) {
     const needle = String(keyword || "").toLowerCase();
     if (!needle) return [];
@@ -290,15 +322,19 @@
     const progress = state.guideProgress || {};
     const guideCounts = guide.counts || {};
     const sourceCounts = Array.isArray(guide.sourceCounts) ? guide.sourceCounts : [];
+    const sourceIssues = Array.isArray(guide.sourceIssues) ? guide.sourceIssues : [];
     const watchHitCount = state.watchlist.reduce((sum, watch) => sum + watchHits(watch.keyword).length, 0);
     const guideHitCount = state.guideHits.length;
     const guideRun = guide.lastRun || null;
     const progressRunning = progress.status === "running";
+    const discoveryChecked = Boolean((guideRun?.websites_checked || progress.websitesChecked || 0) > 0 || (guideRun?.wine_lists_found || 0) > 0);
+    const displayedWineLists = discoveryChecked ? (guideRun?.wine_lists_found || guideCounts.sources || 0) : 0;
+    const displayedWineLines = discoveryChecked ? (guideRun?.wine_lines_found || guideCounts.wineLines || 0) : 0;
     const guideStatus = progressRunning ? "running" : guideRun?.status || (guide ? "ready" : "waiting");
     const guideDetail = progressRunning
       ? `${html(progress.phase || "collecting")} - ${html(progress.message || "Collection is running.")}`
       : guideRun
-      ? `${html(guideRun.sources_requested || "Guides")} checked. ${html(guideCounts.targets || 0)} restaurant targets, ${html(guideCounts.sources || 0)} wine-list sources.`
+      ? `${html(guideRun.sources_requested || "Guides")} checked. ${html(guideCounts.targets || 0)} restaurant targets.`
       : "Michelin, La Liste, and World's 50 Best collector has not exported a guide snapshot yet.";
     const websiteProgress = progress.totalWebsites
       ? `${html(progress.websitesChecked || 0)} / ${html(progress.totalWebsites)}`
@@ -306,13 +342,17 @@
     const sourceBreakdown = sourceCounts.length
       ? sourceCounts.map((source) => `${html(source.code)} ${html(source.places || 0)}`).join(" / ")
       : "-";
+    const sourceIssueText = sourceIssues.length
+      ? sourceIssues.map((issue) => `${html(issue.code || "source")}: ${html(issue.message || "Needs review")}`).join("<br>")
+      : "None";
     const progressRows = `<tr><td>Phase</td><td><span class="dash-pill${progressRunning ? " live" : ""}">${html(progress.phase || guideStatus)}</span></td><td>${html(progress.message || "No collection is running right now.")}</td></tr>
       <tr><td>Current place</td><td colspan="2">${html(progress.currentTarget || "-")}</td></tr>
       <tr><td>Current URL</td><td colspan="2">${progress.currentUrl ? `<a href="${html(progress.currentUrl)}" target="_blank" rel="noreferrer">${html(progress.currentUrl)}</a>` : "-"}</td></tr>
       <tr><td>Guide places</td><td colspan="2">${html(progress.targetsCollected || guideCounts.targets || 0)} collected</td></tr>
       <tr><td>Sources</td><td colspan="2">${sourceBreakdown}</td></tr>
+      <tr><td>Source notes</td><td colspan="2">${sourceIssueText}</td></tr>
       <tr><td>Websites checked</td><td colspan="2">${websiteProgress}</td></tr>
-      <tr><td>Wine lists / lines</td><td colspan="2">${html(progress.wineListsFound || guideCounts.sources || 0)} lists / ${html(progress.wineLinesFound || guideCounts.wineLines || 0)} lines</td></tr>
+      <tr><td>Wine lists / lines</td><td colspan="2">${discoveryChecked ? `${html(displayedWineLists)} lists / ${html(displayedWineLines)} lines` : "Not checked yet"}</td></tr>
       <tr><td>Errors</td><td colspan="2">${html(progress.errors || 0)}</td></tr>`;
     const watchDetail = `${html(state.watchlist.length)} watched keywords. ${html(watchHitCount)} current-search hits / ${html(guideHitCount)} collected-guide hits.`;
     const alertDetail = guideHitCount || watchHitCount
@@ -347,7 +387,7 @@
     root.innerHTML = `<div class="dashboard-grid">
       <div class="dashboard-card"><span>Guide collection</span><b>${html(guideStatus)}</b><small>${guideDetail}</small></div>
       <div class="dashboard-card"><span>Places tracked</span><b>${html(guideCounts.targets || progress.targetsCollected || 0)}</b><small>Restaurants and wine-list places from Michelin, La Liste, and World's 50 Best.</small></div>
-      <div class="dashboard-card"><span>Wine lists found</span><b>${html(guideCounts.sources || 0)}</b><small>${html(guideCounts.wineLines || 0)} collected wine lines.</small></div>
+      <div class="dashboard-card"><span>Wine lists found</span><b>${html(displayedWineLists)}</b><small>${discoveryChecked ? `${html(displayedWineLines)} collected wine lines.` : "Restaurant websites have not been checked in the latest target run."}</small></div>
       <div class="dashboard-card"><span>Watchlist hits</span><b>${html(guideHitCount + watchHitCount)}</b><small>${watchDetail}</small></div>
     </div>
     <div class="dashboard-main">
