@@ -325,15 +325,15 @@ function reviewBadgeMarkup(group) {
 function friendlyPdfReviewReason(reason = "") {
   const text = String(reason || "");
   if (/403|forbidden|not a pdf file|pdf response was not a pdf/i.test(text)) {
-    return "PDF check unavailable. Showing indexed results until the PDF can be reviewed.";
+    return "List check unavailable. Showing found results until the source list can be reviewed.";
   }
   if (/no matching text/i.test(text)) {
-    return "No matching text was verified in the downloaded PDF.";
+    return "No matching text was verified in the downloaded source list.";
   }
   if (/ocr|extractable text/i.test(text)) {
-    return "PDF text could not be extracted automatically. Manual review is needed.";
+    return "Source list text could not be extracted automatically. Manual review is needed.";
   }
-  return "PDF check needs manual review.";
+  return "Source list needs manual review.";
 }
 
 function groupLowestPriceResult(group) {
@@ -402,7 +402,7 @@ function mergeIndexedWithPdf(indexLine, pdfLine) {
     prices: Array.isArray(indexLine.prices) ? indexLine.prices : [],
     pageNumber: pdfLine.pageNumber || indexLine.pageNumber || "",
     pdfVerified: true,
-    source: "PDF verified"
+    source: pdfLine.source || "PDF verified"
   };
 }
 
@@ -413,11 +413,15 @@ function reconciledGroupLines(group) {
     return pdfLines.map((line) => ({ ...line, source: "PDF only", pdfVerified: true }));
   }
   const used = new Set();
-  return indexedLines.map((indexLine) => {
+  const reconciled = indexedLines.map((indexLine) => {
     const match = bestPdfMatch(indexLine, pdfLines, used);
     if (match) used.add(match.index);
     return mergeIndexedWithPdf(indexLine, match?.line);
   });
+  const verifiedExternalExtras = pdfLines
+    .filter((line, index) => !used.has(index) && line.source === "External list verified")
+    .map((line) => ({ ...line, pdfVerified: true }));
+  return [...reconciled, ...verifiedExternalExtras];
 }
 
 function groupedVenues(results) {
@@ -696,12 +700,12 @@ function renderPlaceRow(group) {
 }
 
 function placeLineLabel(group) {
-  const indexedLines = fallbackWineLines(group.results);
+  const foundLines = fallbackWineLines(group.results);
   const verified = reconciledGroupLines(group).filter((line) => line.pdfVerified).length;
-  if (indexedLines.length && verified) return `${indexedLines.length} indexed / ${verified} verified`;
-  if (indexedLines.length) return `${indexedLines.length} indexed lines`;
+  if (foundLines.length && verified) return `${foundLines.length} found / ${verified} verified`;
+  if (foundLines.length) return `${foundLines.length} found`;
   const pdfLines = groupPdfLines(group);
-  if (pdfLines.length) return `${pdfLines.length} PDF-only lines`;
+  if (pdfLines.length) return `${pdfLines.length} source-only found`;
   return "Review";
 }
 
@@ -716,13 +720,13 @@ function renderExpandedPlace(group) {
   const reviewReason = groupPdfReviewReason(group);
   const heldPdfExtras = groupHeldPdfExtras(group);
   const reviewNote = heldPdfExtras
-    ? `<div class="review-note">Showing Star Wine List indexed rows first. ${escapeHtml(String(heldPdfExtras))} PDF-only rows were held for review instead of being added automatically.</div>`
+    ? `<div class="review-note">Showing Star Wine List found rows first. ${escapeHtml(String(heldPdfExtras))} source-only rows were held for review instead of being added automatically.</div>`
     : pdfLines.length
       ? ""
     : groupPdfPending(group)
       ? `<div class="review-note">Reading the current PDF download...</div>`
       : reviewReason
-        ? `<div class="review-note">${escapeHtml(reviewReason)} ${sourceLines.length ? "The rows below are from the Star Wine List search index." : "No priced wine line was found in the downloaded PDF or search index."}</div>`
+        ? `<div class="review-note">${escapeHtml(reviewReason)} ${sourceLines.length ? "The rows below are from the Star Wine List search results." : "No priced wine line was found in the downloaded source list or search results."}</div>`
         : "";
   const lines = sourceLines
     .slice()
