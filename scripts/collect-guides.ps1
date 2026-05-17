@@ -1,6 +1,8 @@
 param(
   [switch]$Quick,
   [switch]$Discover,
+  [switch]$SkipGoogle,
+  [switch]$RefreshWebsites,
   [switch]$NoSnapshot,
   [switch]$Snapshot,
   [int]$MaxSourceItems = 0,
@@ -35,12 +37,15 @@ Push-Location $project
 try {
   if ($Discover) {
     $args = @(
-      ".\scripts\guide_collect.py",
-      "--sources", $Sources,
-      "--max-source-items", "$MaxSourceItems",
-      "--max-targets", "$MaxTargets",
-      "--discover"
+      ".\scripts\guide_discover_wine_lists.py",
+      "--max-targets", "$MaxTargets"
     )
+    if ($SkipGoogle) {
+      $args += "--skip-google"
+    }
+    if ($RefreshWebsites) {
+      $args += "--refresh-websites"
+    }
   } else {
     $args = @(
       ".\scripts\guide_collect_targets.py",
