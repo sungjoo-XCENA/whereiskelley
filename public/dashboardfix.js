@@ -1,6 +1,7 @@
 (function () {
   const state = {
     guide: null,
+    guideProgress: null,
     guideTargets: [],
     guideHits: [],
     watchlist: []
@@ -157,6 +158,38 @@
     }
   }
 
+  function getGroups() {
+    try {
+      return typeof groupedVenues === "function" ? groupedVenues(getResults()) : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  function priceIsValid(result) {
+    try {
+      return typeof hasValidPrice === "function" ? hasValidPrice(result) : Boolean(result?.price);
+    } catch (_error) {
+      return Boolean(result?.price);
+    }
+  }
+
+  function lowestResult(group) {
+    try {
+      return typeof groupLowestPriceResult === "function" ? groupLowestPriceResult(group) : group?.results?.[0];
+    } catch (_error) {
+      return group?.results?.[0];
+    }
+  }
+
+  function reviewReason(group) {
+    try {
+      return typeof groupPdfReviewReason === "function" ? groupPdfReviewReason(group) : "";
+    } catch (_error) {
+      return "";
+    }
+  }
+
   function watchHits(keyword) {
     const needle = String(keyword || "").toLowerCase();
     if (!needle) return [];
@@ -184,16 +217,19 @@
 
   async function loadGuideStats() {
     try {
-      const [status, targets, hits] = await Promise.all([
+      const [status, progress, targets, hits] = await Promise.all([
         fetch("/data/guide-status.json", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
+        fetch("/data/guide-progress.json", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
         fetch("/data/guide-targets.json", { cache: "no-store" }).then((response) => response.ok ? response.json() : []),
         fetch("/data/guide-watch-hits.json", { cache: "no-store" }).then((response) => response.ok ? response.json() : [])
       ]);
       state.guide = status;
+      state.guideProgress = progress;
       state.guideTargets = Array.isArray(targets) ? targets : [];
       state.guideHits = Array.isArray(hits) ? hits : [];
     } catch (_error) {
       state.guide = null;
+      state.guideProgress = null;
       state.guideTargets = [];
       state.guideHits = [];
     }
@@ -252,14 +288,28 @@
   function renderDashboard() {
     const root = ensureDashboardView();
     const guide = state.guide || {};
+    const progress = state.guideProgress || {};
     const guideCounts = guide.counts || {};
     const watchHitCount = state.watchlist.reduce((sum, watch) => sum + watchHits(watch.keyword).length, 0);
     const guideHitCount = state.guideHits.length;
     const guideRun = guide.lastRun || null;
-    const guideStatus = guideRun?.status || (guide ? "ready" : "waiting");
-    const guideDetail = guideRun
+    const progressRunning = progress.status === "running";
+    const guideStatus = progressRunning ? "running" : guideRun?.status || (guide ? "ready" : "waiting");
+    const guideDetail = progressRunning
+      ? `${html(progress.phase || "collecting")} · ${html(progress.message || "Collection is running.")}`
+      : guideRun
       ? `${html(guideRun.sources_requested || "Guides")} checked. ${html(guideCounts.targets || 0)} restaurant targets, ${html(guideCounts.sources || 0)} wine-list sources.`
       : "Michelin, La Liste, and World's 50 Best collector has not exported a guide snapshot yet.";
+    const websiteProgress = progress.totalWebsites
+      ? `${html(progress.websitesChecked || 0)} / ${html(progress.totalWebsites)}`
+      : html(progress.websitesChecked || 0);
+    const progressRows = `<tr><td>Phase</td><td><span class="dash-pill${progressRunning ? " live" : ""}">${html(progress.phase || guideStatus)}</span></td><td>${html(progress.message || "No collection is running right now.")}</td></tr>
+      <tr><td>Current place</td><td colspan="2">${html(progress.currentTarget || "-")}</td></tr>
+      <tr><td>Current URL</td><td colspan="2">${progress.currentUrl ? `<a href="${html(progress.currentUrl)}" target="_blank" rel="noreferrer">${html(progress.currentUrl)}</a>` : "-"}</td></tr>
+      <tr><td>Guide places</td><td colspan="2">${html(progress.targetsCollected || guideCounts.targets || 0)} collected</td></tr>
+      <tr><td>Websites checked</td><td colspan="2">${websiteProgress}</td></tr>
+      <tr><td>Wine lists / lines</td><td colspan="2">${html(progress.wineListsFound || guideCounts.sources || 0)} lists / ${html(progress.wineLinesFound || guideCounts.wineLines || 0)} lines</td></tr>
+      <tr><td>Errors</td><td colspan="2">${html(progress.errors || 0)}</td></tr>`;
     const watchDetail = `${html(state.watchlist.length)} watched keywords. ${html(watchHitCount)} current-search hits / ${html(guideHitCount)} collected-guide hits.`;
     const alertDetail = guideHitCount || watchHitCount
       ? `${html(guideHitCount + watchHitCount)} matches can be reviewed from this dashboard.`
@@ -292,7 +342,7 @@
 
     root.innerHTML = `<div class="dashboard-grid">
       <div class="dashboard-card"><span>Guide collection</span><b>${html(guideStatus)}</b><small>${guideDetail}</small></div>
-      <div class="dashboard-card"><span>Restaurants tracked</span><b>${html(guideCounts.targets || 0)}</b><small>Combined from Michelin, La Liste, and World's 50 Best.</small></div>
+      <div class="dashboard-card"><span>Places tracked</span><b>${html(guideCounts.targets || progress.targetsCollected || 0)}</b><small>Restaurants and wine-list places from Michelin, La Liste, and World's 50 Best.</small></div>
       <div class="dashboard-card"><span>Wine lists found</span><b>${html(guideCounts.sources || 0)}</b><small>${html(guideCounts.wineLines || 0)} collected wine lines.</small></div>
       <div class="dashboard-card"><span>Watchlist hits</span><b>${html(guideHitCount + watchHitCount)}</b><small>${watchDetail}</small></div>
     </div>
@@ -308,10 +358,17 @@
         <div class="watch-items">${watchRows || `<div class="watch-row"><div><b>No keywords yet</b><span>Add one here.</span></div></div>`}</div>
       </section>
       <section class="dash-panel">
-        <p class="dash-kicker">Guide collection</p>
-        <h2>Restaurant targets</h2>
+        <p class="dash-kicker">Live progress</p>
+        <h2>Collection progress</h2>
         <table class="dash-table">
-          <thead><tr><th>Restaurant</th><th>Sources</th><th>Status</th><th>Website</th></tr></thead>
+          <tbody>${progressRows}</tbody>
+        </table>
+      </section>
+      <section class="dash-panel">
+        <p class="dash-kicker">Guide collection</p>
+        <h2>Place targets</h2>
+        <table class="dash-table">
+          <thead><tr><th>Place</th><th>Sources</th><th>Status</th><th>Website</th></tr></thead>
           <tbody>${targetRows || `<tr><td colspan="4">No guide targets collected yet.</td></tr>`}</tbody>
         </table>
       </section>
@@ -361,6 +418,7 @@
     if (results) cleanup.observe(results, { childList: true, subtree: true });
     activate("search");
     loadGuideStats();
+    window.setInterval(loadGuideStats, 5000);
   }
 
   if (document.readyState === "loading") {
