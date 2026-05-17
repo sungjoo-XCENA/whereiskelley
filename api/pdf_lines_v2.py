@@ -122,6 +122,7 @@ def fold_text(value):
 def clean_fragment(value):
     text = re.sub(r"(?<=\d)(?=[^\W\d_])", " ", value or "")
     text = re.sub(r"(?<=[^\W\d_])(?=\d)", " ", text)
+    text = re.sub(r"\b(.{3,80}?)\1\b", r"\1", text, flags=re.I)
     return re.sub(r"\s+", " ", text).strip()
 
 
