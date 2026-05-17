@@ -1,9 +1,38 @@
 (function () {
   const geocodeCache = new Map();
 
-  function hasCoordinates(group) {
-    return Number.isFinite(Number(group.lat)) && Number.isFinite(Number(group.lng));
+  function coordinateValue(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
   }
+
+  function hasCoordinates(group) {
+    return coordinateValue(group.lat) !== null && coordinateValue(group.lng) !== null;
+  }
+
+  groupedVenues = function groupedVenues(results) {
+    const groups = new Map();
+    for (const result of results) {
+      const venue = result.venue || {};
+      const key = venueKey(result);
+      if (!key) continue;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          venue,
+          results: [],
+          lat: coordinateValue(venue.lat),
+          lng: coordinateValue(venue.lng)
+        });
+      }
+      groups.get(key).results.push(result);
+    }
+    for (const group of groups.values()) {
+      group.results = uniqueResults(group.results);
+    }
+    return [...groups.values()].sort((a, b) => String(a.venue?.name || "").localeCompare(String(b.venue?.name || "")));
+  };
 
   function geocodeAddressForGroup(group) {
     const venue = group.venue || {};
@@ -107,7 +136,7 @@
       clearGoogleMarkers();
       const bounds = new maps.LatLngBounds();
       for (const group of mappedVenues) {
-        const position = { lat: Number(group.lat), lng: Number(group.lng) };
+        const position = { lat: coordinateValue(group.lat), lng: coordinateValue(group.lng) };
         bounds.extend(position);
         const marker = new maps.Marker({
           map: googleMap,
