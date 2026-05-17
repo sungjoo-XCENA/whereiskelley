@@ -10,41 +10,41 @@ powershell -ExecutionPolicy Bypass -File .\run-server.ps1
 
 Open `http://localhost:4317`.
 
-## Weekly local collection snapshot
+## Guide collection and watchlist
 
-The production site is designed to work from a snapshot exported by your local PC. Your PC does the heavy collection work, then commits `public/data/*` so Vercel can serve the latest saved DB even after the PC is turned off.
+The collector now follows this flow:
 
-One-command weekly refresh:
+1. Read restaurant candidates from Michelin, La Liste, and World's 50 Best.
+2. Save those restaurants into `db/starwine.sqlite`.
+3. Open each restaurant website when available.
+4. Find candidate wine-list pages or PDFs.
+5. Save parsed wine lines into the DB.
+6. Export a read-only snapshot into `public/data/` so the web search and Dashboard can show it.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\weekly-refresh.ps1
-```
-
-What this command does:
-
-1. Runs the resumable Star Wine List collection sweep.
-2. Saves/updates the local source DB at `db/starwine.sqlite`.
-3. Exports web snapshots into `public/data/`.
-4. If Git is installed, commits and pushes the snapshot to `main`.
-5. Vercel redeploys automatically from GitHub.
-
-Fast test without a full collection:
+Run a small smoke test:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\weekly-refresh.ps1 -Quick -NoPush
+powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Quick -Discover
 ```
 
-Export the current local DB only:
+Run the normal collector:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\weekly-refresh.ps1 -SkipSync
+powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover -MaxSourceItems 1000 -MaxTargets 1000
 ```
 
-The web search merges both sources in one result list:
+Install the weekly Windows task:
 
-- `DB` badge: result came from the exported local DB snapshot.
-- `Live` badge: result came from the live Star Wine List API.
-- `DB + Live` badge: same result was found in both.
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-weekly-task.ps1
+```
+
+The Dashboard shows:
+
+- collection status from the latest guide run
+- restaurants being tracked from the three guide sources
+- wine-list pages or PDFs found from official restaurant websites
+- watchlist hits from saved guide data and from the current search
 
 Watchlist keywords live in:
 
@@ -52,7 +52,14 @@ Watchlist keywords live in:
 public/data/watchlist.json
 ```
 
-Edit that file, then run `weekly-refresh.ps1` again. The generated `public/data/watchlist-hits.json` feeds the Dashboard alert/review area.
+Edit that file, then run `collect-guides.ps1 -Discover` again. The generated `public/data/guide-watch-hits.json` feeds the Dashboard alert area.
+
+The web search merges both sources in one result list:
+
+- `Guide DB`: result came from the collected guide restaurant DB.
+- `DB`: result came from the exported Star Wine snapshot.
+- `Live`: result came from the live Star Wine List API.
+- `DB + Live`: the same result was found in more than one source.
 
 ## Download and index data
 
@@ -140,19 +147,14 @@ The Vercel version merges two sources in the same search results:
 
 The production site does not write to SQLite. The local PC owns collection and parsing, then exports the read-only snapshot into `public/data/` and pushes it to GitHub for Vercel to serve.
 
-Michelin collection is modeled separately:
-
-- `michelin_places`: canonical restaurant/place metadata
-- `michelin_awards`: year-by-year guide status, stars, Bib Gourmand, Green Star, or selected status
-- `michelin_starwine_matches`: candidate or confirmed matches to Star Wine List venues
-- `michelin_sync_runs`: weekly collection run history
-
-External guide collection is also modeled generically so Michelin, The World's 50 Best Restaurants, and La Liste can feed the same matching pipeline:
+External guide collection uses these generic tables:
 
 - `guide_sources`: `michelin`, `worlds50best`, `laliste`
 - `guide_places`: source-specific restaurant metadata and URLs
-- `guide_rankings`: yearly rank, score, distinction, stars, and list metadata
-- `guide_starwine_matches`: candidate or confirmed matches to Star Wine List venues
+- `restaurant_targets`: deduplicated restaurants to check
+- `wine_list_sources`: official restaurant wine-list pages or PDFs found by the collector
+- `guide_wine_entries`: parsed wine rows from those official lists
+- `guide_collection_runs`: collection run history for the Dashboard
 
 Keyword monitoring is stored in:
 
@@ -160,14 +162,14 @@ Keyword monitoring is stored in:
 - `wine_keyword_hits`: detected matches from parsed wine-list entries
 - `notification_events`: pending/sent alert summaries for email, dashboard cards, or webhook delivery
 
-The weekly flow should be:
+The weekly local flow is:
 
 1. Refresh external restaurant guides.
-2. Match guide restaurants to Star Wine List venues by name, city, country, URL, and coordinates.
-3. Refresh wine-list metadata and source PDFs for matched venues.
-4. Parse wine lines, prices, vintage, source status, and review flags.
+2. Deduplicate them into restaurant targets.
+3. Visit official restaurant websites.
+4. Save wine-list HTML/PDF sources when discovered.
 5. Run active keyword watches.
-6. Create dashboard rows and notification events for new matches.
+6. Export `public/data/guide-*.json` and the search snapshot for the web app.
 
 Set this environment variable in Vercel Project Settings:
 
