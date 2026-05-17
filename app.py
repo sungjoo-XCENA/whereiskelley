@@ -19,6 +19,8 @@ GUIDE_PROGRESS_PATH = PUBLIC_DIR / "data" / "guide-progress.json"
 GUIDE_STATUS_PATH = PUBLIC_DIR / "data" / "guide-status.json"
 PORT = 4317
 HOST = os.environ.get("WHEREISKELLEY_HOST", "127.0.0.1")
+API_TOKEN = os.environ.get("WHEREISKELLEY_API_TOKEN", "").strip()
+ALLOWED_ORIGIN = os.environ.get("WHEREISKELLEY_ALLOWED_ORIGIN", "*").strip() or "*"
 SCRIPTS_DIR = ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -65,6 +67,9 @@ def json_response(handler, payload, status=200):
     handler.send_response(status)
     handler.send_header("content-type", "application/json; charset=utf-8")
     handler.send_header("cache-control", "no-store")
+    handler.send_header("access-control-allow-origin", ALLOWED_ORIGIN)
+    handler.send_header("access-control-allow-headers", "content-type, x-whereiskelley-token")
+    handler.send_header("access-control-allow-methods", "GET, OPTIONS")
     handler.send_header("content-length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -74,6 +79,9 @@ def text_response(handler, text, status=200):
     body = text.encode("utf-8")
     handler.send_response(status)
     handler.send_header("content-type", "text/plain; charset=utf-8")
+    handler.send_header("access-control-allow-origin", ALLOWED_ORIGIN)
+    handler.send_header("access-control-allow-headers", "content-type, x-whereiskelley-token")
+    handler.send_header("access-control-allow-methods", "GET, OPTIONS")
     handler.send_header("content-length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -84,6 +92,9 @@ def javascript_response(handler, text, status=200):
     handler.send_response(status)
     handler.send_header("content-type", "application/javascript; charset=utf-8")
     handler.send_header("cache-control", "no-store")
+    handler.send_header("access-control-allow-origin", ALLOWED_ORIGIN)
+    handler.send_header("access-control-allow-headers", "content-type, x-whereiskelley-token")
+    handler.send_header("access-control-allow-methods", "GET, OPTIONS")
     handler.send_header("content-length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -790,27 +801,44 @@ def unparsed(params):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("access-control-allow-origin", ALLOWED_ORIGIN)
+        self.send_header("access-control-allow-headers", "content-type, x-whereiskelley-token")
+        self.send_header("access-control-allow-methods", "GET, OPTIONS")
+        self.end_headers()
+
+    def api_authorized(self, params):
+        if not API_TOKEN:
+            return True
+        header_token = self.headers.get("x-whereiskelley-token", "").strip()
+        query_token = params.get("token", [""])[0].strip()
+        return header_token == API_TOKEN or query_token == API_TOKEN
+
     def do_GET(self):
         parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
         try:
+            if parsed.path.startswith("/api/") and not self.api_authorized(params):
+                return json_response(self, {"error": "Unauthorized"}, status=401)
             if parsed.path == "/api/stats":
                 return json_response(self, stats())
             if parsed.path == "/api/guide-collection":
                 return json_response(self, guide_collection_status())
             if parsed.path == "/api/guide-watch":
-                return json_response(self, guide_watch(parse_qs(parsed.query)))
+                return json_response(self, guide_watch(params))
             if parsed.path == "/api/filters":
                 return json_response(self, filters())
             if parsed.path == "/api/search":
-                return json_response(self, search(parse_qs(parsed.query)))
+                return json_response(self, search(params))
             if parsed.path == "/api/search_v2":
-                return json_response(self, search(parse_qs(parsed.query)))
+                return json_response(self, search(params))
             if parsed.path == "/api/pdf-lines":
-                return json_response(self, pdf_lines(parse_qs(parsed.query)))
+                return json_response(self, pdf_lines(params))
             if parsed.path == "/api/pdf_lines_v2":
-                return json_response(self, pdf_lines(parse_qs(parsed.query)))
+                return json_response(self, pdf_lines(params))
             if parsed.path == "/api/unparsed":
-                return json_response(self, unparsed(parse_qs(parsed.query)))
+                return json_response(self, unparsed(params))
             if parsed.path in ("/config.js", "/api/config"):
                 return javascript_response(self, config_js())
             if parsed.path.startswith("/files/"):

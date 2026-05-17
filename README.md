@@ -24,6 +24,38 @@ powershell -ExecutionPolicy Bypass -File .\run-server.ps1 -Public
 
 The local Dashboard reads live collection state from `/api/guide-collection`, which reads SQLite and `public/data/guide-progress.json` directly. This does not require GitHub or Vercel.
 
+## Use this PC as the deployed dashboard API
+
+When the PC is on, keep the full SQLite DB and downloaded files on the PC. The deployed Vercel app can read this PC through a HTTPS tunnel, so the full DB does not need to be uploaded to Firebase.
+
+1. Set a local API token in `.env.local`:
+
+```text
+WHEREISKELLEY_API_TOKEN=make-a-private-token
+WHEREISKELLEY_ALLOWED_ORIGIN=https://whereiskelley.vercel.app
+```
+
+2. Start the local server:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-server.ps1
+```
+
+3. Start a HTTPS tunnel to the local server:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start-local-tunnel.ps1
+```
+
+4. Add these environment variables in Vercel:
+
+```text
+WHEREISKELLEY_LOCAL_API_BASE=https://your-tunnel-url.trycloudflare.com
+WHEREISKELLEY_LOCAL_API_TOKEN=make-a-private-token
+```
+
+With this setup, the deployed Dashboard reads live progress and watched-wine matches from the local SQLite DB while the PC and tunnel are running.
+
 ## Guide collection and watchlist
 
 The collector now follows this flow:

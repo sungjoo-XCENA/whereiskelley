@@ -4,6 +4,8 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from _local_proxy import proxy_json
+
 
 def json_response(handler, payload, status=200):
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -39,6 +41,11 @@ def fetch_firebase(path):
 
 
 def payload():
+    local_payload = proxy_json("/api/guide-collection")
+    if local_payload is not None:
+        if isinstance(local_payload, dict):
+            local_payload.setdefault("source", "local_api")
+        return local_payload
     progress = fetch_firebase("progress") or {}
     result = fetch_firebase("result") or {}
     status = result.get("guide_status") or result.get("guide-status") or {}
