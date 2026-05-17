@@ -9,26 +9,6 @@ from urllib.request import Request, urlopen
 API_URL = "https://starwinelist.com/api/search"
 LOCATION_API_URL = "https://starwinelist.com/api/location/search"
 LOCATION_CACHE = {}
-COUNTRY_COORDS = {
-    "Argentina": (-38.4161, -63.6167),
-    "Australia": (-25.2744, 133.7751),
-    "Austria": (47.5162, 14.5501),
-    "Belgium": (50.5039, 4.4699),
-    "Czech Republic": (49.8175, 15.4730),
-    "Denmark": (56.2639, 9.5018),
-    "France": (46.2276, 2.2137),
-    "Germany": (51.1657, 10.4515),
-    "Greater China": (35.8617, 104.1954),
-    "Hong Kong": (22.3193, 114.1694),
-    "Italy": (41.8719, 12.5674),
-    "Netherlands": (52.1326, 5.2913),
-    "Norway": (60.4720, 8.4689),
-    "Singapore": (1.3521, 103.8198),
-    "Spain": (40.4637, -3.7492),
-    "Sweden": (60.1282, 18.6435),
-    "UK": (55.3781, -3.4360),
-    "USA": (37.0902, -95.7129),
-}
 CURRENCY_RE = r"\u20ac|\$|\u00a3|\u00a5|\u20a9|CHF|DKK|SEK|NOK|USD|EUR|GBP|CAD|AUD|SGD|HKD|AED|CNY|CZK|ARS|JPY|KRW"
 PRICE_CURRENCY_RE = r"A\$|AU\$|CA\$|HK\$|S\$|US\$|" + CURRENCY_RE
 NO_PRICE_RE = r"\b(?:ask\s+(?:your\s+)?sommelier|ask\s+(?:us|staff)|on\s+request|upon\s+request|price\s+on\s+request|market\s+price|enquire|inquire|poa|n/?a|sold\s+out)\b|\ubb38\uc758|\uc2dc\uac00|\uc2ef\uac00"
@@ -146,8 +126,6 @@ def location_from_result(result, country, city):
     lat = location.get("lat") if location else None
     lng = location.get("lng") if location else None
     star_map_url = ((location or {}).get("urls") or {}).get("map")
-    if lat is None or lng is None:
-        lat, lng = COUNTRY_COORDS.get(country, (None, None))
     return slug, lat, lng, star_map_url or ""
 
 
@@ -393,7 +371,7 @@ def search(params):
         entries += len(lines)
         for line in lines:
             if line.get("item_id"):
-                source_ids.append(str(line.get("item_id")));
+                source_ids.append(str(line.get("item_id")))
             if not passes_filters(line, country, city, vintage):
                 continue
             filtered_lines.append(line)
