@@ -81,7 +81,7 @@ def slugify(value):
 
 def venue_slug_from_url(url):
     try:
-        return urlparse(url).path.rstrip("/").split("/")[-1] or "unknown"
+        return urlparse(url).path.rstrip("/").split("-")[-1] or "unknown"
     except Exception:
         return "unknown"
 
@@ -171,8 +171,8 @@ def normalize_currency(raw, country=""):
 
 def parse_price_number(raw):
     compact = re.sub(r"\s+", "", raw or "")
-    compact = re.sub(r"(?<=\d)[oO](?=[,.])", "", compact)
-    compact = re.sub(r"(?<=[,.])[oO]", "0", compact)
+    compact = re.sub(r"(?<=\d)[oO](?=[,.])", "0", compact)
+    compact = re.sub(r"(?<=[,.])[oO]+", lambda match: "0" * len(match.group(0)), compact)
     compact = re.sub(r"(?<=\d)[oO](?=\d)", "0", compact)
     if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d{2})?", compact):
         return float(compact.replace(",", ""))
