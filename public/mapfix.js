@@ -20,6 +20,26 @@
       .replace(/[åÅ]/g, (char) => char === "Å" ? "A" : "a");
   }
 
+  const CITY_COORDS = {
+    "norway|tromsø": { lat: 69.6492, lng: 18.9553 },
+    "norway|tromso": { lat: 69.6492, lng: 18.9553 }
+  };
+
+  function cityCoordinateFallback(group) {
+    const venue = group.venue || {};
+    const key = `${String(venue.country || "").toLowerCase()}|${String(venue.city || "").toLowerCase()}`;
+    const foldedKey = `${String(venue.country || "").toLowerCase()}|${asciiFold(venue.city).toLowerCase()}`;
+    const coordinates = CITY_COORDS[key] || CITY_COORDS[foldedKey];
+    if (!coordinates) return null;
+    return {
+      ...coordinates,
+      geocoded: true,
+      approximate: true,
+      geocodeQuery: [venue.city, venue.country].filter(Boolean).join(", "),
+      geocodedAddress: [venue.city, venue.country].filter(Boolean).join(", ")
+    };
+  }
+
   groupedVenues = function groupedVenues(results) {
     const groups = new Map();
     for (const result of results) {
@@ -116,6 +136,11 @@
     if (geocodeCache.has(cacheKey)) {
       const cached = geocodeCache.get(cacheKey);
       return Promise.resolve(cached ? { ...group, ...cached } : group);
+    }
+    const cityFallback = cityCoordinateFallback(group);
+    if (cityFallback) {
+      geocodeCache.set(cacheKey, cityFallback);
+      return { ...group, ...cityFallback };
     }
     const geocoder = new maps.Geocoder();
     const restriction = countryRestriction(group.venue?.country);
