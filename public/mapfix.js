@@ -7,28 +7,59 @@
     return Number.isFinite(number) ? number : null;
   }
 
+  function missingCoordinatePair(lat, lng) {
+    const latitude = coordinateValue(lat);
+    const longitude = coordinateValue(lng);
+    if (latitude === null || longitude === null) return true;
+    return latitude === 0 && longitude === 0;
+  }
+
   function hasCoordinates(group) {
-    return coordinateValue(group.lat) !== null && coordinateValue(group.lng) !== null;
+    return !missingCoordinatePair(group.lat, group.lng);
   }
 
   function asciiFold(value) {
     return String(value || "")
       .normalize("NFKD")
       .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[øØ]/g, (char) => char === "Ø" ? "O" : "o")
-      .replace(/[æÆ]/g, (char) => char === "Æ" ? "AE" : "ae")
-      .replace(/[åÅ]/g, (char) => char === "Å" ? "A" : "a");
+      .replace(/[\u00f8\u00d8]/g, (char) => char === "\u00d8" ? "O" : "o")
+      .replace(/[\u00e6\u00c6]/g, (char) => char === "\u00c6" ? "AE" : "ae")
+      .replace(/[\u00e5\u00c5]/g, (char) => char === "\u00c5" ? "A" : "a");
   }
 
   const CITY_COORDS = {
-    "norway|tromsø": { lat: 69.6492, lng: 18.9553 },
+    "norway|troms\u00f8": { lat: 69.6492, lng: 18.9553 },
     "norway|tromso": { lat: 69.6492, lng: 18.9553 }
   };
 
+  const PLACE_COORDS = {
+    "fiskekompaniet|troms\u00f8|norway": { lat: 69.6487, lng: 18.9581 },
+    "fiskekompaniet|tromso|norway": { lat: 69.6487, lng: 18.9581 }
+  };
+
+  function normalizedKey(value) {
+    return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+  }
+
+  function exactPlaceFallback(group) {
+    const venue = group.venue || {};
+    const rawKey = [displayVenueName(venue), venue.city, venue.country].map(normalizedKey).join("|");
+    const foldedKey = [asciiFold(displayVenueName(venue)), asciiFold(venue.city), venue.country].map(normalizedKey).join("|");
+    const coordinates = PLACE_COORDS[rawKey] || PLACE_COORDS[foldedKey];
+    if (!coordinates) return null;
+    return {
+      ...coordinates,
+      geocoded: true,
+      manualFallback: true,
+      geocodeQuery: [displayVenueName(venue), venue.city, venue.country].filter(Boolean).join(", "),
+      geocodedAddress: [displayVenueName(venue), venue.city, venue.country].filter(Boolean).join(", ")
+    };
+  }
+
   function cityCoordinateFallback(group) {
     const venue = group.venue || {};
-    const key = `${String(venue.country || "").toLowerCase()}|${String(venue.city || "").toLowerCase()}`;
-    const foldedKey = `${String(venue.country || "").toLowerCase()}|${asciiFold(venue.city).toLowerCase()}`;
+    const key = `${normalizedKey(venue.country)}|${normalizedKey(venue.city)}`;
+    const foldedKey = `${normalizedKey(venue.country)}|${normalizedKey(asciiFold(venue.city))}`;
     const coordinates = CITY_COORDS[key] || CITY_COORDS[foldedKey];
     if (!coordinates) return null;
     return {
@@ -51,8 +82,8 @@
           key,
           venue,
           results: [],
-          lat: coordinateValue(venue.lat),
-          lng: coordinateValue(venue.lng)
+          lat: missingCoordinatePair(venue.lat, venue.lng) ? null : coordinateValue(venue.lat),
+          lng: missingCoordinatePair(venue.lat, venue.lng) ? null : coordinateValue(venue.lng)
         });
       }
       groups.get(key).results.push(result);
@@ -61,7 +92,7 @@
       group.results = uniqueResults(group.results);
     }
     return [...groups.values()].sort((a, b) => String(a.venue?.name || "").localeCompare(String(b.venue?.name || "")));
-  };
+  }
 
   function geocodeAddressForGroup(group) {
     const venue = group.venue || {};
@@ -137,11 +168,12 @@
       const cached = geocodeCache.get(cacheKey);
       return Promise.resolve(cached ? { ...group, ...cached } : group);
     }
-    const cityFallback = cityCoordinateFallback(group);
-    if (cityFallback) {
-      geocodeCache.set(cacheKey, cityFallback);
-      return { ...group, ...cityFallback };
+    const exactFallback = exactPlaceFallback(group);
+    if (exactFallback) {
+      geocodeCache.set(cacheKey, exactFallback);
+      return { ...group, ...exactFallback };
     }
+    const cityFallback = cityCoordinateFallback(group);
     const geocoder = new maps.Geocoder();
     const restriction = countryRestriction(group.venue?.country);
     const statuses = [];
@@ -167,6 +199,10 @@
         return { ...group, ...coordinates };
       }
       if (status === "REQUEST_DENIED") break;
+    }
+    if (cityFallback) {
+      geocodeCache.set(cacheKey, cityFallback);
+      return { ...group, ...cityFallback, geocodeStatus: statuses.join(" | ") };
     }
     geocodeCache.set(cacheKey, null);
     return { ...group, geocodeFailed: true, geocodeStatus: statuses.join(" | ") };
@@ -207,8 +243,9 @@
       const totalLines = mappedVenues.reduce((sum, group) => sum + group.results.length, 0);
       const geocodedCount = mappedVenues.filter((group) => group.geocoded).length;
       const approximateCount = mappedVenues.filter((group) => group.approximate).length;
+      const fallbackCount = mappedVenues.filter((group) => group.manualFallback).length;
       mapSummaryEl.textContent = mappedVenues.length
-        ? `${mappedVenues.length} places on map / ${totalLines} matching wines${geocodedCount ? `, ${geocodedCount} found by Google` : ""}${approximateCount ? `, ${approximateCount} city-level` : ""}${failedCount ? `, ${failedCount} not located` : ""}`
+        ? `${mappedVenues.length} places on map / ${totalLines} matching wines${geocodedCount ? `, ${geocodedCount} located` : ""}${fallbackCount ? `, ${fallbackCount} matched by place hint` : ""}${approximateCount ? `, ${approximateCount} city-level` : ""}${failedCount ? `, ${failedCount} not located` : ""}`
         : "No mapped places yet";
       if (!mappedVenues.length) {
         clearGoogleMarkers();
