@@ -170,11 +170,19 @@ def write_progress(**payload):
         "currentTarget": "",
         "currentUrl": "",
         "targetsCollected": 0,
+        "processedTargets": 0,
         "websitesChecked": 0,
         "totalWebsites": 0,
         "wineListsFound": 0,
         "wineLinesFound": 0,
         "errors": 0,
+        "startedAt": "",
+        "finishedAt": "",
+        "elapsedSeconds": None,
+        "estimatedRemainingSeconds": None,
+        "estimatedFinishAt": "",
+        "durationSeconds": None,
+        "progressPercent": 0,
     }
     current.update(payload)
     (PUBLIC_DATA_DIR / "guide-progress.json").write_text(

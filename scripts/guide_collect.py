@@ -23,7 +23,13 @@ PUBLIC_DATA_DIR = ROOT / "public" / "data"
 GUIDE_SOURCES = {
     "laliste": {
         "name": "La Liste",
-        "urls": ["https://www.laliste.com/lists/top-1000-restaurants"],
+        "urls": [
+            "https://www.laliste.com/lists/top-1000-restaurants",
+            *[
+                f"https://www.laliste.com/lists/top-1000-restaurants?2dbc56ae_page={page}"
+                for page in range(2, 16)
+            ],
+        ],
     },
     "worlds50best": {
         "name": "World's 50 Best",
@@ -116,11 +122,19 @@ def write_progress(**payload):
         "currentTarget": "",
         "currentUrl": "",
         "targetsCollected": 0,
+        "processedTargets": 0,
         "websitesChecked": 0,
         "totalWebsites": 0,
         "wineListsFound": 0,
         "wineLinesFound": 0,
         "errors": 0,
+        "startedAt": "",
+        "finishedAt": "",
+        "elapsedSeconds": None,
+        "estimatedRemainingSeconds": None,
+        "estimatedFinishAt": "",
+        "durationSeconds": None,
+        "progressPercent": 0,
     }
     current.update(payload)
     (PUBLIC_DATA_DIR / "guide-progress.json").write_text(
@@ -631,7 +645,7 @@ def scan_wine_source(con, target, url, watches):
         return 0, 0, str(exc)
 
 
-def collect_sources(con, sources, max_source_items, run_id):
+def collect_sources(con, sources, max_source_items, run_id, resolve_websites=False):
     collected = 0
     for code in sources:
         source = GUIDE_SOURCES[code]
@@ -670,7 +684,7 @@ def collect_sources(con, sources, max_source_items, run_id):
                     targetsCollected=collected,
                     message="Saving guide place candidates.",
                 )
-                if not place.get("website_url"):
+                if resolve_websites and not place.get("website_url"):
                     place["website_url"] = discover_website_from_place_page(place.get("place_url", ""))
                 upsert_guide_place(con, code, url, place)
                 upsert_target(con, place, code)
@@ -682,15 +696,16 @@ def collect_sources(con, sources, max_source_items, run_id):
 
 def discover_targets(con, max_targets, run_id, target_count):
     watches = load_watchlist()
-    rows = con.execute(
-        """
+    query = """
         select * from restaurant_targets
         where website_url is not null and website_url != ''
         order by priority desc, last_checked_at is not null, name
-        limit ?
-        """,
-        (max_targets,),
-    ).fetchall()
+    """
+    params = ()
+    if max_targets and max_targets > 0:
+        query += " limit ?"
+        params = (max_targets,)
+    rows = con.execute(query, params).fetchall()
     websites = 0
     sources_found = 0
     lines_found = 0
@@ -802,6 +817,18 @@ def export_status(con, run_id):
         "review": con.execute("select count(*) from restaurant_targets where status in ('review','error')").fetchone()[0],
         "found": con.execute("select count(*) from restaurant_targets where status = 'found'").fetchone()[0],
     }
+    source_counts = [
+        dict(row)
+        for row in con.execute(
+            """
+            select s.code, s.name, count(p.id) as places
+            from guide_sources s
+            left join guide_places p on p.source_id = s.id
+            group by s.id, s.code, s.name
+            order by s.code
+            """
+        )
+    ]
     run = con.execute("select * from guide_collection_runs where id=?", (run_id,)).fetchone()
     targets = [
         dict(row)
@@ -810,7 +837,7 @@ def export_status(con, run_id):
             select name, city, country, website_url, sources_json, source_count, priority, status, last_checked_at, last_error
             from restaurant_targets
             order by priority desc, name
-            limit 300
+            limit 120
             """
         )
     ]
@@ -827,7 +854,11 @@ def export_status(con, run_id):
         )
     ]
     (PUBLIC_DATA_DIR / "guide-status.json").write_text(
-        json.dumps({"generatedAt": now_sql(), "counts": counts, "lastRun": dict(run) if run else None}, ensure_ascii=False, separators=(",", ":")) + "\n",
+        json.dumps(
+            {"generatedAt": now_sql(), "counts": counts, "sourceCounts": source_counts, "lastRun": dict(run) if run else None},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ) + "\n",
         encoding="utf-8",
     )
     (PUBLIC_DATA_DIR / "guide-targets.json").write_text(json.dumps(targets, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
@@ -837,10 +868,11 @@ def export_status(con, run_id):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sources", default="michelin,laliste,worlds50best")
-    parser.add_argument("--max-source-items", type=int, default=200)
-    parser.add_argument("--max-targets", type=int, default=100)
+    parser.add_argument("--max-source-items", type=int, default=0, help="Per source URL. 0 means all.")
+    parser.add_argument("--max-targets", type=int, default=0, help="Official websites to check. 0 means all.")
     parser.add_argument("--discover", action="store_true", help="Check target websites for wine lists.")
     parser.add_argument("--no-discover", action="store_true")
+    parser.add_argument("--resolve-websites", action="store_true", help="Try to resolve official websites while reading guide sources.")
     args = parser.parse_args()
 
     init_db()
@@ -860,7 +892,7 @@ def main():
             message="Starting guide collection.",
         )
         try:
-            target_count = collect_sources(con, sources, args.max_source_items, run_id)
+            target_count = collect_sources(con, sources, args.max_source_items, run_id, args.resolve_websites)
             websites_checked = wine_lists_found = wine_lines_found = 0
             if args.discover and not args.no_discover:
                 websites_checked, wine_lists_found, wine_lines_found, errors = discover_targets(con, args.max_targets, run_id, target_count)
