@@ -17,6 +17,7 @@ PRICE_TOKEN_RE = re.compile(
     rf"(?:{PRICE_CURRENCY_RE})?\s*(?:\d{{1,3}}(?:[,\s.]\d{{3}})+|\d{{2,6}}[oO]\s*[,\.]\s*[oO0]{{2}}|\d{{2,6}}(?:\s*[,\.]\s*[oO0]{{2}})?)(?!\d)",
     re.I,
 )
+VINTAGE_RE = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
 
 
 def json_response(handler, payload, status=200):
@@ -60,8 +61,16 @@ def fold_text(value):
 
 
 def clean_fragment(value):
-    text = re.sub(r"(?<=\d)(?=[A-Z][a-z])", " ", value or "")
+    text = re.sub(r"(?<=\d)(?=[^\W\d_])", " ", value or "")
+    text = re.sub(r"(?<=[^\W\d_])(?=\d)", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def display_fragment(value, raw_price="", price_text=""):
+    fragment = clean_fragment(value)
+    if raw_price and price_text:
+        fragment = re.sub(rf"{re.escape(raw_price.strip())}\s*$", price_text, fragment)
+    return fragment
 
 
 def query_tokens(query):
@@ -101,7 +110,7 @@ def query_remainder_letters(raw, tokens):
 def section_header_limit(raw, tokens):
     if not line_has_tokens(raw, tokens):
         return 0
-    if PRICE_TOKEN_RE.search(raw) or re.search(r"\b(?:NV|MV|N/V|19\d{2}|20\d{2})\b", raw, re.I):
+    if PRICE_TOKEN_RE.search(raw) or re.search(r"\b(?:NV|MV|N/V)\b", raw, re.I) or VINTAGE_RE.search(raw):
         return 0
     remainder = query_remainder_letters(raw, tokens)
     return 30 if len(remainder) >= 4 else 1
@@ -117,7 +126,7 @@ def is_probable_wine_row(line, has_price=False):
 
 
 def is_section_price_row(line):
-    return re.search(r"\b(?:NV|MV|N/V|19\d{2}|20\d{2})\b", line, re.I) and PRICE_TOKEN_RE.search(line)
+    return (re.search(r"\b(?:NV|MV|N/V)\b", line, re.I) or VINTAGE_RE.search(line)) and PRICE_TOKEN_RE.search(line)
 
 
 def is_likely_section_break(line):
@@ -135,11 +144,11 @@ def is_likely_section_break(line):
 
 
 def vintage_near(raw, position, fragment):
-    fragment_match = re.search(r"\b(19|20)\d{2}\b", fragment or "")
+    fragment_match = VINTAGE_RE.search(fragment or "")
     if fragment_match:
         return fragment_match.group(0)
     window = raw[max(0, position - 120) : min(len(raw), position + 260)]
-    window_match = re.search(r"\b(19|20)\d{2}\b", window)
+    window_match = VINTAGE_RE.search(window)
     return window_match.group(0) if window_match else None
 
 
@@ -154,7 +163,7 @@ def section_row_price(raw, country):
 def section_fragment(header, raw, country):
     if not is_section_price_row(raw):
         return None
-    fragment = clean_fragment(f"{header}, {raw}")
+    fragment = display_fragment(f"{header}, {raw}")
     price_text, price_value, currency = section_row_price(raw, country)
     if price_value is None:
         price_text, price_value, currency = parse_price(raw, country, require_edge=True)
@@ -162,6 +171,7 @@ def section_fragment(header, raw, country):
         price_text, price_value, currency = parse_price(fragment, country, require_edge=False)
     if price_value is None:
         return None
+    fragment = display_fragment(f"{header}, {raw}", price_text and re.search(PRICE_TOKEN_RE, raw or "").group(0), price_text)
     vintage = vintage_near(raw, 0, raw) or vintage_near(fragment, 0, fragment)
     return fragment, price_text, price_value, currency, vintage
 
@@ -177,7 +187,7 @@ def matched_fragments(raw, query, country):
             fragment = raw[position : match.end()]
             price_text, price_value, currency = parse_price(fragment, country, require_edge=True)
             if price_value is not None:
-                fragments.append((clean_fragment(fragment), price_text, price_value, currency, vintage_near(raw, position, fragment)))
+                fragments.append((display_fragment(fragment, match.group(0), price_text), price_text, price_value, currency, vintage_near(raw, position, fragment)))
                 break
         else:
             before_start = max(0, position - 90)
@@ -186,12 +196,12 @@ def matched_fragments(raw, query, country):
                 fragment = raw[match.start() : min(len(raw), position + 220)]
                 price_text, price_value, currency = parse_price(fragment, country, require_edge=False)
                 if price_value is not None:
-                    fragments.append((clean_fragment(fragment), price_text, price_value, currency, vintage_near(raw, position, fragment)))
+                    fragments.append((display_fragment(fragment, match.group(0), price_text), price_text, price_value, currency, vintage_near(raw, position, fragment)))
                     break
             else:
                 fragment = raw[max(0, position - 40) : min(len(raw), position + 220)]
                 price_text, price_value, currency = parse_price(fragment, country, require_edge=True)
-                fragments.append((clean_fragment(fragment), price_text, price_value, currency, vintage_near(raw, position, fragment)))
+                fragments.append((display_fragment(fragment), price_text, price_value, currency, vintage_near(raw, position, fragment)))
     unique = []
     seen = set()
     for fragment in fragments:
@@ -232,7 +242,7 @@ def match_lines(text, query, country, limit=200):
         for fragment_index, (fragment, price_text, price_value, currency, nearby_vintage) in enumerate(matched_fragments(raw, query, country)):
             if not is_probable_wine_row(fragment, price_value is not None):
                 continue
-            vintage_match = re.search(r"\b(19|20)\d{2}\b", fragment)
+            vintage_match = VINTAGE_RE.search(fragment)
             matches.append(
                 {
                     "id": f"pdf-{index}-{fragment_index}",
