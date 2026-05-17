@@ -20,10 +20,28 @@
   `;
   document.head.appendChild(style);
 
+  function googleMapsSearchUrl(name, place) {
+    const query = [name, place].filter(Boolean).join(", ");
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  }
+
+  function expandedPlaceParts(link) {
+    const expanded = link.closest(".expanded-place");
+    const name = expanded?.querySelector(".expanded-head b")?.textContent.trim() || "";
+    const place = expanded?.querySelector(".expanded-head span")?.textContent.trim() || "";
+    return { name, place };
+  }
+
   function tagMapLinks(root = document) {
     root.querySelectorAll(".actions.compact a").forEach((link) => {
-      if (link.textContent.trim().toLowerCase() === "map") {
+      const label = link.textContent.trim().toLowerCase();
+      if (label === "map") {
+        const { name, place } = expandedPlaceParts(link);
+        if (name || place) link.href = googleMapsSearchUrl(name, place);
         link.classList.add("map-link");
+      }
+      if (label === "star wine list page") {
+        link.textContent = "Star Wine";
       }
     });
   }
