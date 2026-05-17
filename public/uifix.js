@@ -312,9 +312,34 @@
   };
 
   const viewState = {
-    current: localStorage.getItem("whereiskelley.activeView") || "dashboard",
-    watchlist: []
+    current: "search",
+    watchlist: [],
+    dbStats: null,
+    dbStatus: "checking"
   };
+
+  async function fetchOptionalJson(path) {
+    try {
+      const response = await fetch(path, { cache: "no-store" });
+      if (!response.ok) throw new Error(await response.text());
+      return await response.json();
+    } catch (error) {
+      return { error: error.message || "Unavailable" };
+    }
+  }
+
+  async function loadDbOverview() {
+    viewState.dbStatus = "checking";
+    const stats = await fetchOptionalJson("/api/stats");
+    if (stats && !stats.error) {
+      viewState.dbStats = stats;
+      viewState.dbStatus = "connected";
+    } else {
+      viewState.dbStats = null;
+      viewState.dbStatus = "missing";
+    }
+    refreshAppViews();
+  }
 
   function loadWatchlist() {
     try {
@@ -365,6 +390,16 @@
     const root = document.querySelector("#dashboardView");
     if (!root) return;
     const stats = dashboardStats();
+    const db = viewState.dbStats || {};
+    const dbLabel = viewState.dbStatus === "connected" ? "SQLite connected" : "Cloud DB not connected";
+    const lastRun = db.lastRun || null;
+    const lastRunText = lastRun?.finished_at || lastRun?.started_at || "";
+    const lastRunNote = lastRun
+      ? `${escapeHtml(lastRunText || "Unknown time")} / downloaded ${escapeHtml(String(lastRun.downloaded || 0))} / parsed ${escapeHtml(String(lastRun.parsed_entries || 0))} / errors ${escapeHtml(String(lastRun.errors || 0))}`
+      : "No local collection run recorded yet.";
+    const dbDetail = viewState.dbStatus === "connected"
+      ? `${escapeHtml(String(db.venueCount || 0))} places / ${escapeHtml(String(db.entryCount || 0))} stored wine lines`
+      : "Live search works now. Persistent Supabase/Firebase storage is the next connection step.";
     const watchItems = viewState.watchlist.map((watch) => {
       const hits = watchedHitsFor(watch.keyword);
       return `<div class="mini-item">
@@ -373,8 +408,8 @@
       </div>`;
     }).join("");
     root.innerHTML = `<div class="dashboard-grid">
+      <div class="dashboard-card"><span>Database</span><b>${escapeHtml(viewState.dbStatus === "connected" ? String(db.entryCount || 0) : "--")}</b><small>${dbLabel}. ${dbDetail}</small></div>
       <div class="dashboard-card"><span>Live places</span><b>${escapeHtml(String(stats.places))}</b><small>From the current Star Wine search result set.</small></div>
-      <div class="dashboard-card"><span>Wine lines</span><b>${escapeHtml(String(stats.lines))}</b><small>Search-index and verified PDF lines.</small></div>
       <div class="dashboard-card"><span>Countries</span><b>${escapeHtml(String(stats.countries))}</b><small>Mapped from city/country metadata.</small></div>
       <div class="dashboard-card"><span>Review</span><b>${escapeHtml(String(stats.reviews))}</b><small>Places needing price/PDF/manual checks.</small></div>
     </div>
@@ -385,14 +420,14 @@
         <div class="mini-list">${watchItems || `<div class="mini-item"><div><b>No keywords yet</b><span>Add one from the Watchlist tab.</span></div></div>`}</div>
       </section>
       <section class="guide-panel panel-pad">
-        <p class="panel-kicker">Database plan</p>
-        <h2>Guide collection</h2>
+        <p class="panel-kicker">Collection status</p>
+        <h2>DB collection</h2>
         <table class="guide-table">
           <tbody>
-            <tr><th>Source</th><th>Status</th><th>Role</th></tr>
-            <tr><td>La Liste</td><td><span class="status-pill">Schema ready</span></td><td>Top 1000 restaurant candidates</td></tr>
-            <tr><td>World's 50 Best</td><td><span class="status-pill">Schema ready</span></td><td>Annual rank and place candidates</td></tr>
-            <tr><td>Michelin</td><td><span class="status-pill">Schema ready</span></td><td>Stars, Bib, selected, Green Star</td></tr>
+            <tr><th>Item</th><th>Status</th><th>Detail</th></tr>
+            <tr><td>Local SQLite</td><td><span class="status-pill${viewState.dbStatus === "connected" ? " live" : ""}">${escapeHtml(dbLabel)}</span></td><td>${dbDetail}</td></tr>
+            <tr><td>Last collection run</td><td><span class="status-pill">${lastRun ? "Recorded" : "Not running"}</span></td><td>${lastRunNote}</td></tr>
+            <tr><td>Production DB</td><td><span class="status-pill review">Not connected</span></td><td>Vercel live search is working, but weekly persistent collection still needs Supabase/Firebase/Postgres wiring.</td></tr>
           </tbody>
         </table>
       </section>
@@ -421,72 +456,10 @@
     </section>`;
   }
 
-  function guideBadgeForVenue(venue = {}) {
-    const name = String(venue.name || "").toLowerCase();
-    if (/noma|geranium|maido|disfrutar|central|alchemist|asador|piazza duomo|mirazur|odette/.test(name)) {
-      return "Guide candidate";
-    }
-    return "Live only";
-  }
-
-  function renderPlacesPanel() {
-    const root = document.querySelector("#placesView");
-    if (!root) return;
-    const groups = groupedVenues(latestResults || []);
-    const rows = groups.slice(0, 80).map((group) => {
-      const venue = group.venue || {};
-      return `<tr>
-        <td><b>${escapeHtml(displayVenueName(venue))}</b><br><span class="mini-label">${escapeHtml(venue.type || "Place")}</span></td>
-        <td>${escapeHtml(venue.city || "")}</td>
-        <td>${escapeHtml(venue.country || "")}</td>
-        <td><span class="status-pill">${escapeHtml(guideBadgeForVenue(venue))}</span></td>
-        <td>${escapeHtml(placeLineLabel(group))}</td>
-        <td>${krwPriceMarkup(groupLowestPriceResult(group))}</td>
-      </tr>`;
-    }).join("");
-    root.innerHTML = `<section class="guide-panel panel-pad">
-      <p class="panel-kicker">Places</p>
-      <h2>Guide and live places</h2>
-      <table class="guide-table">
-        <thead><tr><th>Place</th><th>City</th><th>Country</th><th>Guide</th><th>Wine list</th><th>Lowest KRW</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6">Run a search to see live places here. Persistent guide DB rows will appear here after collection is connected.</td></tr>`}</tbody>
-      </table>
-    </section>`;
-  }
-
-  function renderReviewPanel() {
-    const root = document.querySelector("#reviewView");
-    if (!root) return;
-    const groups = groupedVenues(latestResults || []).filter((group) => {
-      const lowest = groupLowestPriceResult(group);
-      return !hasValidPrice(lowest) || groupPdfReviewReason(group);
-    });
-    const rows = groups.map((group) => {
-      const venue = group.venue || {};
-      const reason = groupPdfReviewReason(group) || "Price or source needs review";
-      return `<tr>
-        <td><b>${escapeHtml(displayVenueName(venue))}</b></td>
-        <td>${escapeHtml([venue.city, venue.country].filter(Boolean).join(", "))}</td>
-        <td><span class="status-pill review">${escapeHtml(reason)}</span></td>
-        <td>${escapeHtml(placeLineLabel(group))}</td>
-      </tr>`;
-    }).join("");
-    root.innerHTML = `<section class="review-panel panel-pad">
-      <p class="panel-kicker">Review</p>
-      <h2>Needs review</h2>
-      <table class="guide-table">
-        <thead><tr><th>Place</th><th>Location</th><th>Reason</th><th>Lines</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="4">No review items in the current live search.</td></tr>`}</tbody>
-      </table>
-    </section>`;
-  }
-
   function refreshAppViews() {
     ensureSearchSourceStrip();
     renderDashboardPanel();
     renderWatchlistPanel();
-    renderPlacesPanel();
-    renderReviewPanel();
   }
 
   function ensureSearchSourceStrip() {
@@ -501,8 +474,12 @@
       heading.insertAdjacentElement("afterend", strip);
     }
     const liveCount = latestResults?.length || 0;
+    const dbStats = viewState.dbStats;
+    const dbLabel = viewState.dbStatus === "connected"
+      ? `DB stored ${escapeHtml(String(dbStats?.entryCount || 0))} lines`
+      : "DB storage ready / cloud DB not connected";
     strip.innerHTML = `
-      <span class="status-pill">DB ready / not connected</span>
+      <span class="status-pill">${dbLabel}</span>
       <span class="status-pill live">Star Wine live ${escapeHtml(String(liveCount))} lines</span>
       <span class="status-pill">Guide DB schema ready</span>
     `;
@@ -510,7 +487,6 @@
 
   function setActiveView(view) {
     viewState.current = view;
-    localStorage.setItem("whereiskelley.activeView", view);
     document.querySelectorAll(".view-tab").forEach((tab) => {
       tab.classList.toggle("active", tab.dataset.view === view);
     });
@@ -518,11 +494,10 @@
       panel.classList.toggle("active", panel.dataset.viewPanel === view);
     });
     const showSearch = view === "search";
-    const showMap = view === "map";
-    document.querySelector(".command-bar")?.classList.toggle("hidden", !(showSearch || showMap));
-    document.querySelector(".workspace")?.classList.toggle("hidden", !(showSearch || showMap));
-    document.querySelector(".map-panel")?.classList.toggle("hidden", !showMap);
-    if (showMap) renderMap(latestResults || []);
+    document.querySelector(".command-bar")?.classList.toggle("hidden", !showSearch);
+    document.querySelector(".workspace")?.classList.toggle("hidden", !showSearch);
+    document.querySelector(".map-panel")?.classList.toggle("hidden", !showSearch);
+    if (showSearch) renderMap(latestResults || []);
   }
 
   function setupAppShellViews() {
@@ -532,20 +507,15 @@
     const nav = document.createElement("nav");
     nav.className = "view-tabs";
     nav.innerHTML = [
-      ["dashboard", "Dashboard"],
       ["search", "Search"],
-      ["watchlist", "Watchlist"],
-      ["places", "Places"],
-      ["review", "Review"],
-      ["map", "Map"]
+      ["dashboard", "Dashboard"],
+      ["watchlist", "Watchlist"]
     ].map(([key, label]) => `<button class="view-tab" type="button" data-view="${key}">${label}</button>`).join("");
     header.insertAdjacentElement("afterend", nav);
     const commandBar = document.querySelector(".command-bar");
     commandBar.insertAdjacentHTML("beforebegin", `
       <section id="dashboardView" class="app-view" data-view-panel="dashboard"></section>
       <section id="watchlistView" class="app-view" data-view-panel="watchlist"></section>
-      <section id="placesView" class="app-view" data-view-panel="places"></section>
-      <section id="reviewView" class="app-view" data-view-panel="review"></section>
     `);
     nav.addEventListener("click", (event) => {
       const button = event.target.closest("[data-view]");
@@ -576,6 +546,7 @@
     };
     refreshAppViews();
     setActiveView(viewState.current);
+    loadDbOverview();
   }
 
   setupAppShellViews();
