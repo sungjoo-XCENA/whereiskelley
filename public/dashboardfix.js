@@ -158,38 +158,6 @@
     }
   }
 
-  function getGroups() {
-    try {
-      return typeof groupedVenues === "function" ? groupedVenues(getResults()) : [];
-    } catch (_error) {
-      return [];
-    }
-  }
-
-  function priceIsValid(result) {
-    try {
-      return typeof hasValidPrice === "function" ? hasValidPrice(result) : Boolean(result?.price);
-    } catch (_error) {
-      return Boolean(result?.price);
-    }
-  }
-
-  function lowestResult(group) {
-    try {
-      return typeof groupLowestPriceResult === "function" ? groupLowestPriceResult(group) : group?.results?.[0];
-    } catch (_error) {
-      return group?.results?.[0];
-    }
-  }
-
-  function reviewReason(group) {
-    try {
-      return typeof groupPdfReviewReason === "function" ? groupPdfReviewReason(group) : "";
-    } catch (_error) {
-      return "";
-    }
-  }
-
   function watchHits(keyword) {
     const needle = String(keyword || "").toLowerCase();
     if (!needle) return [];
@@ -321,6 +289,7 @@
     const guide = state.guide || {};
     const progress = state.guideProgress || {};
     const guideCounts = guide.counts || {};
+    const sourceCounts = Array.isArray(guide.sourceCounts) ? guide.sourceCounts : [];
     const watchHitCount = state.watchlist.reduce((sum, watch) => sum + watchHits(watch.keyword).length, 0);
     const guideHitCount = state.guideHits.length;
     const guideRun = guide.lastRun || null;
@@ -334,10 +303,14 @@
     const websiteProgress = progress.totalWebsites
       ? `${html(progress.websitesChecked || 0)} / ${html(progress.totalWebsites)}`
       : html(progress.websitesChecked || 0);
+    const sourceBreakdown = sourceCounts.length
+      ? sourceCounts.map((source) => `${html(source.code)} ${html(source.places || 0)}`).join(" / ")
+      : "-";
     const progressRows = `<tr><td>Phase</td><td><span class="dash-pill${progressRunning ? " live" : ""}">${html(progress.phase || guideStatus)}</span></td><td>${html(progress.message || "No collection is running right now.")}</td></tr>
       <tr><td>Current place</td><td colspan="2">${html(progress.currentTarget || "-")}</td></tr>
       <tr><td>Current URL</td><td colspan="2">${progress.currentUrl ? `<a href="${html(progress.currentUrl)}" target="_blank" rel="noreferrer">${html(progress.currentUrl)}</a>` : "-"}</td></tr>
       <tr><td>Guide places</td><td colspan="2">${html(progress.targetsCollected || guideCounts.targets || 0)} collected</td></tr>
+      <tr><td>Sources</td><td colspan="2">${sourceBreakdown}</td></tr>
       <tr><td>Websites checked</td><td colspan="2">${websiteProgress}</td></tr>
       <tr><td>Wine lists / lines</td><td colspan="2">${html(progress.wineListsFound || guideCounts.sources || 0)} lists / ${html(progress.wineLinesFound || guideCounts.wineLines || 0)} lines</td></tr>
       <tr><td>Errors</td><td colspan="2">${html(progress.errors || 0)}</td></tr>`;
