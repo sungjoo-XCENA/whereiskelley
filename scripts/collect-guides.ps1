@@ -16,8 +16,16 @@ if (-not (Test-Path $python)) {
 }
 
 if ($Quick) {
-  $MaxSourceItems = [Math]::Min($MaxSourceItems, 5)
-  $MaxTargets = [Math]::Min($MaxTargets, 5)
+  if ($MaxSourceItems -le 0) {
+    $MaxSourceItems = 5
+  } else {
+    $MaxSourceItems = [Math]::Min($MaxSourceItems, 5)
+  }
+  if ($MaxTargets -le 0) {
+    $MaxTargets = 5
+  } else {
+    $MaxTargets = [Math]::Min($MaxTargets, 5)
+  }
   if (-not $Snapshot) {
     $NoSnapshot = $true
   }
