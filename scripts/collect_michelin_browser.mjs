@@ -51,6 +51,7 @@ const context = await chromium.launchPersistentContext(profileDir, {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
 });
 const page = await context.newPage();
+const detailPage = await context.newPage();
 
 function pageUrl(pageNumber) {
   return startUrl.replace(/\/page\/\d+\/?$/, `/page/${pageNumber}`);
@@ -80,6 +81,79 @@ async function writeProgress(payload) {
   );
 }
 
+async function readMichelinDetail(card) {
+  if (!card.place_url) return card;
+  try {
+    await detailPage.goto(card.place_url, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await detailPage.waitForTimeout(700);
+    const detail = await detailPage.evaluate(() => {
+      function clean(value) {
+        return String(value || "").replace(/\s+/g, " ").trim();
+      }
+      function fromJsonLd() {
+        for (const node of document.querySelectorAll('script[type="application/ld+json"]')) {
+          try {
+            const payload = JSON.parse(node.textContent || "{}");
+            const items = Array.isArray(payload) ? payload : [payload];
+            for (const item of items) {
+              const type = Array.isArray(item["@type"]) ? item["@type"].join(" ") : String(item["@type"] || "");
+              if (!/Restaurant|LocalBusiness|FoodEstablishment/i.test(type)) continue;
+              const address = item.address || {};
+              if (typeof address === "string") return { address: clean(address) };
+              const parts = [
+                address.streetAddress,
+                address.addressLocality,
+                address.addressRegion,
+                address.postalCode,
+                address.addressCountry,
+              ].filter(Boolean);
+              const geo = item.geo || {};
+              return {
+                address: clean(parts.join(", ")),
+                city: clean(address.addressLocality || ""),
+                country: clean(address.addressCountry || ""),
+                lat: geo.latitude || null,
+                lng: geo.longitude || null,
+              };
+            }
+          } catch {}
+        }
+        return {};
+      }
+      const json = fromJsonLd();
+      const selectors = [
+        ".restaurant-details__heading--address",
+        ".restaurant-details__heading .restaurant-details__heading--address",
+        "[data-testid='restaurant-address']",
+        "[itemprop='streetAddress']",
+        ".data-sheet__block--text",
+      ];
+      const selected = selectors
+        .map((selector) => clean(document.querySelector(selector)?.textContent))
+        .find(Boolean);
+      const text = clean(document.body.innerText || "");
+      const addressLine = selected || json.address || "";
+      return {
+        ...json,
+        address: addressLine,
+        detail_title: clean(document.querySelector("h1")?.textContent),
+        body_hint: text.slice(0, 300),
+      };
+    });
+    return {
+      ...card,
+      address: detail.address || card.address || "",
+      city: detail.city || card.city || "",
+      country: detail.country || card.country || "",
+      lat: detail.lat || card.lat || null,
+      lng: detail.lng || card.lng || null,
+      detail_title: detail.detail_title || "",
+    };
+  } catch (error) {
+    return { ...card, detail_error: error.message };
+  }
+}
+
 try {
   const places = [];
   const pages = [];
@@ -89,12 +163,12 @@ try {
     await writeProgress({ url, targetsCollected: places.length });
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForTimeout(1800);
-    await page.getByText("?숈쓽 ?놁씠 怨꾩냽?섍린", { exact: false }).click({ timeout: 2000 }).catch(() => {});
+    await page.getByText("동의 없이 계속하기", { exact: false }).click({ timeout: 2000 }).catch(() => {});
     await page.waitForTimeout(500);
     const result = await page.evaluate(() => {
       const bodyText = document.body.innerText || "";
-      const rangeMatch = bodyText.match(/([\d,]+)\s*-\s*([\d,]+)\s*媛?s*以?s*([\d,]+)\s*?덉뒪?좊옉/);
-      const totalMatch = bodyText.match(/([\d,]+)\s*?덉뒪?좊옉/);
+      const rangeMatch = bodyText.match(/([\d,]+)\s*-\s*([\d,]+)\s*개\s*중\s*([\d,]+)\s*레스토랑/);
+      const totalMatch = bodyText.match(/([\d,]+)\s*레스토랑/);
       const total = rangeMatch
         ? Number(rangeMatch[3].replace(/,/g, ""))
         : totalMatch
@@ -115,7 +189,7 @@ try {
         const name = (title.textContent || text[0] || "").trim();
         if (!name || name.length > 120) continue;
         const locationLine = text.find((line) => line.includes(",")) || "";
-        const priceCuisine = text.find((line) => /[??짜?㈑?+|쨌/.test(line)) || "";
+        const priceCuisine = text.find((line) => /[€$¥₩£]+|·/.test(line)) || "";
         const [city = "", country = ""] = locationLine.split(",").map((value) => value.trim());
         const stars = card.querySelectorAll("img.michelin-award").length || null;
         cards.push({
@@ -136,7 +210,8 @@ try {
     pages.push({ page: pageNumber, url, count: result.count });
     if (!result.cards.length) break;
     for (const card of result.cards) {
-      places.push({ ...card, rank: places.length + 1 });
+      await writeProgress({ url: card.place_url || url, targetsCollected: places.length });
+      places.push({ ...(await readMichelinDetail(card)), rank: places.length + 1 });
     }
     if (reportedTotal && places.length >= reportedTotal) break;
   }

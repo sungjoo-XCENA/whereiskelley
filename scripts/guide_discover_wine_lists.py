@@ -76,46 +76,80 @@ def name_score(left, right):
 
 
 def google_query(target):
-    return " ".join(
-        str(target.get(key) or "").strip()
-        for key in ["name", "city", "country", "address"]
-        if str(target.get(key) or "").strip()
-    )
+    name = str(target.get("name") or "").strip()
+    address = str(target.get("address") or "").strip()
+    city = str(target.get("city") or "").strip()
+    country = str(target.get("country") or "").strip()
+    if address and address.lower() not in {city.lower(), f"{city}, {country}".lower()}:
+        return " ".join(part for part in [name, address, city, country] if part)
+    return " ".join(part for part in [name, "restaurant", city, country] if part)
+
+
+def google_candidates(target):
+    name = str(target.get("name") or "").strip()
+    address = str(target.get("address") or "").strip()
+    city = str(target.get("city") or "").strip()
+    country = str(target.get("country") or "").strip()
+    queries = [google_query(target)]
+    if address:
+        queries.append(" ".join(part for part in [name, address] if part))
+    queries.append(" ".join(part for part in [name, "restaurant", city, country] if part))
+    queries.append(" ".join(part for part in [name, "Michelin restaurant", city, country] if part))
+    seen = set()
+    return [query for query in queries if query and not (query in seen or seen.add(query))]
+
+
+def is_food_place(candidate):
+    types = set(candidate.get("types") or [])
+    if candidate.get("business_status"):
+        return True
+    food_types = {"restaurant", "food", "bar", "cafe", "meal_takeaway", "meal_delivery", "lodging"}
+    return bool(types & food_types)
 
 
 def resolve_google_place(target, api_key):
     if not api_key:
         return {"error": "Google Places API key is not configured on this PC."}
 
-    payload = http_json(
-        GOOGLE_FIND_URL,
-        {
-            "input": google_query(target),
-            "inputtype": "textquery",
-            "fields": "place_id,name,formatted_address,geometry,business_status",
-            "key": api_key,
-        },
-    )
-    status = payload.get("status")
-    if status == "ZERO_RESULTS":
-        return {"error": "Google Places returned no result."}
-    if status != "OK":
-        return {"error": f"Google Places {status}: {payload.get('error_message') or 'request failed'}"}
+    last_error = "Google Places returned no result."
+    candidate = None
+    score = 0
+    for query in google_candidates(target):
+        payload = http_json(
+            GOOGLE_FIND_URL,
+            {
+                "input": query,
+                "inputtype": "textquery",
+                "fields": "place_id,name,formatted_address,geometry,business_status,types",
+                "key": api_key,
+            },
+        )
+        status = payload.get("status")
+        if status == "ZERO_RESULTS":
+            last_error = "Google Places returned no result."
+            continue
+        if status != "OK":
+            return {"error": f"Google Places {status}: {payload.get('error_message') or 'request failed'}"}
 
-    candidates = payload.get("candidates") or []
-    if not candidates:
-        return {"error": "Google Places returned no candidate."}
-    candidates.sort(key=lambda item: name_score(target.get("name", ""), item.get("name", "")), reverse=True)
-    candidate = candidates[0]
-    score = name_score(target.get("name", ""), candidate.get("name", ""))
-    if score < 0.55:
-        return {"error": f"Google Places candidate looked different: {candidate.get('name')}"}
+        candidates = [item for item in payload.get("candidates") or [] if is_food_place(item)]
+        if not candidates:
+            last_error = "Google Places found candidates, but none looked like a restaurant."
+            continue
+        candidates.sort(key=lambda item: name_score(target.get("name", ""), item.get("name", "")), reverse=True)
+        candidate = candidates[0]
+        score = name_score(target.get("name", ""), candidate.get("name", ""))
+        if score >= 0.55:
+            break
+        last_error = f"Google Places candidate looked different: {candidate.get('name')}"
+        candidate = None
+    if not candidate:
+        return {"error": last_error}
 
     details = http_json(
         GOOGLE_DETAILS_URL,
         {
             "place_id": candidate["place_id"],
-            "fields": "name,formatted_address,geometry,website,url,business_status",
+            "fields": "name,formatted_address,geometry,website,url,business_status,types",
             "key": api_key,
         },
     )

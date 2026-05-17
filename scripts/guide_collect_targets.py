@@ -148,6 +148,8 @@ def collect_michelin_browser_places(max_source_items, run_id):
             "city": clean_text(item.get("city")),
             "country": clean_text(item.get("country")),
             "address": clean_text(item.get("address")),
+            "lat": item.get("lat"),
+            "lng": item.get("lng"),
             "place_url": clean_text(item.get("place_url")),
             "website_url": "",
             "rank": item.get("rank"),
@@ -364,15 +366,17 @@ def upsert_place(con, source_code, source_url, place):
         """
         insert into guide_places(
           source_id, source_key, name, normalized_name, country, city, address,
-          place_url, website_url, last_seen_at
+          lat, lng, place_url, website_url, last_seen_at
         )
-        values(?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
+        values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
         on conflict(source_id, source_key) do update set
           name=excluded.name,
           normalized_name=excluded.normalized_name,
           country=coalesce(nullif(excluded.country, ''), guide_places.country),
           city=coalesce(nullif(excluded.city, ''), guide_places.city),
           address=coalesce(nullif(excluded.address, ''), guide_places.address),
+          lat=coalesce(excluded.lat, guide_places.lat),
+          lng=coalesce(excluded.lng, guide_places.lng),
           place_url=coalesce(nullif(excluded.place_url, ''), guide_places.place_url),
           website_url=coalesce(nullif(excluded.website_url, ''), guide_places.website_url),
           last_seen_at=current_timestamp
@@ -386,6 +390,8 @@ def upsert_place(con, source_code, source_url, place):
             place.get("country", ""),
             place.get("city", ""),
             place.get("address", ""),
+            place.get("lat"),
+            place.get("lng"),
             place.get("place_url") or source_url,
             place.get("website_url", ""),
         ),
@@ -428,10 +434,46 @@ def upsert_target(con, source_code, place):
         """
         insert into restaurant_targets(
           normalized_key, name, normalized_name, country, city, address,
-          website_url, sources_json, source_count, priority, last_seen_at
+          lat, lng, website_url, sources_json, source_count, priority, last_seen_at
         )
-        values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
+        values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
         on conflict(normalized_key) do update set
+          country=coalesce(nullif(excluded.country, ''), restaurant_targets.country),
+          city=coalesce(nullif(excluded.city, ''), restaurant_targets.city),
+          address=coalesce(nullif(excluded.address, ''), restaurant_targets.address),
+          website_url=coalesce(nullif(excluded.website_url, ''), restaurant_targets.website_url),
+          lat=case
+            when excluded.lat is not null then excluded.lat
+            when nullif(excluded.address, '') is not null
+             and coalesce(restaurant_targets.address, '') != excluded.address
+            then null
+            else restaurant_targets.lat
+          end,
+          lng=case
+            when excluded.lng is not null then excluded.lng
+            when nullif(excluded.address, '') is not null
+             and coalesce(restaurant_targets.address, '') != excluded.address
+            then null
+            else restaurant_targets.lng
+          end,
+          status=case
+            when nullif(excluded.address, '') is not null
+             and coalesce(restaurant_targets.address, '') != excluded.address
+            then 'not_checked'
+            else restaurant_targets.status
+          end,
+          last_checked_at=case
+            when nullif(excluded.address, '') is not null
+             and coalesce(restaurant_targets.address, '') != excluded.address
+            then null
+            else restaurant_targets.last_checked_at
+          end,
+          last_error=case
+            when nullif(excluded.address, '') is not null
+             and coalesce(restaurant_targets.address, '') != excluded.address
+            then null
+            else restaurant_targets.last_error
+          end,
           sources_json=excluded.sources_json,
           source_count=excluded.source_count,
           priority=excluded.priority,
@@ -444,6 +486,8 @@ def upsert_target(con, source_code, place):
             place.get("country", ""),
             place.get("city", ""),
             place.get("address", ""),
+            place.get("lat"),
+            place.get("lng"),
             place.get("website_url", ""),
             json.dumps(sources),
             len(sources),

@@ -7,7 +7,10 @@
     dashboardMarkers: new Map(),
     dashboardMapHasFit: false,
     dashboardMapPromise: null,
-    activeTargetId: null
+    activeTargetId: null,
+    guideLoadInFlight: false,
+    localGuideSeen: false,
+    lastLocalGuidePayload: null
   };
 
   const css = document.createElement("style");
@@ -313,7 +316,13 @@
     const local = await fetchJson("http://localhost:4317/api/guide-collection", null);
     if (!isEmptyGuidePayload(local)) {
       local.source = "browser_localhost";
+      state.localGuideSeen = true;
+      state.lastLocalGuidePayload = local;
       return local;
+    }
+    if (state.localGuideSeen && state.lastLocalGuidePayload) {
+      state.lastLocalGuidePayload.source = "browser_localhost_stale";
+      return state.lastLocalGuidePayload;
     }
     const proxied = await fetchJson("/api/guide-collection", null);
     if (!isEmptyGuidePayload(proxied)) return proxied;
@@ -729,8 +738,16 @@
   }
 
   async function loadGuideStats() {
-    state.guidePayload = await fetchLiveGuideCollection();
-    renderDashboard();
+    if (state.guideLoadInFlight) return;
+    state.guideLoadInFlight = true;
+    try {
+      const payload = await fetchLiveGuideCollection();
+      if (isEmptyGuidePayload(payload) && state.guidePayload) return;
+      state.guidePayload = payload;
+      renderDashboard();
+    } finally {
+      state.guideLoadInFlight = false;
+    }
   }
 
   function boot() {
