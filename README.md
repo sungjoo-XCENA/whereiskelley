@@ -35,7 +35,7 @@ Run the guide master-list collector:
 powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1
 ```
 
-For guide collection, `MaxSourceItems=0` and `MaxTargets=0` mean no artificial limit.
+Use this as the yearly restaurant-candidate refresh. The guide restaurant list changes slowly, so it is meant to be run only when Michelin, La Liste, or World's 50 Best publish a meaningful update. For guide collection, `MaxSourceItems=0` and `MaxTargets=0` mean no artificial limit.
 
 Run the website/wine-list discovery stage separately:
 
@@ -43,7 +43,25 @@ Run the website/wine-list discovery stage separately:
 powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover
 ```
 
-The first command builds the restaurant target list from Michelin, La Liste, and World's 50 Best. The second command checks official restaurant websites for wine-list pages or PDFs.
+Use this as the weekly wine-list refresh. It reuses the saved restaurant candidates, resolves missing official websites through Google Places, then checks those official restaurant websites for wine-list pages or PDFs.
+
+Local discovery needs a Google key with `Places API` enabled because the weekly job needs official restaurant websites, not just map pins:
+
+```powershell
+$env:GOOGLE_MAPS_API_KEY="your_google_maps_key"
+powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover
+```
+
+You can also save the key in `.env.local`:
+
+```text
+GOOGLE_MAPS_API_KEY=your_google_maps_key
+```
+
+The annual candidate refresh and the weekly wine-list refresh are intentionally separate:
+
+- annual: `collect-guides.ps1` refreshes Michelin, La Liste, and World's 50 Best restaurant candidates.
+- weekly: `collect-guides.ps1 -Discover` uses the saved candidates, finds/updates official websites, scans wine-list HTML/PDF sources, and updates watchlist hits.
 
 Current collection is intentionally target-first:
 
@@ -157,8 +175,8 @@ Keyword monitoring is stored in:
 
 The weekly local flow is:
 
-1. Refresh external restaurant guides.
-2. Deduplicate them into restaurant targets.
+1. Reuse saved guide restaurant targets.
+2. Resolve missing official websites with Google Places.
 3. Visit official restaurant websites.
 4. Save wine-list HTML/PDF sources when discovered.
 5. Run active keyword watches.
