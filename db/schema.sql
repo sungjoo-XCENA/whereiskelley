@@ -222,6 +222,76 @@ create table if not exists guide_starwine_matches (
   unique(guide_place_id, venue_id)
 );
 
+create table if not exists guide_collection_runs (
+  id integer primary key,
+  started_at text not null default current_timestamp,
+  finished_at text,
+  status text not null default 'running',
+  sources_requested text,
+  target_count integer not null default 0,
+  websites_checked integer not null default 0,
+  wine_lists_found integer not null default 0,
+  wine_lines_found integer not null default 0,
+  watch_hits integer not null default 0,
+  errors integer not null default 0,
+  notes text
+);
+
+create table if not exists restaurant_targets (
+  id integer primary key,
+  normalized_key text not null unique,
+  name text not null,
+  normalized_name text,
+  country text,
+  city text,
+  address text,
+  lat real,
+  lng real,
+  website_url text,
+  sources_json text,
+  source_count integer not null default 1,
+  priority integer not null default 1,
+  status text not null default 'not_checked',
+  last_checked_at text,
+  last_error text,
+  first_seen_at text not null default current_timestamp,
+  last_seen_at text not null default current_timestamp
+);
+
+create table if not exists wine_list_sources (
+  id integer primary key,
+  target_id integer not null references restaurant_targets(id) on delete cascade,
+  url text not null,
+  source_type text not null default 'html',
+  status text not null default 'candidate',
+  content_path text,
+  text_path text,
+  checksum text,
+  discovered_at text not null default current_timestamp,
+  last_checked_at text,
+  parser_status text,
+  line_count integer not null default 0,
+  last_error text,
+  unique(target_id, url)
+);
+
+create table if not exists guide_wine_entries (
+  id integer primary key,
+  target_id integer not null references restaurant_targets(id) on delete cascade,
+  wine_list_source_id integer references wine_list_sources(id) on delete set null,
+  raw_text text not null,
+  vintage text,
+  price_text text,
+  price_value real,
+  currency text,
+  source_url text,
+  source_type text,
+  status text not null default 'parsed',
+  first_seen_at text not null default current_timestamp,
+  last_seen_at text not null default current_timestamp,
+  unique(target_id, source_url, raw_text)
+);
+
 create table if not exists wine_keyword_watches (
   id integer primary key,
   keyword text not null,
@@ -284,6 +354,10 @@ create unique index if not exists idx_guide_rankings_unique on guide_rankings(
 );
 create index if not exists idx_guide_matches_place on guide_starwine_matches(guide_place_id);
 create index if not exists idx_guide_matches_venue on guide_starwine_matches(venue_id);
+create index if not exists idx_restaurant_targets_status on restaurant_targets(status, priority);
+create index if not exists idx_restaurant_targets_country_city on restaurant_targets(country, city);
+create index if not exists idx_wine_list_sources_target on wine_list_sources(target_id, status);
+create index if not exists idx_guide_wine_entries_target on guide_wine_entries(target_id);
 create unique index if not exists idx_wine_keyword_watches_unique on wine_keyword_watches(
   normalized_keyword,
   coalesce(vintage, ''),
