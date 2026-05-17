@@ -91,6 +91,22 @@ def line_has_tokens(raw, tokens):
     return bool(tokens) and all(token in folded for token in tokens)
 
 
+def query_remainder_letters(raw, tokens):
+    folded = fold_text(raw)
+    for token in tokens:
+        folded = folded.replace(token, " ")
+    return re.sub(r"[^a-z0-9]", "", folded)
+
+
+def section_header_limit(raw, tokens):
+    if not line_has_tokens(raw, tokens):
+        return 0
+    if PRICE_TOKEN_RE.search(raw) or re.search(r"\b(?:NV|MV|N/V|19\d{2}|20\d{2})\b", raw, re.I):
+        return 0
+    remainder = query_remainder_letters(raw, tokens)
+    return 30 if len(remainder) >= 4 else 1
+
+
 def is_probable_wine_row(line, has_price=False):
     text = line.strip()
     return (
@@ -192,6 +208,7 @@ def match_lines(text, query, country, limit=200):
     active_header = ""
     active_remaining = 0
     section_hits = 0
+    active_max_hits = 0
     for index, raw in enumerate(line.strip() for line in (text or "").splitlines()):
         if not raw:
             if active_header:
@@ -199,11 +216,19 @@ def match_lines(text, query, country, limit=200):
                 if active_remaining <= 0:
                     active_header = ""
                     section_hits = 0
+                    active_max_hits = 0
             continue
-        if line_has_tokens(raw, tokens):
+        header_limit = section_header_limit(raw, tokens)
+        if header_limit:
             active_header = clean_fragment(raw)
-            active_remaining = 80
+            active_remaining = 30
             section_hits = 0
+            active_max_hits = header_limit
+        elif line_has_tokens(raw, tokens):
+            active_header = ""
+            active_remaining = 0
+            section_hits = 0
+            active_max_hits = 0
         for fragment_index, (fragment, price_text, price_value, currency, nearby_vintage) in enumerate(matched_fragments(raw, query, country)):
             if not is_probable_wine_row(fragment, price_value is not None):
                 continue
@@ -239,16 +264,24 @@ def match_lines(text, query, country, limit=200):
                     }
                 )
                 section_hits += 1
-                active_remaining = 80
+                if active_max_hits and section_hits >= active_max_hits:
+                    active_header = ""
+                    active_remaining = 0
+                    section_hits = 0
+                    active_max_hits = 0
+                else:
+                    active_remaining = 30
             elif section_hits and is_likely_section_break(raw):
                 active_header = ""
                 active_remaining = 0
                 section_hits = 0
+                active_max_hits = 0
             else:
                 active_remaining -= 1
                 if active_remaining <= 0:
                     active_header = ""
                     section_hits = 0
+                    active_max_hits = 0
         if len(matches) >= limit:
             break
     unique = []
