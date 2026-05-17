@@ -1,7 +1,8 @@
 (function () {
   const state = {
-    db: null,
-    dbStatus: "checking",
+    guide: null,
+    guideTargets: [],
+    guideHits: [],
     watchlist: []
   };
 
@@ -156,38 +157,6 @@
     }
   }
 
-  function getGroups() {
-    try {
-      return typeof groupedVenues === "function" ? groupedVenues(getResults()) : [];
-    } catch (_error) {
-      return [];
-    }
-  }
-
-  function priceIsValid(result) {
-    try {
-      return typeof hasValidPrice === "function" ? hasValidPrice(result) : Boolean(result?.price);
-    } catch (_error) {
-      return Boolean(result?.price);
-    }
-  }
-
-  function lowestResult(group) {
-    try {
-      return typeof groupLowestPriceResult === "function" ? groupLowestPriceResult(group) : group?.results?.[0];
-    } catch (_error) {
-      return group?.results?.[0];
-    }
-  }
-
-  function reviewReason(group) {
-    try {
-      return typeof groupPdfReviewReason === "function" ? groupPdfReviewReason(group) : "";
-    } catch (_error) {
-      return "";
-    }
-  }
-
   function watchHits(keyword) {
     const needle = String(keyword || "").toLowerCase();
     if (!needle) return [];
@@ -213,31 +182,22 @@
     localStorage.setItem("whereiskelley.watchlist", JSON.stringify(state.watchlist));
   }
 
-  async function loadDbStats() {
-    state.dbStatus = "checking";
-    renderDashboard();
+  async function loadGuideStats() {
     try {
-      const response = await fetch("/api/stats", { cache: "no-store" });
-      if (!response.ok) throw new Error(await response.text());
-      state.db = await response.json();
-      state.dbStatus = "connected";
+      const [status, targets, hits] = await Promise.all([
+        fetch("/data/guide-status.json", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
+        fetch("/data/guide-targets.json", { cache: "no-store" }).then((response) => response.ok ? response.json() : []),
+        fetch("/data/guide-watch-hits.json", { cache: "no-store" }).then((response) => response.ok ? response.json() : [])
+      ]);
+      state.guide = status;
+      state.guideTargets = Array.isArray(targets) ? targets : [];
+      state.guideHits = Array.isArray(hits) ? hits : [];
     } catch (_error) {
-      state.db = null;
-      state.dbStatus = "missing";
+      state.guide = null;
+      state.guideTargets = [];
+      state.guideHits = [];
     }
     renderDashboard();
-  }
-
-  function dashboardStats() {
-    const groups = getGroups();
-    const reviewGroups = groups.filter((group) => !priceIsValid(lowestResult(group)) || reviewReason(group));
-    const countries = new Set(groups.map((group) => group.venue?.country).filter(Boolean));
-    return {
-      places: groups.length,
-      lines: getResults().length,
-      countries: countries.size,
-      reviews: reviewGroups.length
-    };
   }
 
   function ensureDashboardView() {
@@ -291,26 +251,19 @@
 
   function renderDashboard() {
     const root = ensureDashboardView();
-    const stats = dashboardStats();
-    const db = state.db || {};
-    const dbConnected = state.dbStatus === "connected";
+    const guide = state.guide || {};
+    const guideCounts = guide.counts || {};
     const watchHitCount = state.watchlist.reduce((sum, watch) => sum + watchHits(watch.keyword).length, 0);
-    const lastRun = db.lastRun || null;
-    const lastRunText = lastRun?.finished_at || lastRun?.started_at || "";
-    const running = Boolean(lastRun?.started_at && !lastRun?.finished_at);
-    const collectionStatus = running ? "Running" : lastRun ? "Completed" : dbConnected ? "Ready" : "Waiting";
-    const collectionDetail = running
-      ? "A background collection is running now."
-      : lastRun
-        ? `Last checked ${html(lastRunText || "unknown time")}. Saved ${html(lastRun.parsed_entries || 0)} wine lines with ${html(lastRun.errors || 0)} issues.`
-        : "No background collection has run yet.";
-    const savedDetail = dbConnected
-      ? `${html(db.venueCount || 0)} places / ${html(db.wineListCount || 0)} wine lists / ${html(db.entryCount || 0)} wine lines`
-      : "No saved collection is available yet.";
-    const watchDetail = `${html(state.watchlist.length)} watched keywords. ${html(watchHitCount)} matches are visible in the current search.`;
-    const alertDetail = watchHitCount
-      ? `${html(watchHitCount)} current matches can be reviewed from this dashboard.`
-      : "New matches will appear here after a search or after a scheduled collection runs.";
+    const guideHitCount = state.guideHits.length;
+    const guideRun = guide.lastRun || null;
+    const guideStatus = guideRun?.status || (guide ? "ready" : "waiting");
+    const guideDetail = guideRun
+      ? `${html(guideRun.sources_requested || "Guides")} checked. ${html(guideCounts.targets || 0)} restaurant targets, ${html(guideCounts.sources || 0)} wine-list sources.`
+      : "Michelin, La Liste, and World's 50 Best collector has not exported a guide snapshot yet.";
+    const watchDetail = `${html(state.watchlist.length)} watched keywords. ${html(watchHitCount)} current-search hits / ${html(guideHitCount)} collected-guide hits.`;
+    const alertDetail = guideHitCount || watchHitCount
+      ? `${html(guideHitCount + watchHitCount)} matches can be reviewed from this dashboard.`
+      : "New matches will appear here after a search or after a scheduled guide collection runs.";
     const watchRows = state.watchlist.map((watch, index) => {
       const hits = watchHits(watch.keyword);
       return `<div class="watch-row">
@@ -320,11 +273,28 @@
       </div>`;
     }).join("");
 
+    const targetRows = state.guideTargets.slice(0, 12).map((target) => {
+      let sources = [];
+      try { sources = JSON.parse(target.sources_json || "[]"); } catch (_error) {}
+      return `<tr>
+        <td><b>${html(target.name)}</b><br><span>${html([target.city, target.country].filter(Boolean).join(", "))}</span></td>
+        <td>${sources.map((source) => `<span class="dash-pill">${html(source)}</span>`).join(" ") || "-"}</td>
+        <td><span class="dash-pill${target.status === "found" ? " live" : target.status === "review" || target.status === "error" ? " review" : ""}">${html(target.status || "not_checked")}</span></td>
+        <td>${target.website_url ? `<a href="${html(target.website_url)}" target="_blank" rel="noreferrer">Website</a>` : "<span class=\"dash-pill review\">Missing</span>"}</td>
+      </tr>`;
+    }).join("");
+    const hitRows = state.guideHits.slice(0, 10).map((hit) => `<tr>
+      <td>${html(hit.raw_text)}</td>
+      <td>${html(hit.vintage || "")}</td>
+      <td>${html([hit.currency, hit.price_text || hit.price_value || ""].filter(Boolean).join(" "))}</td>
+      <td>${html([hit.name, hit.city, hit.country].filter(Boolean).join(", "))}</td>
+    </tr>`).join("");
+
     root.innerHTML = `<div class="dashboard-grid">
-      <div class="dashboard-card"><span>Collection</span><b>${html(collectionStatus)}</b><small>${collectionDetail}</small></div>
-      <div class="dashboard-card"><span>Saved wines</span><b>${dbConnected ? html(db.entryCount || 0) : "--"}</b><small>${savedDetail}</small></div>
-      <div class="dashboard-card"><span>Watchlist hits</span><b>${html(watchHitCount)}</b><small>${watchDetail}</small></div>
-      <div class="dashboard-card"><span>Needs review</span><b>${html(stats.reviews)}</b><small>Places needing price, PDF, or manual checks from the current search.</small></div>
+      <div class="dashboard-card"><span>Guide collection</span><b>${html(guideStatus)}</b><small>${guideDetail}</small></div>
+      <div class="dashboard-card"><span>Restaurants tracked</span><b>${html(guideCounts.targets || 0)}</b><small>Combined from Michelin, La Liste, and World's 50 Best.</small></div>
+      <div class="dashboard-card"><span>Wine lists found</span><b>${html(guideCounts.sources || 0)}</b><small>${html(guideCounts.wineLines || 0)} collected wine lines.</small></div>
+      <div class="dashboard-card"><span>Watchlist hits</span><b>${html(guideHitCount + watchHitCount)}</b><small>${watchDetail}</small></div>
     </div>
     <div class="dashboard-main">
       <section class="dash-panel">
@@ -338,17 +308,19 @@
         <div class="watch-items">${watchRows || `<div class="watch-row"><div><b>No keywords yet</b><span>Add one here.</span></div></div>`}</div>
       </section>
       <section class="dash-panel">
-        <p class="dash-kicker">Collection status</p>
-        <h2>Background collection</h2>
+        <p class="dash-kicker">Guide collection</p>
+        <h2>Restaurant targets</h2>
         <table class="dash-table">
-          <tbody>
-            <tr><th>Item</th><th>Status</th><th>Detail</th></tr>
-            <tr><td>Collector</td><td><span class="dash-pill${running || lastRun ? " live" : ""}">${html(collectionStatus)}</span></td><td>${collectionDetail}</td></tr>
-            <tr><td>Saved results</td><td><span class="dash-pill${dbConnected ? " live" : ""}">${dbConnected ? "Available" : "Waiting"}</span></td><td>${savedDetail}</td></tr>
-            <tr><td>Watchlist scan</td><td><span class="dash-pill${watchHitCount ? " live" : ""}">${watchHitCount ? "Matches found" : "Watching"}</span></td><td>${watchDetail}</td></tr>
-            <tr><td>Alerts</td><td><span class="dash-pill${watchHitCount ? " review" : ""}">${watchHitCount ? "Review" : "Waiting"}</span></td><td>${alertDetail}</td></tr>
-            <tr><td>Guide lists</td><td><span class="dash-pill">Planned</span></td><td>Michelin, World's 50 Best, and La Liste collection will feed this same dashboard once the scheduled collector is connected.</td></tr>
-          </tbody>
+          <thead><tr><th>Restaurant</th><th>Sources</th><th>Status</th><th>Website</th></tr></thead>
+          <tbody>${targetRows || `<tr><td colspan="4">No guide targets collected yet.</td></tr>`}</tbody>
+        </table>
+      </section>
+      <section class="dash-panel">
+        <p class="dash-kicker">Alerts</p>
+        <h2>Collected watch hits</h2>
+        <table class="dash-table">
+          <thead><tr><th>Wine line</th><th>Vintage</th><th>Price</th><th>Restaurant</th></tr></thead>
+          <tbody>${hitRows || `<tr><td colspan="4">${alertDetail}</td></tr>`}</tbody>
         </table>
       </section>
     </div>`;
@@ -388,7 +360,7 @@
     const results = document.querySelector("#results");
     if (results) cleanup.observe(results, { childList: true, subtree: true });
     activate("search");
-    loadDbStats();
+    loadGuideStats();
   }
 
   if (document.readyState === "loading") {
