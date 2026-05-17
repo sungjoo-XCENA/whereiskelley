@@ -5,6 +5,7 @@
     dashboardMapEl: null,
     dashboardInfoWindow: null,
     dashboardMarkers: new Map(),
+    dashboardMapHasFit: false,
     dashboardMapPromise: null,
     activeTargetId: null
   };
@@ -488,12 +489,14 @@
     return `<strong>${html(target.name || "Unknown")}</strong><br>${html(location || "Unknown location")}<br>${html(statusLabel(target.status))}${wineList}${website}`;
   }
 
-  async function renderDashboardMap(payload) {
+  async function renderDashboardMap(payload, options = {}) {
     const mapEl = document.querySelector("#dashboardDbMap");
     const fallbackEl = document.querySelector("#dashboardMapFallback");
     if (!mapEl || !fallbackEl) return;
     const targets = visibleMapTargets(payload);
     if (!targets.length) {
+      for (const marker of state.dashboardMarkers.values()) marker.setMap(null);
+      state.dashboardMarkers.clear();
       fallbackEl.classList.remove("hidden");
       fallbackEl.innerHTML = `<b>No mapped restaurants yet</b><span>Coordinates will appear as the collector resolves restaurants.</span>`;
       return;
@@ -521,24 +524,43 @@
           ]
         });
         state.dashboardInfoWindow = new maps.InfoWindow();
+        state.dashboardMapHasFit = false;
       }
-      for (const marker of state.dashboardMarkers.values()) marker.setMap(null);
-      state.dashboardMarkers.clear();
+      const visibleTargets = targets.slice(0, 2500);
+      const visibleIds = new Set(visibleTargets.map((target) => String(target.id)));
+      for (const [id, marker] of state.dashboardMarkers.entries()) {
+        if (!visibleIds.has(id)) {
+          marker.setMap(null);
+          state.dashboardMarkers.delete(id);
+        }
+      }
       const bounds = new maps.LatLngBounds();
-      targets.slice(0, 2500).forEach((target) => {
+      visibleTargets.forEach((target) => {
         const position = { lat: target.lat, lng: target.lng };
         bounds.extend(position);
-      const marker = new maps.Marker({
+        const id = String(target.id);
+        const icon = markerIcon(maps, markerColor(targetKind(target)));
+        const existing = state.dashboardMarkers.get(id);
+        if (existing) {
+          existing.setPosition(position);
+          existing.setTitle(target.name || "Restaurant");
+          existing.setIcon(icon);
+          return;
+        }
+        const marker = new maps.Marker({
           map: state.dashboardMap,
           position,
           title: target.name || "Restaurant",
-          icon: markerIcon(maps, markerColor(targetKind(target)))
+          icon
         });
         marker.addListener("click", () => selectDashboardTarget(target.id));
-        state.dashboardMarkers.set(String(target.id), marker);
+        state.dashboardMarkers.set(id, marker);
       });
-      state.dashboardMap.fitBounds(bounds, 56);
-      if (targets.length === 1) state.dashboardMap.setZoom(12);
+      if (!state.dashboardMapHasFit || options.fit) {
+        state.dashboardMap.fitBounds(bounds, 56);
+        if (targets.length === 1) state.dashboardMap.setZoom(12);
+        state.dashboardMapHasFit = true;
+      }
       if (state.activeTargetId) selectDashboardTarget(state.activeTargetId, false);
     } catch (error) {
       fallbackEl.classList.remove("hidden");
@@ -546,7 +568,7 @@
     }
   }
 
-  function selectDashboardTarget(id) {
+  function selectDashboardTarget(id, shouldScroll = true) {
     state.activeTargetId = String(id || "");
     const payload = state.guidePayload || {};
     const target = (payload.mapTargets || []).find((item) => String(item.id) === state.activeTargetId);
@@ -559,7 +581,9 @@
       state.dashboardInfoWindow?.open({ map: state.dashboardMap, anchor: marker });
     }
     renderSelectedTarget(payload);
-    document.querySelector("#selectedRestaurant")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (shouldScroll) {
+      document.querySelector("#selectedRestaurant")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }
 
   function selectedTargetMarkup(payload) {
@@ -615,14 +639,14 @@
       ? `${formatDuration(progress.estimatedRemainingSeconds)}${progress.estimatedFinishAt ? ` / ${formatTime(progress.estimatedFinishAt)}` : ""}`
       : formatDuration(values.duration);
 
-    root.innerHTML = `<div class="dashboard-grid">
+    const cardsHtml = `<div class="dashboard-grid" data-dashboard-section="cards">
       <div class="dashboard-card"><span>Collection</span><b>${html(values.status)}</b><small>${values.running ? "The local PC collector is running now." : "No background collection is running right now."}</small></div>
       <div class="dashboard-card"><span>Progress</span><b>${html(values.percent.toFixed(1))}%</b><small>${html(fmtInt(values.processed))} checked / ${html(fmtInt(values.remaining))} left / ${html(fmtInt(values.total))} total</small></div>
       <div class="dashboard-card"><span>Wine lists found</span><b>${html(fmtInt(summary.totalSources || payload.counts?.wineListSources))}</b><small>${html(fmtInt(summary.parsedSources))} parsed sources, ${html(fmtInt(payload.counts?.wineLines))} saved wine lines.</small></div>
       <div class="dashboard-card"><span>Needs review</span><b>${html(fmtInt(reviewSources + errorCount))}</b><small>${html(fmtInt(reviewSources))} parser reviews / ${html(fmtInt(errorCount))} restaurant errors.</small></div>
-    </div>
+    </div>`;
 
-    <section class="dash-panel">
+    const progressHtml = `<section class="dash-panel" data-dashboard-section="progress">
       <div class="collection-head">
         <div>
           <p class="dash-kicker">Collect progress</p>
@@ -639,9 +663,9 @@
         <div class="metric-box"><span>Current restaurant</span><b>${html(progress.currentTarget || "-")}</b></div>
         <div class="metric-box"><span>Errors</span><b>${html(fmtInt(errorCount))}</b></div>
       </div>
-    </section>
+    </section>`;
 
-    <section class="dash-panel">
+    const summaryHtml = `<section class="dash-panel" data-dashboard-section="summary">
       <p class="dash-kicker">DB summary</p>
       <h2>What the collector found</h2>
       <div class="db-health-grid">
@@ -652,9 +676,9 @@
         <div class="metric-box"><span>Parsing review</span><b>${html(fmtInt(reviewSources))}</b></div>
         <div class="metric-box"><span>Mapped</span><b>${html(fmtInt(mapped))}</b></div>
       </div>
-    </section>
+    </section>`;
 
-    <section class="dash-panel">
+    const mapHtml = `<section class="dash-panel" data-dashboard-section="map">
       <div class="collection-head">
         <div>
           <p class="dash-kicker">Restaurant map</p>
@@ -670,13 +694,26 @@
         <div id="dashboardDbMap"></div>
         <div id="dashboardMapFallback" class="dashboard-map-fallback"><b>Loading map</b><span>Restaurant coordinates are being prepared.</span></div>
       </div>
-    </section>
+    </section>`;
 
-    <section class="dash-panel" id="selectedRestaurant">
+    const selectedHtml = `<section class="dash-panel" id="selectedRestaurant">
       ${selectedTargetMarkup(payload)}
-    </section>
-`;
-    renderDashboardMap(payload);
+    </section>`;
+
+    const mapAlreadyMounted = Boolean(root.querySelector("#dashboardDbMap"));
+    if (!mapAlreadyMounted) {
+      root.innerHTML = `${cardsHtml}${progressHtml}${summaryHtml}${mapHtml}${selectedHtml}`;
+      renderDashboardMap(payload, { fit: true });
+      return;
+    }
+    const cards = root.querySelector('[data-dashboard-section="cards"]');
+    const progressSection = root.querySelector('[data-dashboard-section="progress"]');
+    const summarySection = root.querySelector('[data-dashboard-section="summary"]');
+    if (cards) cards.outerHTML = cardsHtml;
+    if (progressSection) progressSection.outerHTML = progressHtml;
+    if (summarySection) summarySection.outerHTML = summaryHtml;
+    renderSelectedTarget(payload);
+    renderDashboardMap(payload, { fit: false });
   }
 
   async function loadGuideStats() {
