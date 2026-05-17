@@ -10,6 +10,50 @@ powershell -ExecutionPolicy Bypass -File .\run-server.ps1
 
 Open `http://localhost:4317`.
 
+## Weekly local collection snapshot
+
+The production site is designed to work from a snapshot exported by your local PC. Your PC does the heavy collection work, then commits `public/data/*` so Vercel can serve the latest saved DB even after the PC is turned off.
+
+One-command weekly refresh:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\weekly-refresh.ps1
+```
+
+What this command does:
+
+1. Runs the resumable Star Wine List collection sweep.
+2. Saves/updates the local source DB at `db/starwine.sqlite`.
+3. Exports web snapshots into `public/data/`.
+4. If Git is installed, commits and pushes the snapshot to `main`.
+5. Vercel redeploys automatically from GitHub.
+
+Fast test without a full collection:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\weekly-refresh.ps1 -Quick -NoPush
+```
+
+Export the current local DB only:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\weekly-refresh.ps1 -SkipSync
+```
+
+The web search merges both sources in one result list:
+
+- `DB` badge: result came from the exported local DB snapshot.
+- `Live` badge: result came from the live Star Wine List API.
+- `DB + Live` badge: same result was found in both.
+
+Watchlist keywords live in:
+
+```text
+public/data/watchlist.json
+```
+
+Edit that file, then run `weekly-refresh.ps1` again. The generated `public/data/watchlist-hits.json` feeds the Dashboard alert/review area.
+
 ## Download and index data
 
 Small smoke test:
@@ -87,10 +131,14 @@ This repo includes a lightweight Vercel version:
 - static UI from `public/`
 - serverless live search at `api/search.py`
 - Google Maps config at `api/config.js`
+- static DB snapshot files from `public/data/`
 
-The Vercel version does not persist SQLite/PDF data yet. It searches the public Star Wine List search API live and returns the same result shape as the local UI.
+The Vercel version merges two sources in the same search results:
 
-For persistent weekly collection, keep local development on `db/starwine.sqlite`, then move production data to a managed Postgres database such as Supabase Postgres or Neon Postgres. Store PDF/source files separately in Vercel Blob or Supabase Storage, and keep only URLs, checksums, parse status, and review flags in Postgres. This avoids relying on Vercel's ephemeral filesystem for SQLite/PDF storage.
+- exported local DB snapshot from `public/data/wine-lines-*.json`
+- live Star Wine List API results from `api/search.py`
+
+The production site does not write to SQLite. The local PC owns collection and parsing, then exports the read-only snapshot into `public/data/` and pushes it to GitHub for Vercel to serve.
 
 Michelin collection is modeled separately:
 
