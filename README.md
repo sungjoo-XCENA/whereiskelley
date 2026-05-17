@@ -57,51 +57,15 @@ Edit that file, then run `collect-guides.ps1 -Discover` again. The generated `pu
 The web search merges both sources in one result list:
 
 - `Guide DB`: result came from the collected guide restaurant DB.
-- `DB`: result came from the exported Star Wine snapshot.
+- `DB`: result came from an exported local snapshot.
 - `Live`: result came from the live Star Wine List API.
 - `DB + Live`: the same result was found in more than one source.
 
-## Download and index data
+## Star Wine search
 
-Small smoke test:
+Star Wine List is not fully crawled. The app uses the live Star Wine search API when you search, then merges those live results with the collected Guide DB snapshot.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\sync.ps1 --countries=germany --limit-venues=5
-```
-
-Full sync:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\sync.ps1
-```
-
-Search API sync with direct source PDFs:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\sync-search-api.ps1 --pages=10 --download-pdfs --max-pdfs=20
-```
-
-Broad search sweep with direct PDFs:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\sync-search-sweep.ps1 --download-pdfs --max-pdfs=999999
-```
-
-The sweep queries digits and letters, deduplicates by Star Wine List `item_id`, and saves progress to `data/search-sweep-state.json`.
-
-Full resumable API sweep:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-full-api-sync.ps1
-```
-
-Weekly refresh on Windows Task Scheduler:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install-weekly-task.ps1
-```
-
-The sync stores metadata and searchable entries in `db/starwine.sqlite`, with downloaded wine lists and extracted text under `data/`.
+This keeps the heavy weekly DB collection focused on restaurants from Michelin, La Liste, and World's 50 Best. Star Wine results are only stored when they are part of a user search/export flow.
 
 ## Manual PDF import
 
@@ -142,7 +106,7 @@ This repo includes a lightweight Vercel version:
 
 The Vercel version merges two sources in the same search results:
 
-- exported local DB snapshot from `public/data/wine-lines-*.json`
+- exported Guide DB snapshot from `public/data/wine-lines-*.json`
 - live Star Wine List API results from `api/search.py`
 
 The production site does not write to SQLite. The local PC owns collection and parsing, then exports the read-only snapshot into `public/data/` and pushes it to GitHub for Vercel to serve.
