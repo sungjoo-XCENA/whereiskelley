@@ -37,6 +37,151 @@ hotfixStyle.textContent = `
     align-items: center;
     gap: 10px;
   }
+  @media (max-width: 720px) {
+    .app-shell {
+      width: min(100vw - 14px, 720px);
+      padding: 10px 0 18px;
+    }
+    .app-header {
+      padding: 14px 2px 12px;
+    }
+    h1 {
+      font-size: clamp(38px, 14vw, 54px);
+    }
+    .world-map {
+      height: 300px;
+      margin: 0 8px 8px;
+    }
+    .panel-heading {
+      align-items: flex-start;
+      flex-wrap: wrap;
+      padding: 14px;
+    }
+    .panel-tools {
+      width: 100%;
+      justify-content: space-between;
+    }
+    .download-results {
+      flex: 1;
+    }
+    .result-stack {
+      max-height: none;
+    }
+    .table-wrap {
+      overflow: visible;
+    }
+    .result-table {
+      min-width: 0;
+      border-spacing: 0;
+    }
+    .result-table > thead {
+      display: none;
+    }
+    .result-table,
+    .result-table > tbody,
+    .result-table > tbody > tr,
+    .result-table > tbody > tr > td {
+      display: block;
+      width: 100%;
+    }
+    .result-table > tbody > tr.place-row {
+      margin: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .result-table > tbody > tr.place-row.active {
+      box-shadow: inset 4px 0 0 var(--accent);
+    }
+    .result-table > tbody > tr.place-row > td {
+      display: grid;
+      grid-template-columns: 96px minmax(0, 1fr);
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .result-table > tbody > tr.place-row > td:last-child {
+      border-bottom: 0;
+    }
+    .result-table > tbody > tr.place-row > td::before {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .result-table > tbody > tr.place-row > td:nth-child(1)::before { content: "Place"; }
+    .result-table > tbody > tr.place-row > td:nth-child(2)::before { content: "City"; }
+    .result-table > tbody > tr.place-row > td:nth-child(3)::before { content: "Country"; }
+    .result-table > tbody > tr.place-row > td:nth-child(4)::before { content: "Updated"; }
+    .result-table > tbody > tr.place-row > td:nth-child(5)::before { content: "Matches"; }
+    .result-table > tbody > tr.place-row > td:nth-child(6)::before { content: "KRW"; }
+    .result-table > tbody > tr.place-row > td:nth-child(7)::before { content: "PDF"; }
+    .place-cell {
+      min-width: 0;
+    }
+    .krw-cell,
+    .price-cell {
+      width: auto;
+    }
+    .expanded-row {
+      margin: 0 10px 12px;
+    }
+    .expanded-place {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+      border-radius: 8px;
+    }
+    .expanded-head {
+      display: grid;
+    }
+    .actions.compact {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .actions.compact a {
+      justify-content: center;
+      padding: 0 8px;
+      text-align: center;
+    }
+    .line-table,
+    .line-table tbody,
+    .line-table tr,
+    .line-table td {
+      display: block;
+      width: 100%;
+    }
+    .line-table thead {
+      display: none;
+    }
+    .line-table tr {
+      padding: 10px 0;
+      border-top: 1px solid var(--line);
+    }
+    .line-table td {
+      display: grid;
+      grid-template-columns: 88px minmax(0, 1fr);
+      gap: 10px;
+      padding: 5px 0;
+      border-top: 0;
+    }
+    .line-table td::before {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .line-table td:nth-child(1)::before { content: "Line"; }
+    .line-table td:nth-child(2)::before { content: "Vintage"; }
+    .line-table td:nth-child(3)::before { content: "Price"; }
+    .line-table td:nth-child(4)::before { content: "KRW"; }
+    .line-table td:nth-child(5)::before { content: "Page"; }
+    .wine-cell {
+      min-width: 0;
+      width: auto;
+    }
+  }
 `;
 document.head.appendChild(hotfixStyle);
 
@@ -152,8 +297,7 @@ function friendlyPdfReviewReason(reason = "") {
 }
 
 function groupLowestPriceResult(group) {
-  const pdfLines = groupPdfLines(group);
-  const candidates = pdfLines.length ? pdfLines : fallbackWineLines(group.results);
+  const candidates = reconciledGroupLines(group);
   return [...candidates].sort((a, b) => numericPrice(a) - numericPrice(b))[0] || {};
 }
 
@@ -166,6 +310,75 @@ function hasWineLineSignal(result = {}) {
 
 function fallbackWineLines(results = []) {
   return uniqueResults(results).filter(hasWineLineSignal);
+}
+
+function normalizedWineText(value = "") {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function lineTokens(value = "") {
+  return normalizedWineText(value)
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !/^(?:the|and|aoc|aop|auc|doc|docg|cru|grand|wine|list)$/.test(token));
+}
+
+function lineMatchScore(indexLine = {}, pdfLine = {}) {
+  const indexTokens = lineTokens(indexLine.text);
+  const pdfText = ` ${normalizedWineText(pdfLine.text)} `;
+  if (!indexTokens.length || !pdfText.trim()) return 0;
+  const hits = indexTokens.filter((token) => pdfText.includes(` ${token} `)).length;
+  let score = hits / indexTokens.length;
+  if (indexLine.vintage && pdfLine.vintage && String(indexLine.vintage) === String(pdfLine.vintage)) score += 0.25;
+  if (hasValidPrice(indexLine) && hasValidPrice(pdfLine) && Number(indexLine.priceValue) === Number(pdfLine.priceValue)) score += 0.2;
+  return score;
+}
+
+function bestPdfMatch(indexLine, pdfLines, used) {
+  let best = null;
+  let bestScore = 0;
+  pdfLines.forEach((pdfLine, index) => {
+    if (used.has(index)) return;
+    const score = lineMatchScore(indexLine, pdfLine);
+    if (score > bestScore) {
+      best = { index, line: pdfLine };
+      bestScore = score;
+    }
+  });
+  return bestScore >= 0.55 ? best : null;
+}
+
+function mergeIndexedWithPdf(indexLine, pdfLine) {
+  if (!pdfLine) return { ...indexLine, source: "Search index" };
+  return {
+    ...indexLine,
+    vintage: indexLine.vintage || pdfLine.vintage || "",
+    priceValue: hasValidPrice(indexLine) ? indexLine.priceValue : pdfLine.priceValue,
+    currency: indexLine.currency || pdfLine.currency || "",
+    prices: Array.isArray(indexLine.prices) && indexLine.prices.length ? indexLine.prices : (pdfLine.prices || []),
+    pageNumber: pdfLine.pageNumber || indexLine.pageNumber || "",
+    pdfText: pdfLine.text || "",
+    pdfVerified: true,
+    source: "PDF verified"
+  };
+}
+
+function reconciledGroupLines(group) {
+  const indexedLines = fallbackWineLines(group.results);
+  const pdfLines = uniqueResults(groupPdfLines(group));
+  if (!indexedLines.length) {
+    return pdfLines.map((line) => ({ ...line, source: "PDF only", pdfVerified: true }));
+  }
+  const used = new Set();
+  return indexedLines.map((indexLine) => {
+    const match = bestPdfMatch(indexLine, pdfLines, used);
+    if (match) used.add(match.index);
+    return mergeIndexedWithPdf(indexLine, match?.line);
+  });
 }
 
 function groupedVenues(results) {
@@ -219,7 +432,7 @@ function exportRows() {
   return groupedVenues(latestResults).flatMap((group) => {
     const venue = group.venue || {};
     const pdfLists = groupPdfLists(group);
-    const lines = groupPdfLines(group).length ? groupPdfLines(group) : fallbackWineLines(group.results);
+    const lines = reconciledGroupLines(group);
     const pdfUrls = pdfLists.map((list) => pdfUrl(list)).filter(Boolean).join(" | ");
     return (lines.length ? lines : [{ text: "", vintage: "", priceValue: "", currency: "", review: true }]).map((line) => ({
       place: displayVenueName(venue),
@@ -231,7 +444,7 @@ function exportRows() {
       vintage: line.vintage || "",
       originalPrice: originalPriceText(line),
       krw: krwPriceText(line),
-      source: groupPdfLines(group).length ? "PDF" : "Search index",
+      source: line.source || "Search index",
       pdfUrls,
       starWineListUrl: venue.url || "",
       mapUrl: venue.starWineMapUrl || ""
@@ -329,10 +542,12 @@ function renderPlaceRow(group) {
 }
 
 function placeLineLabel(group) {
+  const indexedLines = fallbackWineLines(group.results);
+  const verified = reconciledGroupLines(group).filter((line) => line.pdfVerified).length;
+  if (indexedLines.length && verified) return `${indexedLines.length} indexed / ${verified} verified`;
+  if (indexedLines.length) return `${indexedLines.length} indexed lines`;
   const pdfLines = groupPdfLines(group);
-  if (pdfLines.length) return `${pdfLines.length} PDF lines`;
-  const fallbackLines = fallbackWineLines(group.results);
-  if (fallbackLines.length) return `${fallbackLines.length} indexed lines`;
+  if (pdfLines.length) return `${pdfLines.length} PDF-only lines`;
   return "Review";
 }
 
@@ -343,10 +558,15 @@ function renderExpandedPlace(group) {
   if (groupPdfPending(group)) {
     window.setTimeout(() => loadPdfLines(group), 0);
   }
-  const sourceLines = pdfLines.length ? uniqueResults(pdfLines) : fallbackWineLines(group.results);
+  const sourceLines = reconciledGroupLines(group);
   const reviewReason = groupPdfReviewReason(group);
-  const reviewNote = pdfLines.length
-    ? ""
+  const indexedLines = fallbackWineLines(group.results);
+  const verifiedCount = sourceLines.filter((line) => line.pdfVerified).length;
+  const heldPdfExtras = indexedLines.length ? Math.max(0, pdfLines.length - verifiedCount) : 0;
+  const reviewNote = heldPdfExtras
+    ? `<div class="review-note">Showing Star Wine List indexed rows first. ${escapeHtml(String(heldPdfExtras))} PDF-only rows were held for review instead of being added automatically.</div>`
+    : pdfLines.length
+      ? ""
     : groupPdfPending(group)
       ? `<div class="review-note">Reading the current PDF download...</div>`
       : reviewReason
@@ -356,7 +576,7 @@ function renderExpandedPlace(group) {
     .slice()
     .sort((a, b) => numericPrice(a) - numericPrice(b))
     .map((result) => `<tr>
-      <td class="wine-cell">${escapeHtml(result.text)}</td>
+      <td class="wine-cell">${escapeHtml(result.text)}${result.pdfText && result.pdfText !== result.text ? `<span class="muted">PDF: ${escapeHtml(result.pdfText)}</span>` : ""}</td>
       <td>${escapeHtml(result.vintage || "")}</td>
       <td class="price-cell">${originalPriceMarkup(result)}</td>
       <td class="krw-cell">${krwPriceMarkup(result)}</td>
