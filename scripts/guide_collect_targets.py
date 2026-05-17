@@ -40,7 +40,7 @@ GUIDE_SOURCES = {
     "michelin": {
         "name": "MICHELIN Guide",
         "urls": [
-            "https://guide.michelin.com/en/restaurants/1-star-michelin/2-stars-michelin/3-stars-michelin/page/1",
+            "https://guide.michelin.com/us/en/restaurants/1-star-michelin/2-stars-michelin/3-stars-michelin/page/1",
         ],
     },
 }
@@ -108,6 +108,8 @@ def fetch_text(url, timeout=30):
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
     with urlopen(Request(url, headers=headers), timeout=timeout, context=SSL_CONTEXT) as response:
+        if response.status != 200:
+            raise RuntimeError(f"HTTP {response.status}: expected a normal HTML page")
         data = response.read()
     return data.decode("utf-8", errors="replace")
 
@@ -243,18 +245,41 @@ def extract_worlds50best_places(html, source_url):
     pattern = re.compile(
         r'<div class="list-item"[^>]*>.*?'
         r'<p class="rank[^"]*"[^>]*>(?P<rank>\d+)</p>.*?'
-        r'<a[^>]+href="(?P<href>[^"]+)"[^>]*>\s*<h2>(?P<name>.*?)</h2>\s*</a>\s*<p>(?P<city>.*?)</p>',
+        r'<h2>(?P<name>.*?)</h2>\s*<p>(?P<city>.*?)</p>',
         re.I | re.S,
     )
     for match in pattern.finditer(html):
+        body = match.group(0)
+        href_match = re.search(r'<a[^>]+href="([^"]+)"', body, re.I | re.S)
+        rank = int(match.group("rank"))
         places.append({
             "name": clean_text(re.sub(r"<[^>]+>", " ", match.group("name"))),
             "city": clean_text(re.sub(r"<[^>]+>", " ", match.group("city"))),
             "country": "",
             "address": "",
-            "place_url": urljoin(source_url, match.group("href")),
+            "place_url": urljoin(source_url, href_match.group(1)) if href_match else f"{source_url}#rank-{rank}",
             "website_url": "",
-            "rank": int(match.group("rank")),
+            "rank": rank,
+            "score": None,
+        })
+
+    text = re.sub(r"<(br|p|h[1-6]|div|li)\b[^>]*>", "\n", html, flags=re.I)
+    text = clean_text(re.sub(r"<[^>]+>", " ", text)).replace(" No.", "\nNo.")
+    story_pattern = re.compile(r"\bNo\.(?P<rank>\d{1,3})\s+(?P<name>[^\n]+?)\s+(?P<city>[A-Z][^\n]+)")
+    for match in story_pattern.finditer(text):
+        name = re.sub(r"\s+-\s+.*$", "", match.group("name")).strip()
+        city = match.group("city").strip()
+        if not name or len(name) > 90 or len(city) > 80:
+            continue
+        rank = int(match.group("rank"))
+        places.append({
+            "name": clean_text(name),
+            "city": clean_text(city),
+            "country": "",
+            "address": "",
+            "place_url": f"{source_url}#rank-{rank}",
+            "website_url": "",
+            "rank": rank,
             "score": None,
         })
     return places
@@ -386,6 +411,12 @@ def export_status(con, run_id):
         )
     ]
     run = con.execute("select * from guide_collection_runs where id=?", (run_id,)).fetchone()
+    source_issues = []
+    if run and run["notes"]:
+        try:
+            source_issues = json.loads(run["notes"])
+        except json.JSONDecodeError:
+            source_issues = [{"code": "collector", "message": run["notes"]}]
     targets = [
         dict(row)
         for row in con.execute(
@@ -398,7 +429,7 @@ def export_status(con, run_id):
         )
     ]
     (PUBLIC_DATA_DIR / "guide-status.json").write_text(
-        json.dumps({"generatedAt": now_sql(), "counts": counts, "sourceCounts": source_counts, "lastRun": dict(run) if run else None}, ensure_ascii=False, separators=(",", ":")) + "\n",
+        json.dumps({"generatedAt": now_sql(), "counts": counts, "sourceCounts": source_counts, "sourceIssues": source_issues, "lastRun": dict(run) if run else None}, ensure_ascii=False, separators=(",", ":")) + "\n",
         encoding="utf-8",
     )
     (PUBLIC_DATA_DIR / "guide-targets.json").write_text(
@@ -410,6 +441,8 @@ def export_status(con, run_id):
 def collect_targets(con, sources, max_source_items, run_id):
     collected = 0
     errors = 0
+    source_seen = {code: 0 for code in sources}
+    source_issues = []
     for code in sources:
         source = GUIDE_SOURCES[code]
         for url in source["urls"]:
@@ -426,9 +459,11 @@ def collect_targets(con, sources, max_source_items, run_id):
                 html = fetch_text(url)
             except Exception as exc:
                 errors += 1
+                source_issues.append({"code": code, "url": url, "message": str(exc)})
                 write_progress(runId=run_id, phase="reading_guides", source=code, currentUrl=url, targetsCollected=collected, errors=errors, message=str(exc))
                 continue
             places = extract_places(code, html, url)
+            source_seen[code] += len(places)
             for place in places[:max_source_items or None]:
                 collected += 1
                 write_progress(
@@ -445,7 +480,14 @@ def collect_targets(con, sources, max_source_items, run_id):
                 upsert_target(con, code, place)
                 if collected % 25 == 0:
                     con.commit()
-    return collected, errors
+    for code, count in source_seen.items():
+        if count == 0:
+            source_issues.append({
+                "code": code,
+                "url": GUIDE_SOURCES[code]["urls"][0],
+                "message": "No parseable restaurant cards were found. The source may be blocked, challenged, or rendered only after browser scripts.",
+            })
+    return collected, errors, source_issues
 
 
 def main():
@@ -464,21 +506,23 @@ def main():
         )
         run_id = cur.lastrowid
         try:
-            collected, errors = collect_targets(con, sources, args.max_source_items, run_id)
+            collected, errors, source_issues = collect_targets(con, sources, args.max_source_items, run_id)
+            target_total = con.execute("select count(*) from restaurant_targets").fetchone()[0]
+            notes = json.dumps(source_issues, ensure_ascii=False) if source_issues else None
             con.execute(
                 """
                 update guide_collection_runs
                 set finished_at=?, status='completed', target_count=?, websites_checked=0,
-                    wine_lists_found=0, wine_lines_found=0, errors=?
+                    wine_lists_found=0, wine_lines_found=0, errors=?, notes=?
                 where id=?
                 """,
-                (now_sql(), collected, errors, run_id),
+                (now_sql(), target_total, errors, notes, run_id),
             )
-            write_progress(runId=run_id, status="completed", phase="completed", targetsCollected=collected, errors=errors, message="Guide target collection completed.")
+            write_progress(runId=run_id, status="completed", phase="completed", targetsCollected=target_total, errors=errors, message="Guide target collection completed.")
         finally:
             export_status(con, run_id)
             con.commit()
-        print(f"targets={collected} websites=0 wine_lists=0 wine_lines=0 errors={errors}")
+        print(f"targets={target_total} processed={collected} websites=0 wine_lists=0 wine_lines=0 errors={errors}")
 
 
 if __name__ == "__main__":
