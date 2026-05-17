@@ -334,6 +334,35 @@
     }
   }
 
+  function isEmptyGuidePayload(payload) {
+    if (!payload || payload.error) return true;
+    const progress = payload.progress || {};
+    const counts = payload.counts || {};
+    return !progress.status && !Number(counts.targets || counts.wineLines || counts.wineListSources || 0);
+  }
+
+  async function fetchLiveGuideCollection() {
+    const proxied = await fetchJson("/api/guide-collection", null);
+    if (!isEmptyGuidePayload(proxied)) return proxied;
+    const local = await fetchJson("http://localhost:4317/api/guide-collection", null);
+    if (local && !local.error) {
+      local.source = "browser_localhost";
+      return local;
+    }
+    return proxied;
+  }
+
+  async function fetchLiveGuideWatch(watchQuery) {
+    const proxied = await fetchJson(`/api/guide-watch?watchlist=${watchQuery}&limit=80`, null);
+    if (proxied && !proxied.error && (proxied.rows?.length || proxied.watches?.length || proxied.totals)) return proxied;
+    const local = await fetchJson(`http://localhost:4317/api/guide-watch?watchlist=${watchQuery}&limit=80`, null);
+    if (local && !local.error) {
+      local.source = "browser_localhost";
+      return local;
+    }
+    return proxied;
+  }
+
   function progressFromStatus(status) {
     const run = status?.lastRun;
     const counts = status?.counts || {};
@@ -365,7 +394,7 @@
   async function loadGuideStats() {
     try {
       const [live, status, progress, targets, hits] = await Promise.all([
-        fetchJson("/api/guide-collection", null),
+        fetchLiveGuideCollection(),
         fetchJson("/data/guide-status.json", null),
         fetchJson("/data/guide-progress.json", null),
         fetchJson("/data/guide-targets.json", []),
@@ -388,7 +417,7 @@
       state.guideTargets = Array.isArray(targets) ? targets : [];
       state.guideHits = Array.isArray(live?.guideHits) ? live.guideHits : Array.isArray(hits) ? hits : [];
       const watchQuery = encodeURIComponent(JSON.stringify(state.watchlist));
-      state.guideWatch = await fetchJson(`/api/guide-watch?watchlist=${watchQuery}&limit=80`, null);
+      state.guideWatch = await fetchLiveGuideWatch(watchQuery);
     } catch (_error) {
       state.guide = null;
       state.guideProgress = null;

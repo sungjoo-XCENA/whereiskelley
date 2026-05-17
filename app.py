@@ -70,6 +70,7 @@ def json_response(handler, payload, status=200):
     handler.send_header("access-control-allow-origin", ALLOWED_ORIGIN)
     handler.send_header("access-control-allow-headers", "content-type, x-whereiskelley-token")
     handler.send_header("access-control-allow-methods", "GET, OPTIONS")
+    handler.send_header("access-control-allow-private-network", "true")
     handler.send_header("content-length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -82,6 +83,7 @@ def text_response(handler, text, status=200):
     handler.send_header("access-control-allow-origin", ALLOWED_ORIGIN)
     handler.send_header("access-control-allow-headers", "content-type, x-whereiskelley-token")
     handler.send_header("access-control-allow-methods", "GET, OPTIONS")
+    handler.send_header("access-control-allow-private-network", "true")
     handler.send_header("content-length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -95,6 +97,7 @@ def javascript_response(handler, text, status=200):
     handler.send_header("access-control-allow-origin", ALLOWED_ORIGIN)
     handler.send_header("access-control-allow-headers", "content-type, x-whereiskelley-token")
     handler.send_header("access-control-allow-methods", "GET, OPTIONS")
+    handler.send_header("access-control-allow-private-network", "true")
     handler.send_header("content-length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -806,6 +809,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("access-control-allow-origin", ALLOWED_ORIGIN)
         self.send_header("access-control-allow-headers", "content-type, x-whereiskelley-token")
         self.send_header("access-control-allow-methods", "GET, OPTIONS")
+        self.send_header("access-control-allow-private-network", "true")
         self.end_headers()
 
     def api_authorized(self, params):
