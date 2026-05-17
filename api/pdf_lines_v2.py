@@ -1,8 +1,10 @@
 import io
+import html as html_lib
 import json
 import re
 import sys
 import unicodedata
+from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -50,9 +52,66 @@ def fetch_pdf(url):
     return body
 
 
+def fetch_body(url):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+        "Accept": "application/pdf,text/html,application/xhtml+xml,*/*",
+        "Referer": "https://starwinelist.com/",
+    }
+    with urlopen(Request(resolve_pdf_url(url), headers=headers), timeout=25) as response:
+        content_type = response.headers.get("content-type", "")
+        body = response.read()
+    return body, content_type
+
+
 def extract_text(pdf_bytes):
     reader = PdfReader(io.BytesIO(pdf_bytes))
     return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+class HTMLTextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.parts = []
+        self.skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {"style", "noscript"}:
+            self.skip_depth += 1
+        if tag in {"br", "p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6"}:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in {"style", "noscript"} and self.skip_depth:
+            self.skip_depth -= 1
+        if tag in {"p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6"}:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if self.skip_depth:
+            return
+        if data and data.strip():
+            self.parts.append(data)
+            self.parts.append(" ")
+
+    def text(self):
+        text = html_lib.unescape("".join(self.parts))
+        text = re.sub(r"[ \t\r\f\v]+", " ", text)
+        return re.sub(r"\n\s*\n+", "\n", text)
+
+
+def html_to_text(raw_html):
+    parser = HTMLTextExtractor()
+    parser.feed(raw_html or "")
+    return parser.text()
+
+
+def document_text(url):
+    body, content_type = fetch_body(url)
+    if body.startswith(b"%PDF") or "pdf" in content_type.lower():
+        return "pdf", extract_text(body), ""
+    raw_html = body.decode("utf-8", "replace")
+    return "html", html_to_text(raw_html), raw_html
 
 
 def fold_text(value):
@@ -75,6 +134,77 @@ def display_fragment(value, raw_price="", price_text=""):
 
 def query_tokens(query):
     return [fold_text(token.strip()) for token in query.split() if len(token.strip()) >= 2]
+
+
+def decode_jsonish_string(value):
+    if value is None:
+        return ""
+    try:
+        return json.loads(f'"{value}"')
+    except Exception:
+        return value.replace(r"\"", '"').replace(r"\\", "\\")
+
+
+def first_jsonish_string(block, name):
+    match = re.search(rf'"{re.escape(name)}"\s*:\s*"((?:\\.|[^"])*)"', block)
+    return decode_jsonish_string(match.group(1)) if match else ""
+
+
+def first_jsonish_array_value(block, name):
+    match = re.search(rf'"{re.escape(name)}"\s*:\s*\[\s*"((?:\\.|[^"])*)"', block)
+    return decode_jsonish_string(match.group(1)) if match else ""
+
+
+def jsonish_html_matches(raw_html, query, country, limit=200):
+    if not raw_html:
+        return []
+    source = html_lib.unescape(raw_html)
+    quote_placeholder = "\ue000"
+    source = re.sub(r'\\{3}"', quote_placeholder, source)
+    source = source.replace(r"\"", '"')
+    source = source.replace(quote_placeholder, r"\"")
+    tokens = query_tokens(query)
+    matches = []
+    seen = set()
+    for index, match in enumerate(re.finditer(r'"fields"\s*:\s*\{(.*?)\}\s*\}', source, re.S)):
+        block = match.group(1)
+        searchable = fold_text(block)
+        if tokens and not all(token in searchable for token in tokens):
+            continue
+        price_match = re.search(r'"Price"\s*:\s*(\d+(?:\.\d+)?)', block)
+        if not price_match:
+            continue
+        price_text, price_value, currency = parse_price(price_match.group(1), country, require_edge=False)
+        if price_value is None:
+            continue
+        producer = first_jsonish_array_value(block, "Producer Name") or first_jsonish_string(block, "producer")
+        name = first_jsonish_string(block, "Name") or first_jsonish_string(block, "name")
+        vintage = first_jsonish_string(block, "Vintage") or first_jsonish_string(block, "vintage")
+        subregion = first_jsonish_array_value(block, "Subregion") or first_jsonish_string(block, "subregion")
+        region = first_jsonish_array_value(block, "Region Name") or first_jsonish_string(block, "region")
+        parts = [part for part in [producer, subregion, vintage, name] if part]
+        text = ", ".join(parts) or clean_fragment(block[:180])
+        key = (fold_text(producer), fold_text(name), vintage, price_value, currency)
+        if key in seen:
+            continue
+        seen.add(key)
+        matches.append(
+            {
+                "id": f"html-json-{index}",
+                "text": text,
+                "vintage": vintage or None,
+                "priceValue": price_value,
+                "currency": currency,
+                "prices": [price_text] if price_text else [],
+                "pageNumber": None,
+                "review": False,
+                "source": "External list verified",
+                "region": region,
+            }
+        )
+        if len(matches) >= limit:
+            break
+    return matches
 
 
 def matching_positions(raw, tokens):
@@ -322,20 +452,26 @@ def handle(params):
         if not url:
             continue
         try:
-            text = extract_text(fetch_pdf(url))
+            kind, text, raw_html = document_text(url)
         except Exception as exc:
             errors.append(str(exc))
             continue
         if not text.strip():
-            errors.append("PDF has no extractable text. OCR review required.")
+            errors.append("List has no extractable text. OCR or manual review required.")
             continue
-        lines = match_lines(text, query, country)
+        if kind == "html":
+            json_lines = jsonish_html_matches(raw_html, query, country)
+            lines = json_lines if json_lines else match_lines(text, query, country)
+            for line in lines:
+                line.setdefault("source", "External list verified")
+        else:
+            lines = match_lines(text, query, country)
         if lines:
             return {"status": "ok", "reason": "", "lines": lines}
-        errors.append("No matching text found in extracted PDF text.")
+        errors.append("No matching text found in extracted list text.")
     return {
         "status": "review",
-        "reason": " ".join(dict.fromkeys(errors)) or "PDF text extraction failed. OCR review required.",
+        "reason": " ".join(dict.fromkeys(errors)) or "List text extraction failed. OCR or manual review required.",
         "lines": [],
     }
 
