@@ -81,7 +81,7 @@ def slugify(value):
 
 def venue_slug_from_url(url):
     try:
-        return urlparse(url).path.rstrip("/").split("-")[-1] or "unknown"
+        return urlparse(url).path.rstrip("/").split("/")[-1] or "unknown"
     except Exception:
         return "unknown"
 
@@ -393,7 +393,7 @@ def search(params):
         entries += len(lines)
         for line in lines:
             if line.get("item_id"):
-                source_ids.append(str(line.get("item_id")))
+                source_ids.append(str(line.get("item_id")));
             if not passes_filters(line, country, city, vintage):
                 continue
             filtered_lines.append(line)
