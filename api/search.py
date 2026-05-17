@@ -319,7 +319,7 @@ def normalize_result(result):
             "id": wine_list_id,
             "label": f"Wine list {wine_list_id}",
             "externalUrl": wine_list.get("external") or "",
-            "downloadUrl": wine_list.get("download_url") or wine_list.get("file") or "",
+            "downloadUrl": wine_list.get("download_url") or "",
             "fileUrl": wine_list.get("file") or "",
             "fileViewUrl": wine_list.get("file_view") or "",
             "localFilePath": "",
@@ -421,8 +421,9 @@ def search(params):
 
     for line in filtered_lines:
         normalized = normalize_result(line)
-        if normalized["wineList"]["fileUrl"]:
-            pdf_urls.add(normalized["wineList"]["fileUrl"])
+        primary_pdf_url = normalized["wineList"].get("downloadUrl") or normalized["wineList"].get("fileUrl")
+        if primary_pdf_url:
+            pdf_urls.add(primary_pdf_url)
         results.append(normalized)
 
     results = dedupe_results(results)
