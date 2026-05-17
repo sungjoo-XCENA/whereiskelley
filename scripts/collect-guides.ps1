@@ -25,16 +25,20 @@ if ($Quick) {
 
 Push-Location $project
 try {
-  $args = @(
-    ".\scripts\guide_collect.py",
-    "--sources", $Sources,
-    "--max-source-items", "$MaxSourceItems",
-    "--max-targets", "$MaxTargets"
-  )
   if ($Discover) {
-    $args += "--discover"
+    $args = @(
+      ".\scripts\guide_collect.py",
+      "--sources", $Sources,
+      "--max-source-items", "$MaxSourceItems",
+      "--max-targets", "$MaxTargets",
+      "--discover"
+    )
   } else {
-    $args += "--no-discover"
+    $args = @(
+      ".\scripts\guide_collect_targets.py",
+      "--sources", $Sources,
+      "--max-source-items", "$MaxSourceItems"
+    )
   }
   & $python @args
 
