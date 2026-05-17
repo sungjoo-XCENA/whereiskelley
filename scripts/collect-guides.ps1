@@ -2,8 +2,9 @@ param(
   [switch]$Quick,
   [switch]$Discover,
   [switch]$NoSnapshot,
-  [int]$MaxSourceItems = 200,
-  [int]$MaxTargets = 100,
+  [switch]$Snapshot,
+  [int]$MaxSourceItems = 0,
+  [int]$MaxTargets = 0,
   [string]$Sources = "michelin,laliste,worlds50best"
 )
 
@@ -17,6 +18,9 @@ if (-not (Test-Path $python)) {
 if ($Quick) {
   $MaxSourceItems = [Math]::Min($MaxSourceItems, 5)
   $MaxTargets = [Math]::Min($MaxTargets, 5)
+  if (-not $Snapshot) {
+    $NoSnapshot = $true
+  }
 }
 
 Push-Location $project
