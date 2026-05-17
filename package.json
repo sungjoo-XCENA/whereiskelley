@@ -11,6 +11,8 @@
     "sync:sweep": "powershell -ExecutionPolicy Bypass -File scripts/sync-search-sweep.ps1",
     "snapshot": "powershell -ExecutionPolicy Bypass -File scripts/export-snapshot.ps1",
     "weekly-refresh": "powershell -ExecutionPolicy Bypass -File scripts/weekly-refresh.ps1",
+    "collect:guides": "powershell -ExecutionPolicy Bypass -File scripts/collect-guides.ps1",
+    "collect:guides:quick": "powershell -ExecutionPolicy Bypass -File scripts/collect-guides.ps1 -Quick",
     "import-pdf": "powershell -ExecutionPolicy Bypass -File scripts/import-pdf.ps1"
   }
 }
