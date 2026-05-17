@@ -123,6 +123,52 @@ def result_row(row):
     return compact(result)
 
 
+def guide_result_row(row):
+    venue_id = f"guide-{row['target_id']}"
+    list_id = str(row["source_id"] or f"guide-{row['target_id']}")
+    result = {
+        "id": f"guide-{row['entry_id']}",
+        "source": "Guide DB",
+        "text": row["raw_text"] or "",
+        "producer": None,
+        "wineName": None,
+        "vintage": row["vintage"],
+        "region": None,
+        "grape": None,
+        "priceValue": row["price_value"],
+        "currency": row["currency"],
+        "prices": [row["price_text"]] if row["price_text"] else [],
+        "section": "Guide restaurant website",
+        "pageNumber": None,
+        "venue": {
+            "id": venue_id,
+            "name": row["name"],
+            "type": "Restaurant",
+            "city": row["city"],
+            "country": row["country"],
+            "lat": row["lat"],
+            "lng": row["lng"],
+            "address": row["address"] or ", ".join([part for part in [row["city"], row["country"]] if part]),
+            "googleMapsUrl": "",
+            "starWineMapUrl": "",
+            "url": row["website_url"] or row["source_url"] or "",
+        },
+        "wineList": {
+            "id": list_id,
+            "label": row["source_type"] or "Guide wine list",
+            "externalUrl": row["source_url"] or "",
+            "downloadUrl": row["source_url"] or "",
+            "fileUrl": row["source_url"] or "",
+            "fileViewUrl": row["source_url"] or "",
+            "localFilePath": row["content_path"] or "",
+            "localFileUrl": "",
+            "updatedText": row["last_seen_at"] or "",
+            "updatedDate": row["last_seen_at"] or "",
+        },
+    }
+    return compact(result)
+
+
 def compact(value):
     if isinstance(value, dict):
         cleaned = {}
@@ -182,6 +228,39 @@ def load_lines(con):
         order by c.name, v.city, v.name, e.id
     """
     return [result_row(row) for row in con.execute(sql)]
+
+
+def load_guide_lines(con):
+    try:
+        sql = """
+            select
+              e.id as entry_id,
+              e.raw_text,
+              e.vintage,
+              e.price_text,
+              e.price_value,
+              e.currency,
+              e.source_url,
+              e.source_type,
+              e.last_seen_at,
+              t.id as target_id,
+              t.name,
+              t.country,
+              t.city,
+              t.address,
+              t.lat,
+              t.lng,
+              t.website_url,
+              s.id as source_id,
+              s.content_path
+            from guide_wine_entries e
+            join restaurant_targets t on t.id = e.target_id
+            left join wine_list_sources s on s.id = e.wine_list_source_id
+            order by t.country, t.city, t.name, e.id
+        """
+        return [guide_result_row(row) for row in con.execute(sql)]
+    except sqlite3.Error:
+        return []
 
 
 def load_venues(con):
@@ -286,7 +365,7 @@ def main():
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     with con:
-        lines = load_lines(con)
+        lines = load_lines(con) + load_guide_lines(con)
         venues = load_venues(con)
         run = latest_run(con)
         chunks = []
