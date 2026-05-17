@@ -11,6 +11,15 @@
     return coordinateValue(group.lat) !== null && coordinateValue(group.lng) !== null;
   }
 
+  function asciiFold(value) {
+    return String(value || "")
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[øØ]/g, (char) => char === "Ø" ? "O" : "o")
+      .replace(/[æÆ]/g, (char) => char === "Æ" ? "AE" : "ae")
+      .replace(/[åÅ]/g, (char) => char === "Å" ? "A" : "a");
+  }
+
   groupedVenues = function groupedVenues(results) {
     const groups = new Map();
     for (const result of results) {
@@ -45,34 +54,86 @@
     return [...new Set(parts)].join(", ");
   }
 
-  function geocodeGroup(group, maps) {
+  function geocodeQueriesForGroup(group) {
+    const venue = group.venue || {};
+    const name = displayVenueName(venue);
+    const city = venue.city || "";
+    const country = venue.country || "";
+    const address = venue.address && venue.address !== `${city}, ${country}` ? venue.address : "";
+    const queries = [
+      [name, address, city, country].filter(Boolean).join(", "),
+      [name, "restaurant", city, country].filter(Boolean).join(", "),
+      [name, city, country].filter(Boolean).join(", "),
+      [asciiFold(name), "restaurant", asciiFold(city), country].filter(Boolean).join(", "),
+      [asciiFold(name), asciiFold(city), country].filter(Boolean).join(", ")
+    ];
+    return [...new Set(queries.filter(Boolean))];
+  }
+
+  function countryRestriction(country) {
+    const value = String(country || "").toLowerCase();
+    const map = {
+      australia: "AU",
+      austria: "AT",
+      belgium: "BE",
+      denmark: "DK",
+      france: "FR",
+      germany: "DE",
+      "greater china": "CN",
+      "hong kong": "HK",
+      italy: "IT",
+      netherlands: "NL",
+      norway: "NO",
+      singapore: "SG",
+      spain: "ES",
+      sweden: "SE",
+      uk: "GB",
+      usa: "US"
+    };
+    return map[value] || "";
+  }
+
+  function geocodeOnce(geocoder, request) {
+    return new Promise((resolve) => {
+      geocoder.geocode(request, (results, status) => resolve({ results, status }));
+    });
+  }
+
+  async function geocodeGroup(group, maps) {
     if (hasCoordinates(group)) return Promise.resolve(group);
-    const address = geocodeAddressForGroup(group);
-    if (!address || !maps?.Geocoder) return Promise.resolve(group);
-    const cacheKey = group.key || address;
+    const queries = geocodeQueriesForGroup(group);
+    if (!queries.length || !maps?.Geocoder) return Promise.resolve(group);
+    const cacheKey = group.key || queries[0];
     if (geocodeCache.has(cacheKey)) {
       const cached = geocodeCache.get(cacheKey);
       return Promise.resolve(cached ? { ...group, ...cached } : group);
     }
     const geocoder = new maps.Geocoder();
-    return new Promise((resolve) => {
-      geocoder.geocode({ address }, (results, status) => {
-        if (status !== "OK" || !results?.[0]?.geometry?.location) {
-          geocodeCache.set(cacheKey, null);
-          resolve(group);
-          return;
-        }
-        const location = results[0].geometry.location;
+    const restriction = countryRestriction(group.venue?.country);
+    const statuses = [];
+    for (const address of queries) {
+      const request = restriction
+        ? { address, componentRestrictions: { country: restriction } }
+        : { address };
+      const { results, status } = await geocodeOnce(geocoder, request);
+      statuses.push(`${address}: ${status}`);
+      if (status === "OK" && results?.[0]?.geometry?.location) {
+        const result = results[0];
+        const location = result.geometry.location;
         const coordinates = {
           lat: location.lat(),
           lng: location.lng(),
           geocoded: true,
-          geocodedAddress: results[0].formatted_address || address
+          geocodedAddress: result.formatted_address || address,
+          geocodeQuery: address
         };
         geocodeCache.set(cacheKey, coordinates);
-        resolve({ ...group, ...coordinates });
-      });
-    });
+        return { ...group, ...coordinates };
+      }
+      if (status === "REQUEST_DENIED") break;
+    }
+    geocodeCache.set(cacheKey, null);
+    return { ...group, geocodeFailed: true, geocodeStatus: statuses.join(" | ") };
   }
 
   renderMap = function renderMap(results) {
@@ -105,15 +166,17 @@
         located.push(await geocodeGroup(group, maps));
       }
       const mappedVenues = located.filter(hasCoordinates);
+      const failedCount = located.filter((group) => group.geocodeFailed).length;
       latestMapVenues = mappedVenues;
       const totalLines = mappedVenues.reduce((sum, group) => sum + group.results.length, 0);
       const geocodedCount = mappedVenues.filter((group) => group.geocoded).length;
       mapSummaryEl.textContent = mappedVenues.length
-        ? `${mappedVenues.length} places on map / ${totalLines} matching wines${geocodedCount ? `, ${geocodedCount} found by Google` : ""}`
+        ? `${mappedVenues.length} places on map / ${totalLines} matching wines${geocodedCount ? `, ${geocodedCount} found by Google` : ""}${failedCount ? `, ${failedCount} not located` : ""}`
         : "No mapped places yet";
       if (!mappedVenues.length) {
         clearGoogleMarkers();
-        showMapFallback("Google Maps could not locate these places from the available name, city, and country.", "No mapped places");
+        const failed = located.find((group) => group.geocodeFailed);
+        showMapFallback(failed?.geocodeStatus || "Google Maps could not locate these places from the available name, city, and country.", "No mapped places");
         return;
       }
       mapFallbackEl.classList.add("hidden");
