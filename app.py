@@ -175,6 +175,23 @@ def guide_collection_status():
             "review": 0,
         },
         "statusCounts": [],
+        "sourceStatusCounts": [],
+        "collectionSummary": {
+            "totalTargets": 0,
+            "checkedTargets": 0,
+            "foundWineList": 0,
+            "noWineList": 0,
+            "pending": 0,
+            "missingWebsite": 0,
+            "needsReview": 0,
+            "errors": 0,
+            "parseReviewSources": 0,
+            "parsedSources": 0,
+            "emptyParsedSources": 0,
+            "mappedTargets": 0,
+        },
+        "mapTargets": [],
+        "recentErrors": [],
         "latestRuns": [],
     }
     if not DB_PATH.exists():
@@ -193,6 +210,105 @@ def guide_collection_status():
             row_to_dict(row)
             for row in con.execute(
                 "select status, count(1) as count from restaurant_targets group by status order by count desc"
+            )
+        ]
+        payload["sourceStatusCounts"] = [
+            row_to_dict(row)
+            for row in con.execute(
+                """
+                select coalesce(parser_status, status, 'unknown') as status, count(1) as count
+                from wine_list_sources
+                group by coalesce(parser_status, status, 'unknown')
+                order by count desc
+                """
+            )
+        ]
+        target_summary = con.execute(
+            """
+            select
+              count(1) as totalTargets,
+              sum(case when status != 'not_checked' then 1 else 0 end) as checkedTargets,
+              sum(case when status = 'found' then 1 else 0 end) as foundWineList,
+              sum(case when status = 'no_wine_list' then 1 else 0 end) as noWineList,
+              sum(case when status = 'not_checked' then 1 else 0 end) as pending,
+              sum(case when status = 'missing_website' then 1 else 0 end) as missingWebsite,
+              sum(case when status in ('review','error') then 1 else 0 end) as needsReview,
+              sum(case when status = 'error' then 1 else 0 end) as errors,
+              sum(case when lat is not null and lng is not null then 1 else 0 end) as mappedTargets
+            from restaurant_targets
+            """
+        ).fetchone()
+        source_summary = con.execute(
+            """
+            select
+              count(1) as totalSources,
+              sum(case when parser_status = 'parsed' then 1 else 0 end) as parsedSources,
+              sum(case when parser_status = 'review' or status = 'review' or (last_error is not null and last_error != '') then 1 else 0 end) as parseReviewSources,
+              sum(case when parser_status = 'parsed' and coalesce(line_count, 0) = 0 then 1 else 0 end) as emptyParsedSources
+            from wine_list_sources
+            """
+        ).fetchone()
+        summary = row_to_dict(target_summary)
+        summary.update(row_to_dict(source_summary))
+        payload["collectionSummary"].update({key: int(value or 0) for key, value in summary.items()})
+        payload["recentErrors"] = [
+            row_to_dict(row)
+            for row in con.execute(
+                """
+                select
+                  coalesce(nullif(last_error, ''), 'Unknown error') as error,
+                  count(1) as count
+                from restaurant_targets
+                where last_error is not null and last_error != ''
+                group by coalesce(nullif(last_error, ''), 'Unknown error')
+                order by count desc, error asc
+                limit 10
+                """
+            )
+        ]
+        payload["mapTargets"] = [
+            row_to_dict(row)
+            for row in con.execute(
+                """
+                with source_counts as (
+                  select target_id, count(1) as source_count,
+                         sum(case when parser_status = 'review' or status = 'review' or (last_error is not null and last_error != '') then 1 else 0 end) as review_source_count
+                  from wine_list_sources
+                  group by target_id
+                ),
+                entry_counts as (
+                  select target_id, count(1) as line_count
+                  from guide_wine_entries
+                  group by target_id
+                )
+                select
+                  t.id,
+                  t.name,
+                  t.city,
+                  t.country,
+                  t.address,
+                  t.lat,
+                  t.lng,
+                  t.website_url as websiteUrl,
+                  t.status,
+                  t.last_checked_at as lastCheckedAt,
+                  t.last_error as lastError,
+                  coalesce(sc.source_count, 0) as wineListCount,
+                  coalesce(sc.review_source_count, 0) as reviewSourceCount,
+                  coalesce(ec.line_count, 0) as wineLineCount
+                from restaurant_targets t
+                left join source_counts sc on sc.target_id = t.id
+                left join entry_counts ec on ec.target_id = t.id
+                order by
+                  case
+                    when t.status = 'found' then 0
+                    when t.status = 'no_wine_list' then 1
+                    when t.status in ('review','error') then 2
+                    else 3
+                  end,
+                  t.name asc
+                limit 7000
+                """
             )
         ]
         payload["latestRuns"] = [

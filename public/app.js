@@ -23,6 +23,8 @@ let googleInfoWindow = null;
 let googleMarkers = [];
 let googleMapsPromise = null;
 let mapRenderToken = 0;
+let snapshotManifestCache = null;
+let snapshotLineCache = null;
 
 const COUNTRY_CURRENCY = {
   Argentina: "ARS",
@@ -83,6 +85,33 @@ async function getJson(path) {
   const response = await fetch(path);
   if (!response.ok) throw new Error(await response.text());
   return response.json();
+}
+
+async function getOptionalJson(path) {
+  try {
+    return await getJson(path);
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function getOptionalSnapshotChunk(chunk) {
+  try {
+    const url = `/data/${chunk.file}`;
+    if (chunk.encoding !== "gzip-base64-json") return await getJson(url);
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(await response.text());
+    const encoded = (await response.text()).trim();
+    const binary = atob(encoded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    if (!("DecompressionStream" in window)) {
+      throw new Error("This browser cannot read compressed DB snapshots.");
+    }
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return JSON.parse(await new Response(stream).text());
+  } catch (_error) {
+    return null;
+  }
 }
 
 function renderFilters(filters) {
@@ -190,6 +219,46 @@ function uniqueResults(results = []) {
   return unique;
 }
 
+function resultSource(result = {}) {
+  return result.source || result.sourceLabel || "Live";
+}
+
+function sourceBadge(source) {
+  const value = String(source || "Live");
+  const normalized = value.toLowerCase();
+  const key = normalized.includes("db") && normalized.includes("live")
+    ? "both"
+    : normalized.includes("db")
+      ? "db"
+      : "live";
+  const label = key === "both" ? "Saved DB + Live API" : key === "db" ? "Saved DB" : "Live API";
+  return `<span class="source-badge ${key}">${escapeHtml(label)}</span>`;
+}
+
+function mergeResultSources(results = []) {
+  const byKey = new Map();
+  for (const raw of results) {
+    const result = { ...raw };
+    const key = resultDedupKey(result);
+    if (!byKey.has(key)) {
+      byKey.set(key, result);
+      continue;
+    }
+    const existing = byKey.get(key);
+    const sources = new Set(
+      [resultSource(existing), resultSource(result)]
+        .join("+")
+        .split("+")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    );
+    if (sources.has("DB") && sources.has("Live")) {
+      existing.source = "DB + Live";
+    }
+  }
+  return [...byKey.values()];
+}
+
 function pdfLinksMarkup(lists = []) {
   const validLists = lists.filter((list) => pdfUrl(list));
   return validLists
@@ -230,8 +299,7 @@ function groupUpdatedValue(group) {
 }
 
 function groupLowestPriceResult(group) {
-  const pdfLines = groupPdfLines(group);
-  const candidates = pdfLines.length ? pdfLines : fallbackWineLines(group.results);
+  const candidates = reconciledGroupLines(group);
   return [...candidates].sort((a, b) => numericPrice(a) - numericPrice(b))[0] || {};
 }
 
@@ -244,6 +312,138 @@ function hasWineLineSignal(result = {}) {
 
 function fallbackWineLines(results = []) {
   return uniqueResults(results).filter(hasWineLineSignal);
+}
+
+function normalizedWineText(value = "") {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+async function loadSnapshotManifest() {
+  if (snapshotManifestCache !== null) return snapshotManifestCache;
+  snapshotManifestCache = await getOptionalJson(`/data/search-manifest.json?ts=${Date.now()}`);
+  return snapshotManifestCache;
+}
+
+async function loadSnapshotLines() {
+  if (snapshotLineCache !== null) return snapshotLineCache;
+  const manifest = await loadSnapshotManifest();
+  const chunks = Array.isArray(manifest?.chunks) ? manifest.chunks : [];
+  if (!chunks.length) {
+    snapshotLineCache = [];
+    return snapshotLineCache;
+  }
+  const loaded = await Promise.all(chunks.map((chunk) => getOptionalSnapshotChunk(chunk)));
+  snapshotLineCache = loaded.flatMap((chunk) => Array.isArray(chunk) ? chunk : []);
+  return snapshotLineCache;
+}
+
+function snapshotSearchText(result = {}) {
+  return normalizedWineText([
+    result.text,
+    result.producer,
+    result.wineName,
+    result.region,
+    result.grape,
+    result.venue?.name,
+    result.venue?.city,
+    result.venue?.country
+  ].filter(Boolean).join(" "));
+}
+
+function snapshotMatches(result, query, country, city, vintage) {
+  const text = snapshotSearchText(result);
+  const tokens = normalizedWineText(query).split(/\s+/).filter(Boolean);
+  if (tokens.length && !tokens.every((token) => text.includes(token))) return false;
+  if (country && normalizedWineText(result.venue?.country) !== normalizedWineText(country)) return false;
+  if (city && !normalizedWineText(result.venue?.city).includes(normalizedWineText(city))) return false;
+  if (vintage && String(result.vintage || "") !== vintage && !String(result.text || "").includes(vintage)) return false;
+  return true;
+}
+
+async function searchSnapshot(params) {
+  const query = params.get("q") || "";
+  if (!query.trim()) return { results: [], liveRefresh: null };
+  const country = params.get("country") || "";
+  const city = params.get("city") || "";
+  const vintage = params.get("vintage") || "";
+  const limit = Number(params.get("limit") || 5000);
+  const lines = await loadSnapshotLines();
+  const results = lines
+    .filter((result) => snapshotMatches(result, query, country, city, vintage))
+    .slice(0, limit)
+    .map((result) => ({ ...result, source: result.source || "DB" }));
+  return {
+    results,
+    liveRefresh: {
+      sourceSummary: "DB snapshot + live API",
+      snapshotLines: lines.length,
+      snapshotMatches: results.length
+    }
+  };
+}
+
+function lineTokens(value = "") {
+  return normalizedWineText(value)
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !/^(?:the|and|aoc|aop|auc|doc|docg|cru|grand|wine|list)$/.test(token));
+}
+
+function lineMatchScore(indexLine = {}, pdfLine = {}) {
+  const indexTokens = lineTokens(indexLine.text);
+  const pdfText = ` ${normalizedWineText(pdfLine.text)} `;
+  if (!indexTokens.length || !pdfText.trim()) return 0;
+  const hits = indexTokens.filter((token) => pdfText.includes(` ${token} `)).length;
+  let score = hits / indexTokens.length;
+  if (indexLine.vintage && pdfLine.vintage && String(indexLine.vintage) === String(pdfLine.vintage)) score += 0.25;
+  if (hasValidPrice(indexLine) && hasValidPrice(pdfLine) && Number(indexLine.priceValue) === Number(pdfLine.priceValue)) score += 0.2;
+  return score;
+}
+
+function bestPdfMatch(indexLine, pdfLines, used) {
+  let best = null;
+  let bestScore = 0;
+  pdfLines.forEach((pdfLine, index) => {
+    if (used.has(index)) return;
+    const score = lineMatchScore(indexLine, pdfLine);
+    if (score > bestScore) {
+      best = { index, line: pdfLine };
+      bestScore = score;
+    }
+  });
+  return bestScore >= 0.55 ? best : null;
+}
+
+function mergeIndexedWithPdf(indexLine, pdfLine) {
+  if (!pdfLine) return { ...indexLine, source: "Search index" };
+  return {
+    ...indexLine,
+    vintage: indexLine.vintage || pdfLine.vintage || "",
+    priceValue: indexLine.priceValue,
+    currency: indexLine.currency || "",
+    prices: Array.isArray(indexLine.prices) ? indexLine.prices : [],
+    pageNumber: pdfLine.pageNumber || indexLine.pageNumber || "",
+    pdfVerified: true,
+    source: "PDF verified"
+  };
+}
+
+function reconciledGroupLines(group) {
+  const indexedLines = fallbackWineLines(group.results);
+  const pdfLines = uniqueResults(groupPdfLines(group));
+  if (!indexedLines.length) {
+    return pdfLines.map((line) => ({ ...line, source: "PDF only", pdfVerified: true }));
+  }
+  const used = new Set();
+  return indexedLines.map((indexLine) => {
+    const match = bestPdfMatch(indexLine, pdfLines, used);
+    if (match) used.add(match.index);
+    return mergeIndexedWithPdf(indexLine, match?.line);
+  });
 }
 
 function groupKrwValue(group) {
@@ -384,6 +584,9 @@ function sortHeader(label, key) {
 
 function liveRefreshLine(liveRefresh) {
   if (!liveRefresh) return "";
+  if (liveRefresh.sourceSummary) {
+    return `<div class="sync-note">${escapeHtml(liveRefresh.sourceSummary)}: ${escapeHtml(String(liveRefresh.snapshotMatches || 0))} DB matches from ${escapeHtml(String(liveRefresh.snapshotLines || 0))} saved lines, ${escapeHtml(String(liveRefresh.liveMatches || 0))} live matches</div>`;
+  }
   const complete = liveRefresh.complete
     ? "Full pull complete"
     : `Loaded first ${liveRefresh.pages} pages`;
@@ -394,11 +597,87 @@ function liveRefreshLine(liveRefresh) {
 }
 
 function renderResults(results, liveRefresh = null) {
-  latestResults = sortByCheapest(uniqueResults(results));
+  ensureDownloadButton();
+  latestResults = sortByCheapest(mergeResultSources(results));
   latestLiveRefresh = liveRefresh;
   countEl.textContent = String(groupedVenues(latestResults).length);
   renderMap(latestResults);
   renderResultList();
+}
+
+function ensureDownloadButton() {
+  if (document.querySelector("#downloadResults")) return;
+  const heading = document.querySelector(".result-list .panel-heading");
+  if (!heading || !countEl) return;
+  const tools = document.createElement("div");
+  tools.className = "panel-tools";
+  const button = document.createElement("button");
+  button.id = "downloadResults";
+  button.className = "download-results";
+  button.type = "button";
+  button.textContent = "Download results";
+  button.addEventListener("click", downloadSearchResults);
+  heading.insertBefore(tools, countEl);
+  tools.appendChild(button);
+  tools.appendChild(countEl);
+}
+
+function csvCell(value) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
+}
+
+function exportRows() {
+  return groupedVenues(latestResults).flatMap((group) => {
+    const venue = group.venue || {};
+    const pdfLists = groupPdfLists(group);
+    const lines = reconciledGroupLines(group);
+    const pdfUrls = pdfLists.map((list) => pdfUrl(list)).filter(Boolean).join(" | ");
+    return (lines.length ? lines : [{ text: "", vintage: "", priceValue: "", currency: "", review: true }]).map((line) => ({
+      place: fallback(venue.name),
+      type: venue.type || "Restaurant / wine bar",
+      city: venue.city || "",
+      country: venue.country || "",
+      updated: groupUpdatedValue(group) || group.results[0]?.wineList?.updatedDate || group.results[0]?.wineList?.updatedText || "",
+      matchedLine: line.text || "",
+      vintage: line.vintage || "",
+      originalPrice: originalPriceText(line),
+      krw: krwPriceText(line),
+      source: line.source || "Search index",
+      pdfUrls,
+      starWineListUrl: venue.url || "",
+      mapUrl: venue.starWineMapUrl || ""
+    }));
+  });
+}
+
+function downloadSearchResults() {
+  const headers = ["Place", "Type", "City", "Country", "Updated", "Matched line", "Vintage", "Original price", "KRW", "Source", "PDF URLs", "Star Wine List URL", "Map URL"];
+  const rows = exportRows();
+  const csv = [headers, ...rows.map((row) => [
+    row.place,
+    row.type,
+    row.city,
+    row.country,
+    row.updated,
+    row.matchedLine,
+    row.vintage,
+    row.originalPrice,
+    row.krw,
+    row.source,
+    row.pdfUrls,
+    row.starWineListUrl,
+    row.mapUrl
+  ])].map((row) => row.map(csvCell).join(",")).join("\r\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `whereiskelley-results-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function renderResultList() {
@@ -423,7 +702,6 @@ function renderResultList() {
           <th>${sortHeader("Updated", "updated")}</th>
           <th>${sortHeader("Matches", "matches")}</th>
           <th>${sortHeader("Lowest KRW", "krw")}</th>
-          <th>PDF</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -437,22 +715,24 @@ function renderPlaceRow(group) {
   const firstList = group.results[0]?.wineList || {};
   const lowest = groupLowestPriceResult(group);
   const expanded = key && key === activeVenueKey;
+  const sources = [...new Set(group.results.map(resultSource))].sort();
   return `<tr class="place-row${expanded ? " active" : ""}" data-venue-key="${escapeHtml(key)}">
-      <td class="place-cell"><b>${escapeHtml(fallback(venue.name))}</b><span>${escapeHtml(venue.type || "Restaurant / wine bar")}</span></td>
+      <td class="place-cell"><b>${escapeHtml(fallback(venue.name))}</b><span>${escapeHtml(venue.type || "Restaurant / wine bar")}</span><span class="source-badges">${sources.map(sourceBadge).join("")}</span></td>
       <td>${escapeHtml(fallback(venue.city))}</td>
       <td>${escapeHtml(fallback(venue.country))}</td>
       <td>${escapeHtml(fallback(groupUpdatedValue(group) || firstList.updatedDate || firstList.updatedText))}</td>
       <td>${escapeHtml(placeLineLabel(group))}</td>
       <td class="krw-cell">${krwPriceMarkup(lowest)}</td>
-      <td>${pdfMarkup(groupPdfList(group))}</td>
     </tr>${expanded ? renderExpandedPlace(group) : ""}`;
 }
 
 function placeLineLabel(group) {
+  const indexedLines = fallbackWineLines(group.results);
+  const verified = reconciledGroupLines(group).filter((line) => line.pdfVerified).length;
+  if (indexedLines.length && verified) return `${indexedLines.length} indexed / ${verified} verified`;
+  if (indexedLines.length) return `${indexedLines.length} indexed lines`;
   const pdfLines = groupPdfLines(group);
-  if (pdfLines.length) return `${pdfLines.length} PDF lines`;
-  const fallbackLines = fallbackWineLines(group.results);
-  if (fallbackLines.length) return `${fallbackLines.length} indexed lines`;
+  if (pdfLines.length) return `${pdfLines.length} PDF-only lines`;
   return "Review";
 }
 
@@ -463,10 +743,15 @@ function renderExpandedPlace(group) {
   if (groupPdfPending(group)) {
     window.setTimeout(() => loadPdfLines(group), 0);
   }
-  const sourceLines = pdfLines.length ? uniqueResults(pdfLines) : fallbackWineLines(group.results);
+  const sourceLines = reconciledGroupLines(group);
   const reviewReason = groupPdfReviewReason(group);
-  const reviewNote = pdfLines.length
-    ? ""
+  const indexedLines = fallbackWineLines(group.results);
+  const verifiedCount = sourceLines.filter((line) => line.pdfVerified).length;
+  const heldPdfExtras = indexedLines.length ? Math.max(0, pdfLines.length - verifiedCount) : 0;
+  const reviewNote = heldPdfExtras
+    ? `<div class="review-note">Showing Star Wine List indexed rows first. ${escapeHtml(String(heldPdfExtras))} PDF-only rows were held for review instead of being added automatically.</div>`
+    : pdfLines.length
+      ? ""
     : groupPdfPending(group)
       ? `<div class="review-note">Reading the current PDF download...</div>`
       : reviewReason
@@ -481,10 +766,11 @@ function renderExpandedPlace(group) {
       <td class="price-cell">${originalPriceMarkup(result)}</td>
       <td class="krw-cell">${krwPriceMarkup(result)}</td>
       <td>${escapeHtml(result.pageNumber || "")}</td>
+      <td>${sourceBadge(resultSource(result))}</td>
     </tr>`)
-    .join("") || `<tr><td colspan="5" class="muted">Review needed. The search index matched text for this place, but no priced wine line was verified from the PDF.</td></tr>`;
+    .join("") || `<tr><td colspan="6" class="muted">Review needed. The search index matched text for this place, but no priced wine line was verified from the PDF.</td></tr>`;
   return `<tr class="expanded-row">
-    <td colspan="7">
+    <td colspan="6">
       <div class="expanded-place">
         <div class="expanded-head">
           <div>
@@ -500,7 +786,7 @@ function renderExpandedPlace(group) {
         ${reviewNote}
         <table class="line-table">
           <thead>
-            <tr><th>Matched PDF/search line</th><th>Vintage</th><th>Price</th><th>KRW</th><th>Page</th></tr>
+            <tr><th>Matched PDF/search line</th><th>Vintage</th><th>Price</th><th>KRW</th><th>Page</th><th>Source</th></tr>
           </thead>
           <tbody>${lines}</tbody>
         </table>
@@ -697,8 +983,20 @@ async function runSearch() {
   }
   params.set("limit", "5000");
   try {
-    const payload = await getJson(`/api/search?${params.toString()}`);
-    renderResults(payload.results, payload.liveRefresh);
+    const [snapshotResult, liveResult] = await Promise.allSettled([
+      searchSnapshot(params),
+      getJson(`/api/search?${params.toString()}`)
+    ]);
+    const snapshotPayload = snapshotResult.status === "fulfilled" ? snapshotResult.value : { results: [], liveRefresh: null };
+    const livePayload = liveResult.status === "fulfilled" ? liveResult.value : { results: [], liveRefresh: null };
+    const dbResults = (snapshotPayload.results || []).map((result) => ({ ...result, source: result.source || "DB" }));
+    const liveResults = (livePayload.results || []).map((result) => ({ ...result, source: "Live" }));
+    renderResults([...dbResults, ...liveResults], {
+      sourceSummary: "DB snapshot + live API",
+      snapshotLines: snapshotPayload.liveRefresh?.snapshotLines || 0,
+      snapshotMatches: dbResults.length,
+      liveMatches: liveResults.length
+    });
   } finally {
     submitButton.disabled = false;
   }
