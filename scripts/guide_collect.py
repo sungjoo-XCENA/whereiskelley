@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -236,7 +237,7 @@ def init_db():
         con.commit()
 
 
-def fetch_text(url, timeout=30):
+def fetch_text(url, timeout=8):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf,*/*;q=0.8",
@@ -275,7 +276,7 @@ def render_page_text(url):
             encoding="utf-8",
             errors="replace",
             capture_output=True,
-            timeout=35,
+            timeout=12,
         )
     except Exception:
         return ""
@@ -692,7 +693,7 @@ def discover_candidate_wine_links(base_url, html, max_pages=40):
         if urlparse(link["url"]).path.lower().endswith(".pdf"):
             continue
         try:
-            content, content_type = fetch_text(link["url"], timeout=20)
+            content, content_type = fetch_text(link["url"], timeout=5)
         except Exception:
             continue
         if not isinstance(content, str) or "html" not in content_type.lower():
@@ -912,7 +913,7 @@ def load_watchlist():
 
 def scan_wine_source(con, target, url, watches, link_score=0):
     try:
-        content, content_type = fetch_text(url, timeout=30)
+        content, content_type = fetch_text(url, timeout=6)
         source_type = "pdf" if "pdf" in content_type.lower() or urlparse(url).path.lower().endswith(".pdf") else "html"
         if source_type == "pdf":
             temp = DATA_DIR / "_temp.pdf"
@@ -923,7 +924,7 @@ def scan_wine_source(con, target, url, watches, link_score=0):
             text = html_to_lines(content)
             if link_score >= 80:
                 quick_lines = [line for line in candidate_text_lines(text) if likely_wine_line(line, watches)]
-                if not quick_lines:
+                if not quick_lines and os.environ.get("WHEREISKELLEY_RENDER_DYNAMIC") == "1":
                     rendered_text = render_page_text(url)
                     if rendered_text:
                         text = rendered_text

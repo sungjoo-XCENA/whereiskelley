@@ -422,8 +422,12 @@
 
   function targetKind(target) {
     const status = target?.status || "";
+    if (number(target.verifiedWineListCount) > 0 || (
+      target.wineListStatus === "found" &&
+      target.wineListParserStatus === "parsed" &&
+      number(target.chosenWineLineCount) > 0
+    )) return "found";
     if (status === "no_wine_list") return "none";
-    if (status === "found" || number(target.wineListCount) > 0 || number(target.wineLineCount) > 0) return "found";
     return "pending";
   }
 
@@ -525,13 +529,15 @@
 
   function infoHtml(target) {
     const location = [target.city, target.country].filter(Boolean).join(", ");
+    const kind = targetKind(target);
+    const wineListLabel = kind === "found" ? "Wine list" : "Review source";
     const wineList = target.wineListUrl
-      ? `<br><a href="${html(target.wineListUrl)}" target="_blank" rel="noreferrer">Wine list</a>`
+      ? `<br><a href="${html(target.wineListUrl)}" target="_blank" rel="noreferrer">${html(wineListLabel)}</a>`
       : "";
     const website = target.websiteUrl && target.websiteUrl !== target.wineListUrl
       ? `<br><a href="${html(target.websiteUrl)}" target="_blank" rel="noreferrer">Official website</a>`
       : "";
-    return `<strong>${html(target.name || "Unknown")}</strong><br>${html(location || "Unknown location")}<br>${html(statusLabel(target.status))}${wineList}${website}`;
+    return `<strong>${html(target.name || "Unknown")}</strong><br>${html(location || "Unknown location")}<br>${targetPill(target)}${wineList}${website}`;
   }
 
   async function renderDashboardMap(payload, options = {}) {
@@ -648,7 +654,10 @@
     }
     const location = [target.city, target.country].filter(Boolean).join(", ");
     const googleMapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([target.name, target.city, target.country].filter(Boolean).join(" "))}`;
-    const wineListLabel = /pdf|file/i.test(String(target.wineListType || target.wineListUrl || ""))
+    const kind = targetKind(target);
+    const wineListLabel = kind !== "found"
+      ? "Review source"
+      : /pdf|file/i.test(String(target.wineListType || target.wineListUrl || ""))
       ? "Wine list file"
       : "Wine list";
     return `<div class="selected-target">
@@ -662,7 +671,7 @@
         <div class="metric-box"><span>Last checked</span><b>${html(target.lastCheckedAt || "-")}</b></div>
       </div>
       <div class="selected-target-actions">
-        ${target.wineListUrl ? `<a href="${html(target.wineListUrl)}" target="_blank" rel="noreferrer">${html(wineListLabel)}</a>` : ""}
+        ${target.wineListUrl ? `<a class="${kind === "found" ? "" : "secondary"}" href="${html(target.wineListUrl)}" target="_blank" rel="noreferrer">${html(wineListLabel)}</a>` : ""}
         ${target.websiteUrl && target.websiteUrl !== target.wineListUrl ? `<a class="secondary" href="${html(target.websiteUrl)}" target="_blank" rel="noreferrer">Official website</a>` : ""}
         <a class="secondary" href="${html(googleMapUrl)}" target="_blank" rel="noreferrer">Google Maps</a>
         <button class="secondary" type="button" data-clear-dashboard-selection>Close</button>
@@ -682,8 +691,20 @@
     const summary = values.summary;
     const progress = values.progress;
     const mapped = visibleMapTargets(payload).length;
+    const progressCounts = progress.dbCounts || {};
+    const sourceCount = Math.max(
+      number(summary.totalSources),
+      number(payload.counts?.wineListSources),
+      number(progressCounts.wineListSources),
+      number(progress.wineListsFound)
+    );
+    const savedLines = Math.max(
+      number(payload.counts?.wineLines),
+      number(progressCounts.wineLines),
+      number(progress.wineLinesFound)
+    );
     const parsedSources = number(summary.parsedSources);
-    const reviewSources = number(summary.parseReviewSources);
+    const reviewSources = Math.max(number(summary.parseReviewSources), Math.max(0, sourceCount - parsedSources));
     const found = number(summary.foundWineList);
     const none = number(summary.noWineList);
     const pending = number(summary.pending) + number(summary.missingWebsite);
@@ -706,7 +727,7 @@
     const cardsHtml = `<div class="dashboard-grid" data-dashboard-section="cards">
       <div class="dashboard-card"><span>Collection</span><b>${html(values.status)}</b><small>${html(collectionText)}</small></div>
       <div class="dashboard-card"><span>Progress</span><b>${html(values.percent.toFixed(1))}%</b><small>${html(fmtInt(values.processed))} checked / ${html(fmtInt(values.remaining))} left / ${html(fmtInt(values.total))} total</small></div>
-      <div class="dashboard-card"><span>Wine lists found</span><b>${html(fmtInt(summary.totalSources || payload.counts?.wineListSources))}</b><small>${html(fmtInt(summary.parsedSources))} parsed sources, ${html(fmtInt(payload.counts?.wineLines))} saved wine lines.</small></div>
+      <div class="dashboard-card"><span>Wine-list sources</span><b>${html(fmtInt(sourceCount))}</b><small>${html(fmtInt(parsedSources))} verified sources, ${html(fmtInt(savedLines))} saved wine lines.</small></div>
       <div class="dashboard-card"><span>Needs review</span><b>${html(fmtInt(reviewSources + errorCount))}</b><small>${html(fmtInt(reviewSources))} parser reviews / ${html(fmtInt(errorCount))} restaurant errors.</small></div>
     </div>`;
 
@@ -734,7 +755,7 @@
       <h2>What the collector found</h2>
       <div class="db-health-grid">
         <div class="metric-box"><span>Restaurants saved</span><b>${html(fmtInt(summary.totalTargets || values.total))}</b></div>
-        <div class="metric-box"><span>Wine list found</span><b>${html(fmtInt(found))}</b></div>
+        <div class="metric-box"><span>Verified wine lists</span><b>${html(fmtInt(found))}</b></div>
         <div class="metric-box"><span>No wine list</span><b>${html(fmtInt(none))}</b></div>
         <div class="metric-box"><span>Pending / no website</span><b>${html(fmtInt(pending))}</b></div>
         <div class="metric-box"><span>Parsing review</span><b>${html(fmtInt(reviewSources))}</b></div>

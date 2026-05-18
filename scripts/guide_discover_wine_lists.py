@@ -206,11 +206,11 @@ def direct_wine_source(url, html, watches):
 
 
 def discover_target(con, target, watches, max_links):
-    content, content_type = guide.fetch_text(target["website_url"], timeout=25)
+    content, content_type = guide.fetch_text(target["website_url"], timeout=6)
     if not isinstance(content, str):
         return 0, 0, "Official website returned binary content."
 
-    links = guide.discover_candidate_wine_links(target["website_url"], content, max_pages=max(8, min(18, max_links)))
+    links = guide.discover_candidate_wine_links(target["website_url"], content, max_pages=max(2, min(4, max_links)))
     if direct_wine_source(target["website_url"], content, watches):
         links.insert(0, {"url": target["website_url"], "text": "Official website", "score": 1})
 
@@ -301,10 +301,130 @@ def db_counts(con):
     }
 
 
+def row_to_dict(row):
+    return {key: row[key] for key in row.keys()}
+
+
+def dashboard_payload(con, progress_payload):
+    counts = db_counts(con)
+    target_summary = con.execute(
+        """
+        select
+          count(1) as totalTargets,
+          sum(case when status != 'not_checked' then 1 else 0 end) as checkedTargets,
+          sum(case when status = 'no_wine_list' then 1 else 0 end) as noWineList,
+          sum(case when status in ('not_checked','missing_website') then 1 else 0 end) as pending,
+          sum(case when status in ('review','error') then 1 else 0 end) as needsReview,
+          sum(case when status = 'error' then 1 else 0 end) as errors,
+          sum(case when status != 'not_checked' and lat is not null and lng is not null then 1 else 0 end) as mappedTargets
+        from restaurant_targets
+        """
+    ).fetchone()
+    source_summary = con.execute(
+        """
+        select
+          count(1) as totalSources,
+          count(distinct case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 then target_id end) as foundWineList,
+          sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 then 1 else 0 end) as parsedSources,
+          sum(case when status != 'found' or parser_status != 'parsed' or coalesce(line_count, 0) = 0 then 1 else 0 end) as parseReviewSources,
+          sum(case when parser_status = 'parsed' and coalesce(line_count, 0) = 0 then 1 else 0 end) as emptyParsedSources
+        from wine_list_sources
+        """
+    ).fetchone()
+    summary = row_to_dict(target_summary)
+    summary.update(row_to_dict(source_summary))
+    collection_summary = {key: int(value or 0) for key, value in summary.items()}
+    map_targets = [
+        row_to_dict(row)
+        for row in con.execute(
+            """
+            with source_counts as (
+              select target_id,
+                     count(1) as source_count,
+                     sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 then 1 else 0 end) as verified_source_count,
+                     sum(case when status != 'found' or parser_status != 'parsed' or coalesce(line_count, 0) = 0 then 1 else 0 end) as review_source_count
+              from wine_list_sources
+              group by target_id
+            ),
+            entry_counts as (
+              select target_id, count(1) as line_count
+              from guide_wine_entries
+              group by target_id
+            ),
+            wine_choices as (
+              select target_id, url, source_type, status as source_status, parser_status, line_count
+              from (
+                select
+                  s.target_id,
+                  s.url,
+                  s.source_type,
+                  s.status,
+                  s.parser_status,
+                  s.line_count,
+                  row_number() over (
+                    partition by s.target_id
+                    order by
+                      case when s.status = 'found' and s.parser_status = 'parsed' and coalesce(s.line_count, 0) > 0 then 0 else 1 end,
+                      case when s.source_type = 'pdf' then 0 else 1 end,
+                      coalesce(s.line_count, 0) desc,
+                      s.last_checked_at desc,
+                      s.discovered_at desc
+                  ) as choice_rank
+                from wine_list_sources s
+              )
+              where choice_rank = 1
+            )
+            select
+              t.id,
+              t.name,
+              t.city,
+              t.country,
+              t.address,
+              t.lat,
+              t.lng,
+              t.website_url as websiteUrl,
+              t.status,
+              t.last_checked_at as lastCheckedAt,
+              t.last_error as lastError,
+              wc.url as wineListUrl,
+              wc.source_type as wineListType,
+              wc.source_status as wineListStatus,
+              wc.parser_status as wineListParserStatus,
+              coalesce(wc.line_count, 0) as chosenWineLineCount,
+              coalesce(sc.source_count, 0) as wineListCount,
+              coalesce(sc.verified_source_count, 0) as verifiedWineListCount,
+              coalesce(sc.review_source_count, 0) as reviewSourceCount,
+              coalesce(ec.line_count, 0) as wineLineCount
+            from restaurant_targets t
+            left join source_counts sc on sc.target_id = t.id
+            left join entry_counts ec on ec.target_id = t.id
+            left join wine_choices wc on wc.target_id = t.id
+            where t.status != 'not_checked'
+              and t.lat is not null
+              and t.lng is not null
+            order by t.last_checked_at desc, t.name asc
+            limit 7000
+            """
+        )
+    ]
+    status_counts = [
+        row_to_dict(row)
+        for row in con.execute("select status, count(1) as count from restaurant_targets group by status order by count desc")
+    ]
+    return {
+        "generatedAt": progress_payload.get("generatedAt"),
+        "progress": progress_payload,
+        "counts": counts,
+        "statusCounts": status_counts,
+        "collectionSummary": collection_summary,
+        "mapTargets": map_targets,
+    }
+
+
 def write_live_progress(con, **payload):
     payload["dbCounts"] = db_counts(con)
     guide.write_progress(**payload)
-    firebase_sync.publish_progress(payload)
+    firebase_sync.publish_progress(dashboard_payload(con, payload))
 
 
 def sql_time_to_epoch(value):
@@ -362,7 +482,7 @@ def export_status(con, run_id, watch_hits=0):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-targets", type=int, default=0, help="0 means all restaurant targets.")
-    parser.add_argument("--max-links", type=int, default=20)
+    parser.add_argument("--max-links", type=int, default=5)
     parser.add_argument("--skip-google", action="store_true")
     parser.add_argument("--refresh-websites", action="store_true", help="Resolve Google Places even if website_url already exists.")
     parser.add_argument("--recheck-all", action="store_true", help="Recheck targets that were already found or already had no wine list.")
@@ -432,6 +552,8 @@ def main():
 
         for index, row in enumerate(rows, start=1):
             target = dict(row)
+            current_sources = 0
+            current_lines = 0
             write_live_progress(
                 con,
                 runId=run_id,
@@ -469,8 +591,23 @@ def main():
                         "update restaurant_targets set status='missing_website', last_checked_at=current_timestamp where id=?",
                         (target["id"],),
                     )
-                if index % 10 == 0:
-                    con.commit()
+                con.commit()
+                write_live_progress(
+                    con,
+                    runId=run_id,
+                    phase="checking_wine_lists",
+                    currentTarget=target.get("name", ""),
+                    currentUrl="",
+                    targetsCollected=targets_total,
+                    processedTargets=index,
+                    websitesChecked=websites_checked,
+                    totalWebsites=len(rows),
+                    wineListsFound=wine_lists_found,
+                    wineLinesFound=wine_lines_found,
+                    errors=errors,
+                    message="Restaurant website is missing; moved to review.",
+                    **timing_payload(started_at, index, len(rows)),
+                )
                 continue
 
             websites_checked += 1
@@ -479,6 +616,8 @@ def main():
                     con.execute("delete from guide_wine_entries where target_id=?", (target["id"],))
                     con.execute("delete from wine_list_sources where target_id=?", (target["id"],))
                 sources, lines, error = discover_target(con, target, watches, args.max_links)
+                current_sources = sources
+                current_lines = lines
                 wine_lists_found += sources
                 wine_lines_found += lines
                 if error:
@@ -490,8 +629,27 @@ def main():
                     (str(exc), target["id"]),
                 )
 
-            if index % 10 == 0:
-                con.commit()
+            con.commit()
+            write_live_progress(
+                con,
+                runId=run_id,
+                phase="checking_wine_lists",
+                currentTarget=target.get("name", ""),
+                currentUrl=target.get("website_url") or "",
+                targetsCollected=targets_total,
+                processedTargets=index,
+                websitesChecked=websites_checked,
+                totalWebsites=len(rows),
+                wineListsFound=wine_lists_found,
+                wineLinesFound=wine_lines_found,
+                errors=errors,
+                message=(
+                    "Verified a wine list for this restaurant."
+                    if current_sources
+                    else "Checked restaurant; wine-list source needs review or was not found."
+                ),
+                **timing_payload(started_at, index, len(rows)),
+            )
 
         watch_hits = write_watch_hits(con)
         con.execute(
@@ -547,6 +705,7 @@ def main():
                     pass
         result_payload["dbCounts"] = db_counts(con)
         result_payload["completedAt"] = guide.now_sql()
+        result_payload.update(dashboard_payload(con, result_payload.get("guide_status", {}).get("lastRun", {}) if isinstance(result_payload.get("guide_status"), dict) else {}))
         firebase_sync.publish_result(result_payload)
         con.commit()
         print(

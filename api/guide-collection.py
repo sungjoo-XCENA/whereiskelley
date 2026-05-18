@@ -47,7 +47,13 @@ def payload():
             local_payload.setdefault("source", "local_api")
         return local_payload
     progress = fetch_firebase("progress") or {}
+    if isinstance(progress, dict) and (progress.get("collectionSummary") or progress.get("mapTargets")):
+        progress.setdefault("source", "firebase")
+        return progress
     result = fetch_firebase("result") or {}
+    if isinstance(result, dict) and (result.get("collectionSummary") or result.get("mapTargets")):
+        result.setdefault("source", "firebase_result")
+        return result
     status = result.get("guide_status") or result.get("guide-status") or {}
     hits = result.get("guide_watch_hits") or result.get("guide-watch-hits") or []
     return {

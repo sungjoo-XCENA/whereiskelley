@@ -186,6 +186,7 @@ def mark_stale_progress(progress):
 def guide_collection_status():
     progress = mark_stale_progress(read_json_file(GUIDE_PROGRESS_PATH, {}))
     snapshot = read_json_file(GUIDE_STATUS_PATH, {})
+    progress_counts = progress.get("dbCounts") if isinstance(progress.get("dbCounts"), dict) else {}
     payload = {
         "generatedAt": progress.get("generatedAt") or snapshot.get("generatedAt"),
         "progress": progress,
@@ -253,7 +254,6 @@ def guide_collection_status():
             select
               count(1) as totalTargets,
               sum(case when status != 'not_checked' then 1 else 0 end) as checkedTargets,
-              sum(case when status = 'found' then 1 else 0 end) as foundWineList,
               sum(case when status = 'no_wine_list' then 1 else 0 end) as noWineList,
               sum(case when status = 'not_checked' then 1 else 0 end) as pending,
               sum(case when status = 'missing_website' then 1 else 0 end) as missingWebsite,
@@ -267,8 +267,9 @@ def guide_collection_status():
             """
             select
               count(1) as totalSources,
-              sum(case when parser_status = 'parsed' then 1 else 0 end) as parsedSources,
-              sum(case when parser_status = 'review' or status = 'review' or (last_error is not null and last_error != '') then 1 else 0 end) as parseReviewSources,
+              count(distinct case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 then target_id end) as foundWineList,
+              sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 then 1 else 0 end) as parsedSources,
+              sum(case when status != 'found' or parser_status != 'parsed' or coalesce(line_count, 0) = 0 or (last_error is not null and last_error != '') then 1 else 0 end) as parseReviewSources,
               sum(case when parser_status = 'parsed' and coalesce(line_count, 0) = 0 then 1 else 0 end) as emptyParsedSources
             from wine_list_sources
             """
@@ -297,7 +298,8 @@ def guide_collection_status():
                 """
                 with source_counts as (
                   select target_id, count(1) as source_count,
-                         sum(case when parser_status = 'review' or status = 'review' or (last_error is not null and last_error != '') then 1 else 0 end) as review_source_count
+                         sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 then 1 else 0 end) as verified_source_count,
+                         sum(case when status != 'found' or parser_status != 'parsed' or coalesce(line_count, 0) = 0 or (last_error is not null and last_error != '') then 1 else 0 end) as review_source_count
                   from wine_list_sources
                   group by target_id
                 ),
@@ -307,15 +309,19 @@ def guide_collection_status():
                   group by target_id
                 ),
                 wine_choices as (
-                  select target_id, url, source_type
+                  select target_id, url, source_type, status as source_status, parser_status, line_count
                   from (
                     select
                       s.target_id,
                       s.url,
                       s.source_type,
+                      s.status,
+                      s.parser_status,
+                      s.line_count,
                       row_number() over (
                         partition by s.target_id
                         order by
+                          case when s.status = 'found' and s.parser_status = 'parsed' and coalesce(s.line_count, 0) > 0 then 0 else 1 end,
                           case when rt.website_url is not null and rt.website_url != '' and s.url = rt.website_url then 1 else 0 end,
                           case when s.source_type = 'pdf' then 0 else 1 end,
                           case
@@ -346,7 +352,11 @@ def guide_collection_status():
                   t.last_error as lastError,
                   wc.url as wineListUrl,
                   wc.source_type as wineListType,
+                  wc.source_status as wineListStatus,
+                  wc.parser_status as wineListParserStatus,
+                  coalesce(wc.line_count, 0) as chosenWineLineCount,
                   coalesce(sc.source_count, 0) as wineListCount,
+                  coalesce(sc.verified_source_count, 0) as verifiedWineListCount,
                   coalesce(sc.review_source_count, 0) as reviewSourceCount,
                   coalesce(ec.line_count, 0) as wineLineCount
                 from restaurant_targets t
@@ -380,6 +390,17 @@ def guide_collection_status():
                 """
             )
         ]
+    for key in ["wineListSources", "wineLines", "review"]:
+        payload["counts"][key] = max(int(payload["counts"].get(key) or 0), int(progress_counts.get(key) or 0))
+    payload["collectionSummary"]["totalSources"] = max(
+        int(payload["collectionSummary"].get("totalSources") or 0),
+        int(payload["counts"].get("wineListSources") or 0),
+        int(progress.get("wineListsFound") or 0),
+    )
+    payload["collectionSummary"]["parseReviewSources"] = max(
+        int(payload["collectionSummary"].get("parseReviewSources") or 0),
+        max(0, int(payload["collectionSummary"].get("totalSources") or 0) - int(payload["collectionSummary"].get("parsedSources") or 0)),
+    )
     return payload
 
 
