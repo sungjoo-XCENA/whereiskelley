@@ -366,6 +366,7 @@ def main():
     parser.add_argument("--skip-google", action="store_true")
     parser.add_argument("--refresh-websites", action="store_true", help="Resolve Google Places even if website_url already exists.")
     parser.add_argument("--recheck-all", action="store_true", help="Recheck targets that were already found or already had no wine list.")
+    parser.add_argument("--replace-existing", action="store_true", help="Replace saved wine-list sources and lines for each checked target.")
     parser.add_argument("--sleep", type=float, default=0.18)
     args = parser.parse_args()
 
@@ -474,6 +475,9 @@ def main():
 
             websites_checked += 1
             try:
+                if args.replace_existing:
+                    con.execute("delete from guide_wine_entries where target_id=?", (target["id"],))
+                    con.execute("delete from wine_list_sources where target_id=?", (target["id"],))
                 sources, lines, error = discover_target(con, target, watches, args.max_links)
                 wine_lists_found += sources
                 wine_lines_found += lines
