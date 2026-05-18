@@ -353,6 +353,9 @@ def guide_collection_status():
                 left join source_counts sc on sc.target_id = t.id
                 left join entry_counts ec on ec.target_id = t.id
                 left join wine_choices wc on wc.target_id = t.id
+                where t.status != 'not_checked'
+                  and t.lat is not null
+                  and t.lng is not null
                 order by
                   case
                     when t.status = 'found' then 0
