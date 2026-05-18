@@ -41,7 +41,12 @@ def fetch_firebase(path):
 
 
 def payload():
-    local_payload = proxy_json("/api/guide-collection")
+    local_error = ""
+    try:
+        local_payload = proxy_json("/api/guide-collection")
+    except Exception as exc:
+        local_payload = None
+        local_error = str(exc)
     if local_payload is not None:
         if isinstance(local_payload, dict):
             local_payload.setdefault("source", "local_api")
@@ -63,6 +68,7 @@ def payload():
         "guideHits": hits if isinstance(hits, list) else [],
         "counts": progress.get("dbCounts") or result.get("dbCounts") or {},
         "source": "firebase" if os.environ.get("FIREBASE_DATABASE_URL") else "not_configured",
+        "localApiError": local_error,
     }
 
 
