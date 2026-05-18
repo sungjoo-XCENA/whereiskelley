@@ -4,6 +4,9 @@
     dashboardMap: null,
     dashboardMapEl: null,
     dashboardInfoWindow: null,
+    dashboardDataLayer: null,
+    dashboardDataClickBound: false,
+    dashboardMapSignature: "",
     dashboardMarkers: new Map(),
     dashboardMapHasFit: false,
     dashboardMapPromise: null,
@@ -489,6 +492,27 @@
     };
   }
 
+  function mapSignature(targets) {
+    return targets
+      .map((target) => [target.id, target.status, target.lat, target.lng, target.wineListCount, target.wineLineCount].join(":"))
+      .join("|");
+  }
+
+  function targetFeature(target) {
+    return {
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [Number(target.lng), Number(target.lat)]
+      },
+      properties: {
+        id: String(target.id),
+        kind: targetKind(target),
+        name: target.name || "Restaurant"
+      }
+    };
+  }
+
   function infoHtml(target) {
     const location = [target.city, target.country].filter(Boolean).join(", ");
     const wineList = target.wineListUrl
@@ -538,36 +562,27 @@
         state.dashboardInfoWindow = new maps.InfoWindow();
         state.dashboardMapHasFit = false;
       }
-      const visibleTargets = targets.slice(0, 2500);
-      const visibleIds = new Set(visibleTargets.map((target) => String(target.id)));
-      for (const [id, marker] of state.dashboardMarkers.entries()) {
-        if (!visibleIds.has(id)) {
-          marker.setMap(null);
-          state.dashboardMarkers.delete(id);
-        }
-      }
+      const signature = mapSignature(targets);
       const bounds = new maps.LatLngBounds();
-      visibleTargets.forEach((target) => {
-        const position = { lat: target.lat, lng: target.lng };
-        bounds.extend(position);
-        const id = String(target.id);
-        const icon = markerIcon(maps, markerColor(targetKind(target)));
-        const existing = state.dashboardMarkers.get(id);
-        if (existing) {
-          existing.setPosition(position);
-          existing.setTitle(target.name || "Restaurant");
-          existing.setIcon(icon);
-          return;
-        }
-        const marker = new maps.Marker({
-          map: state.dashboardMap,
-          position,
-          title: target.name || "Restaurant",
-          icon
+      targets.forEach((target) => bounds.extend({ lat: target.lat, lng: target.lng }));
+      if (!state.dashboardDataLayer) {
+        state.dashboardDataLayer = new maps.Data({ map: state.dashboardMap });
+        state.dashboardDataLayer.setStyle((feature) => markerIcon(maps, markerColor(feature.getProperty("kind"))));
+      }
+      if (!state.dashboardDataClickBound) {
+        state.dashboardDataLayer.addListener("click", (event) => {
+          selectDashboardTarget(event.feature.getProperty("id"), true, event.latLng);
         });
-        marker.addListener("click", () => selectDashboardTarget(target.id));
-        state.dashboardMarkers.set(id, marker);
-      });
+        state.dashboardDataClickBound = true;
+      }
+      if (signature !== state.dashboardMapSignature) {
+        state.dashboardDataLayer.forEach((feature) => state.dashboardDataLayer.remove(feature));
+        state.dashboardDataLayer.addGeoJson({
+          type: "FeatureCollection",
+          features: targets.map(targetFeature)
+        });
+        state.dashboardMapSignature = signature;
+      }
       if (!state.dashboardMapHasFit || options.fit) {
         state.dashboardMap.fitBounds(bounds, 56);
         if (targets.length === 1) state.dashboardMap.setZoom(12);
@@ -580,17 +595,21 @@
     }
   }
 
-  function selectDashboardTarget(id, shouldScroll = true) {
+  function selectDashboardTarget(id, shouldScroll = true, clickedLatLng = null) {
     state.activeTargetId = String(id || "");
     const payload = state.guidePayload || {};
     const target = (payload.mapTargets || []).find((item) => String(item.id) === state.activeTargetId);
     if (!target) return;
     const marker = state.dashboardMarkers.get(String(target.id));
-    if (marker && state.dashboardMap) {
-      state.dashboardMap.panTo(marker.getPosition());
+    const position = clickedLatLng || (Number.isFinite(Number(target.lat)) && Number.isFinite(Number(target.lng))
+      ? new google.maps.LatLng(Number(target.lat), Number(target.lng))
+      : null);
+    if (state.dashboardMap && position) {
+      state.dashboardMap.panTo(position);
       if (state.dashboardMap.getZoom() < 8) state.dashboardMap.setZoom(8);
       state.dashboardInfoWindow?.setContent(infoHtml(target));
-      state.dashboardInfoWindow?.open({ map: state.dashboardMap, anchor: marker });
+      state.dashboardInfoWindow?.setPosition(position);
+      state.dashboardInfoWindow?.open({ map: state.dashboardMap });
     }
     renderSelectedTarget(payload);
     if (shouldScroll) {
