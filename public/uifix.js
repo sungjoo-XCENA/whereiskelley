@@ -501,6 +501,7 @@
   }
 
   function setupAppShellViews() {
+    if (window.WHEREISKELLEY_USE_DASHBOARD_FIX !== false) return;
     if (document.querySelector(".view-tabs")) return;
     loadWatchlist();
     const header = document.querySelector(".app-header");
