@@ -386,7 +386,8 @@
     const counts = payload?.counts || {};
     const latestRun = payload?.latestRuns?.[0] || {};
     const summary = payload?.collectionSummary || {};
-    const running = progress.status === "running";
+    const running = progress.status === "running" && !progress.stale;
+    const stopped = progress.status === "stalled" || Boolean(progress.stale);
     const processed = number(progress.processedTargets ?? progress.websitesChecked ?? latestRun.websites_checked);
     const total = number(progress.totalWebsites || summary.totalTargets || counts.targets || latestRun.target_count);
     const percent = total ? Math.min(100, Math.max(0, number(progress.progressPercent || ((processed / total) * 100)))) : 0;
@@ -396,13 +397,14 @@
       latestRun,
       summary,
       running,
+      stopped,
       processed,
       total,
       remaining: total ? Math.max(0, total - processed) : 0,
       percent,
       elapsed: progress.elapsedSeconds ?? secondsBetween(progress.startedAt || latestRun.started_at, progress.finishedAt || latestRun.finished_at),
       duration: progress.durationSeconds ?? secondsBetween(progress.startedAt || latestRun.started_at, progress.finishedAt || latestRun.finished_at),
-      status: running ? "Collecting" : latestRun.status === "completed" ? "Done" : "Ready"
+      status: running ? "Collecting" : stopped ? "Stopped" : latestRun.status === "completed" ? "Done" : "Ready"
     };
   }
 
@@ -689,9 +691,20 @@
     const etaText = values.running
       ? `${formatDuration(progress.estimatedRemainingSeconds)}${progress.estimatedFinishAt ? ` / ${formatTime(progress.estimatedFinishAt)}` : ""}`
       : formatDuration(values.duration);
+    const collectionText = values.running
+      ? "The local PC collector is running now."
+      : values.stopped
+        ? "The local PC collector stopped reporting progress."
+        : "No background collection is running right now.";
+    const progressTitle = values.running
+      ? "Collecting restaurant wine lists"
+      : values.stopped
+        ? "Collection stopped"
+        : "Collection status";
+    const progressPillClass = values.running ? "good" : values.stopped ? "warn" : "";
 
     const cardsHtml = `<div class="dashboard-grid" data-dashboard-section="cards">
-      <div class="dashboard-card"><span>Collection</span><b>${html(values.status)}</b><small>${values.running ? "The local PC collector is running now." : "No background collection is running right now."}</small></div>
+      <div class="dashboard-card"><span>Collection</span><b>${html(values.status)}</b><small>${html(collectionText)}</small></div>
       <div class="dashboard-card"><span>Progress</span><b>${html(values.percent.toFixed(1))}%</b><small>${html(fmtInt(values.processed))} checked / ${html(fmtInt(values.remaining))} left / ${html(fmtInt(values.total))} total</small></div>
       <div class="dashboard-card"><span>Wine lists found</span><b>${html(fmtInt(summary.totalSources || payload.counts?.wineListSources))}</b><small>${html(fmtInt(summary.parsedSources))} parsed sources, ${html(fmtInt(payload.counts?.wineLines))} saved wine lines.</small></div>
       <div class="dashboard-card"><span>Needs review</span><b>${html(fmtInt(reviewSources + errorCount))}</b><small>${html(fmtInt(reviewSources))} parser reviews / ${html(fmtInt(errorCount))} restaurant errors.</small></div>
@@ -701,9 +714,9 @@
       <div class="collection-head">
         <div>
           <p class="dash-kicker">Collect progress</p>
-          <h2>${html(values.running ? "Collecting restaurant wine lists" : "Collection status")}</h2>
+          <h2>${html(progressTitle)}</h2>
         </div>
-        <span class="dash-pill ${values.running ? "good" : ""}">${html(values.status)}</span>
+        <span class="dash-pill ${progressPillClass}">${html(values.status)}</span>
       </div>
       <div class="dash-progress" style="--dash-progress:${html(values.percent)}%"><i></i></div>
       <div class="collection-metrics">

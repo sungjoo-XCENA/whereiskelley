@@ -5,6 +5,7 @@ import os
 import sqlite3
 import sys
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
@@ -158,8 +159,32 @@ def read_json_file(path, fallback):
     return fallback
 
 
+def mark_stale_progress(progress):
+    if not isinstance(progress, dict) or progress.get("status") != "running":
+        return progress
+    generated_at = progress.get("generatedAt")
+    if not generated_at:
+        return progress
+    try:
+        updated_at = datetime.fromisoformat(str(generated_at).replace("Z", "+00:00"))
+    except ValueError:
+        return progress
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    stale_seconds = int((datetime.now(timezone.utc) - updated_at).total_seconds())
+    if stale_seconds <= 15 * 60:
+        return progress
+    stalled = dict(progress)
+    stalled["status"] = "stalled"
+    stalled["phase"] = "stalled"
+    stalled["stale"] = True
+    stalled["staleSeconds"] = stale_seconds
+    stalled["message"] = "Collector stopped reporting progress. Restart the local collection to continue."
+    return stalled
+
+
 def guide_collection_status():
-    progress = read_json_file(GUIDE_PROGRESS_PATH, {})
+    progress = mark_stale_progress(read_json_file(GUIDE_PROGRESS_PATH, {}))
     snapshot = read_json_file(GUIDE_STATUS_PATH, {})
     payload = {
         "generatedAt": progress.get("generatedAt") or snapshot.get("generatedAt"),
