@@ -445,6 +445,12 @@
     return "#f59e0b";
   }
 
+  function markerLabel(kind) {
+    if (kind === "found") return "F";
+    if (kind === "none") return "N";
+    return "R";
+  }
+
   function getGoogleMapsKey() {
     return window.STARWINE_CONFIG?.googleMapsApiKey || localStorage.getItem("googleMapsApiKey") || "";
   }
@@ -481,14 +487,16 @@
     return state.dashboardMapPromise;
   }
 
-  function markerIcon(maps, color) {
+  function markerIcon(maps, color, label = "") {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="38" viewBox="0 0 30 38">
+      <path fill="${color}" stroke="#ffffff" stroke-width="2.2" d="M15 2C8.1 2 2.5 7.6 2.5 14.5 2.5 24 15 36 15 36s12.5-12 12.5-21.5C27.5 7.6 21.9 2 15 2Z"/>
+      <circle cx="15" cy="14.5" r="6" fill="rgba(255,255,255,0.95)"/>
+      <text x="15" y="18.2" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" font-weight="800" fill="${color}">${label}</text>
+    </svg>`;
     return {
-      path: maps.SymbolPath.CIRCLE,
-      scale: 7,
-      fillColor: color,
-      fillOpacity: 0.95,
-      strokeColor: "#ffffff",
-      strokeWeight: 2
+      url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+      scaledSize: new maps.Size(24, 30),
+      anchor: new maps.Point(12, 30)
     };
   }
 
@@ -567,7 +575,10 @@
       targets.forEach((target) => bounds.extend({ lat: target.lat, lng: target.lng }));
       if (!state.dashboardDataLayer) {
         state.dashboardDataLayer = new maps.Data({ map: state.dashboardMap });
-        state.dashboardDataLayer.setStyle((feature) => markerIcon(maps, markerColor(feature.getProperty("kind"))));
+        state.dashboardDataLayer.setStyle((feature) => ({
+          icon: markerIcon(maps, markerColor(feature.getProperty("kind")), markerLabel(feature.getProperty("kind"))),
+          title: feature.getProperty("name") || "Restaurant"
+        }));
       }
       if (!state.dashboardDataClickBound) {
         state.dashboardDataLayer.addListener("click", (event) => {
