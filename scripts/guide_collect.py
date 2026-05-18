@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import ssl
+import unicodedata
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -49,15 +50,76 @@ GUIDE_SOURCES = {
 }
 SSL_CONTEXT = ssl._create_unverified_context()
 
-WINE_LINK_RE = re.compile(
-    r"\b(?:wine|wine-list|winelist|wines|cellar|beverage|drinks|drink|bar|menu|vin|vins|wein|vino|cave)\b",
+WINE_LINK_STRONG_RE = re.compile(
+    r"\b(?:wine|wine-list|winelist|winecard|wine-menu|wines|cellar|sommelier|champagne|"
+    r"beverage|beverages|drinks|drink|drink-list|drink-menu|bar-menu|"
+    r"vin|vins|carte-des-vins|carte\s+des\s+vins|carte\s+vins|cave|boisson|boissons|"
+    r"wein|weine|weinkarte|getranke|getraenke|"
+    r"vino|vini|carta-dei-vini|carta\s+dei\s+vini|"
+    r"lista-de-vinos|lista\s+de\s+vinos|carta\s+de\s+vinos|bebida|bebidas|bodega|"
+    r"vinho|vinhos|carta\s+de\s+vinhos|"
+    r"wijn|wijnen|wijnkaart|dranken|"
+    r"vinkort|vinliste|dryck|drycker|dryckeslista|"
+    r"viini|viinit|viinilista|sake)\b",
     re.I,
 )
+WINE_LINK_WEAK_RE = re.compile(r"\b(?:menu|bar|pairing|tasting|omakase|degustation|degustazione|degustacion)\b", re.I)
+NON_WINE_MENU_RE = re.compile(r"\b(?:food|lunch|dinner|breakfast|brunch|tasting-menu|a-la-carte|dessert)\b", re.I)
+CRAWL_SKIP_RE = re.compile(
+    r"\.(?:jpg|jpeg|png|gif|webp|svg|ico|css|js|zip|mp4|mov|avi|woff2?|ttf|eot)(?:[?#]|$)|"
+    r"\b(?:privacy|terms|cookie|career|jobs|press|newsletter|gift-card|giftcard|voucher|"
+    r"instagram|facebook|twitter|linkedin|youtube|tripadvisor|reservation|booking|book-a-table)\b",
+    re.I,
+)
+WINE_TEXT_RE = re.compile(
+    r"\b(?:"
+    r"burgundy|bourgogne|bordeaux|champagne|"
+    r"chablis|cote\s+d['’]?or|côte\s+d['’]?or|cote\s+de\s+nuits|côte\s+de\s+nuits|cote\s+de\s+beaune|côte\s+de\s+beaune|"
+    r"meursault|puligny|chassagne|volnay|pommard|gevrey|chambolle|vosne|nuits|beaune|morey|vougeot|"
+    r"margaux|pauillac|pomerol|saint[-\s]?emilion|st[-\s]?emilion|saint[-\s]?julien|st[-\s]?julien|saint[-\s]?estephe|st[-\s]?estephe|"
+    r"pessac|leognan|léognan|sauternes|barsac|medoc|médoc|haut[-\s]?medoc|haut[-\s]?médoc|"
+    r"reims|epernay|épernay|montagne\s+de\s+reims|cote\s+des\s+blancs|côte\s+des\s+blancs|vallee\s+de\s+la\s+marne|vallée\s+de\s+la\s+marne|"
+    r"brut|extra\s+brut|blanc\s+de\s+blancs|blanc\s+de\s+noirs|"
+    r"brut|extra\s+brut|sec|demi-sec|cru|village|villages|domaine|domain|chateau|château|weingut|estate|reserve|reserva|grand|premier|"
+    r"pinot\s+noir|chardonnay|cabernet\s+sauvignon|merlot"
+    r")\b",
+    re.I,
+)
+CORE_WINE_TEXT_RE = re.compile(
+    r"\b(?:burgundy|bourgogne|bordeaux|champagne|chablis|meursault|puligny|chassagne|volnay|pommard|gevrey|chambolle|vosne|"
+    r"margaux|pauillac|pomerol|saint[-\s]?emilion|st[-\s]?emilion|sauternes|medoc|médoc|reims|epernay|épernay|"
+    r"cote\s+d['’]?or|côte\s+d['’]?or|cote\s+de\s+nuits|côte\s+de\s+nuits|cote\s+des\s+blancs|côte\s+des\s+blancs)\b",
+    re.I,
+)
+BAD_LINE_RE = re.compile(
+    r"https?://|url\(|background:|copyright|all rights reserved|michelin guide|screenshot|"
+    r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)\b|"
+    r"\b(?:wait_for|function|script|cookie|analytics|instagram|facebook|google|schema|"
+    r"privacy|terms|newsletter|reservation|booking|award|posted|edition)\b",
+    re.I,
+)
+WINE_TEXT_RE = re.compile(
+    r"\b(?:burgundy|bourgogne|bordeaux|champagne|chablis|cote\s+d['’]?or|cote\s+de\s+nuits|cote\s+de\s+beaune|"
+    r"meursault|puligny|chassagne|volnay|pommard|gevrey|chambolle|vosne|nuits|beaune|morey|vougeot|"
+    r"margaux|pauillac|pomerol|saint[-\s]?emilion|st[-\s]?emilion|saint[-\s]?julien|st[-\s]?julien|"
+    r"saint[-\s]?estephe|st[-\s]?estephe|pessac|leognan|sauternes|barsac|medoc|haut[-\s]?medoc|"
+    r"reims|epernay|montagne\s+de\s+reims|cote\s+des\s+blancs|vallee\s+de\s+la\s+marne|brut|extra\s+brut|"
+    r"blanc\s+de\s+blancs|blanc\s+de\s+noirs|sec|demi-sec|cru|village|villages|domaine|domain|chateau|"
+    r"weingut|estate|reserve|reserva|grand|premier|pinot\s+noir|chardonnay|cabernet\s+sauvignon|merlot)\b",
+    re.I,
+)
+CORE_WINE_TEXT_RE = re.compile(
+    r"\b(?:burgundy|bourgogne|bordeaux|champagne|chablis|meursault|puligny|chassagne|volnay|pommard|gevrey|"
+    r"chambolle|vosne|margaux|pauillac|pomerol|saint[-\s]?emilion|st[-\s]?emilion|sauternes|medoc|"
+    r"reims|epernay|cote\s+d['’]?or|cote\s+de\s+nuits|cote\s+des\s+blancs)\b",
+    re.I,
+)
+PRICE_NUMBER_RE = re.compile(r"(?<!\d)(?:\d{1,3}(?:[,\s.]\d{3})+|\d{2,6})(?:[,.]\d{2})?(?!\d)")
 WATCH_DEFAULTS = [
     {"keyword": "Romanee-Conti", "vintage": "", "active": True},
     {"keyword": "William Kelley", "vintage": "", "active": True},
 ]
-CURRENCY_RE = r"HK\$|SG\$|S\$|A\$|C\$|US\$|\u20ac|\$|\u00a3|\u00a5|\u20a9|CHF|DKK|SEK|NOK|USD|EUR|GBP|CAD|AUD|SGD|HKD|AED|CNY|CZK|ARS|JPY|KRW"
+CURRENCY_RE = r"HK\$|SG\$|S\$|A\$|C\$|US\$|\u20ac|\$|\u00a3|\u00a5|\u20a9|(?<![A-Z])(?:CHF|DKK|SEK|NOK|USD|EUR|GBP|CAD|AUD|SGD|HKD|AED|CNY|CZK|ARS|JPY|KRW)(?![A-Z])"
 CURRENCY_ALIASES = {
     "HK$": "HKD",
     "SG$": "SGD",
@@ -71,6 +133,11 @@ CURRENCY_ALIASES = {
     "\u00a5": "JPY",
     "\u20a9": "KRW",
 }
+
+
+def fold_text(value):
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    return normalized.encode("ascii", "ignore").decode("ascii").lower()
 
 
 class LinkParser(HTMLParser):
@@ -180,6 +247,45 @@ def fetch_text(url, timeout=30):
     if "pdf" in content_type.lower() or urlparse(url).path.lower().endswith(".pdf"):
         return data, content_type
     return data.decode("utf-8", errors="replace"), content_type
+
+
+def find_node():
+    bundled = (
+        Path.home()
+        / ".cache"
+        / "codex-runtimes"
+        / "codex-primary-runtime"
+        / "dependencies"
+        / "node"
+        / "bin"
+        / "node.exe"
+    )
+    return str(bundled) if bundled.exists() else "node"
+
+
+def render_page_text(url):
+    script = ROOT / "scripts" / "render_page_text.mjs"
+    if not script.exists():
+        return ""
+    try:
+        result = subprocess.run(
+            [find_node(), str(script), url],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=35,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0 and not result.stdout:
+        return ""
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return ""
+    return payload.get("text") if payload.get("ok") else ""
 
 
 def normalize_name(value):
@@ -455,24 +561,151 @@ def discover_website_from_place_page(place_url):
     return ""
 
 
-def candidate_wine_links(base_url, html):
+def registrable_root(host):
+    host = (host or "").lower().strip(".")
+    parts = [part for part in host.split(".") if part]
+    if len(parts) >= 3 and parts[-2] in {"ac", "co", "com", "edu", "gov", "net", "org"} and len(parts[-1]) == 2:
+        return ".".join(parts[-3:])
+    if len(parts) >= 2:
+        return ".".join(parts[-2:])
+    return host
+
+
+def same_site_or_wine_host(base_url, href):
+    base_host = urlparse(base_url).netloc.lower()
+    host = urlparse(href).netloc.lower()
+    if not base_host or not host:
+        return False
+    base_root = registrable_root(base_host)
+    host_root = registrable_root(host)
+    return host == base_host or host_root == base_root or host.startswith("wine.") or ".wine." in host
+
+
+def generated_wine_link_candidates(base_url):
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return []
+    base_host = parsed.netloc.lower()
+    root = registrable_root(base_host)
+    candidates = [
+        (f"{parsed.scheme}://wine.{root}/", "Wine subdomain", 150),
+    ]
+    for path in ["/wine/", "/wine-list/", "/winelist/", "/drinks/", "/drink-list/", "/beverage/", "/vin/", "/vins/", "/carte-des-vins/"]:
+        candidates.append((urljoin(f"{parsed.scheme}://{base_host}", path), path.strip("/"), 80))
+    return [{"url": url, "text": text, "score": score} for url, text, score in candidates]
+
+
+def candidate_wine_links(base_url, html, include_review_candidates=True):
     parser = LinkParser()
     parser.feed(html)
-    links = []
+    links = generated_wine_link_candidates(base_url)
     for link in parser.links:
         href = urljoin(base_url, link.get("href", ""))
         text = clean_text(link.get("text", ""))
+        parsed = urlparse(href)
+        host = parsed.netloc.lower()
         path = urlparse(href).path.lower()
-        if WINE_LINK_RE.search(text) or WINE_LINK_RE.search(path) or path.endswith(".pdf"):
-            links.append({"url": href, "text": text})
+        haystack = fold_text(" ".join([text, host, path]).replace("_", "-"))
+        score = 0
+        if path.endswith(".pdf"):
+            score += 20
+        if host.startswith("wine.") or ".wine." in host:
+            score += 120
+        if WINE_LINK_STRONG_RE.search(haystack):
+            score += 80
+        if WINE_LINK_WEAK_RE.search(haystack):
+            score += 10
+        if NON_WINE_MENU_RE.search(haystack) and not WINE_LINK_STRONG_RE.search(haystack):
+            score -= 60
+        if include_review_candidates and same_site_or_wine_host(base_url, href) and score <= 0:
+            if not NON_WINE_MENU_RE.search(haystack) and not re.search(r"\b(?:privacy|terms|contact|gallery|news|blog|reservation|book|career|gift)\b", haystack, re.I):
+                score = 1
+        if score > 0:
+            links.append({"url": href, "text": text, "score": score})
+    scored = sorted(links, key=lambda item: item.get("score", 0), reverse=True)
+    strong_links = [link for link in scored if link.get("score", 0) >= 70]
+    review_links = [link for link in scored if link.get("score", 0) < 70]
+    candidates = [*strong_links, *review_links]
     seen = set()
     unique = []
-    for link in links:
+    for link in candidates:
         if link["url"] in seen:
             continue
         seen.add(link["url"])
         unique.append(link)
-    return unique[:20]
+    return unique[:60]
+
+
+def normalize_crawl_url(base_url, href):
+    if not href or href.startswith(("mailto:", "tel:", "sms:", "javascript:")):
+        return ""
+    url = urljoin(base_url, href).split("#", 1)[0]
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    if not same_site_or_wine_host(base_url, url):
+        return ""
+    haystack = fold_text(" ".join([parsed.netloc.lower(), parsed.path.lower()]))
+    if CRAWL_SKIP_RE.search(haystack) and not WINE_LINK_STRONG_RE.search(haystack):
+        return ""
+    return url
+
+
+def crawlable_page_links(base_url, page_url, html):
+    parser = LinkParser()
+    parser.feed(html)
+    links = []
+    for link in parser.links:
+        url = normalize_crawl_url(base_url, urljoin(page_url, link.get("href", "")))
+        if not url:
+            continue
+        text = clean_text(link.get("text", ""))
+        parsed = urlparse(url)
+        haystack = fold_text(" ".join([text, parsed.netloc.lower(), parsed.path.lower()]).replace("_", "-"))
+        score = 1
+        if parsed.path.lower().endswith(".pdf"):
+            score += 30
+        if parsed.netloc.lower().startswith("wine.") or ".wine." in parsed.netloc.lower():
+            score += 120
+        if WINE_LINK_STRONG_RE.search(haystack):
+            score += 80
+        if WINE_LINK_WEAK_RE.search(haystack):
+            score += 10
+        links.append({"url": url, "text": text, "score": score})
+    return links
+
+
+def discover_candidate_wine_links(base_url, html, max_pages=40):
+    links = [{"url": base_url, "text": "Official website", "score": 1}, *candidate_wine_links(base_url, html)]
+    queue = sorted(crawlable_page_links(base_url, base_url, html), key=lambda item: item.get("score", 0), reverse=True)
+    seen = {link["url"].split("#", 1)[0] for link in links}
+    queued = {link["url"].split("#", 1)[0] for link in queue}
+    scanned_pages = 0
+    while queue and scanned_pages < max_pages:
+        queue.sort(key=lambda item: item.get("score", 0), reverse=True)
+        link = queue.pop(0)
+        key = link["url"].split("#", 1)[0]
+        if key in seen:
+            continue
+        seen.add(key)
+        links.append(link)
+        if urlparse(link["url"]).path.lower().endswith(".pdf"):
+            continue
+        try:
+            content, content_type = fetch_text(link["url"], timeout=20)
+        except Exception:
+            continue
+        if not isinstance(content, str) or "html" not in content_type.lower():
+            continue
+        scanned_pages += 1
+        child_links = crawlable_page_links(base_url, link["url"], content)
+        for child in child_links:
+            key = child["url"].split("#", 1)[0]
+            if key in seen or key in queued:
+                continue
+            queued.add(key)
+            queue.append(child)
+    return sorted(links, key=lambda item: item.get("score", 0), reverse=True)
 
 
 def parse_price(line):
@@ -483,33 +716,119 @@ def parse_price(line):
     if currency_match:
         token = currency_match.group(0)
         currency = CURRENCY_ALIASES.get(token, token.upper())
-    numbers = list(re.finditer(r"(?<!\d)(?:\d{1,3}(?:[,\s.]\d{3})+|\d{2,6})(?:[,.]\d{2})?(?!\d)", line))
+    numbers = list(PRICE_NUMBER_RE.finditer(line))
     if not numbers:
         return "", None, currency
-    raw = numbers[-1].group(0)
-    compact = re.sub(r"\s+", "", raw)
-    if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d{2})?", compact):
-        value = float(compact.replace(",", ""))
-    elif re.fullmatch(r"\d{1,3}(?:\.\d{3})+(?:,\d{2})?", compact):
-        value = float(compact.replace(".", "").replace(",", "."))
-    elif re.fullmatch(r"\d+[,.]\d{2}", compact):
-        value = float(compact.replace(",", "."))
-    else:
-        value = float(re.sub(r"[,.]", "", compact))
-    if value < 10:
-        return "", None, currency
-    return raw, value, currency
+    for match in reversed(numbers):
+        raw = match.group(0)
+        compact = re.sub(r"\s+", "", raw)
+        if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d{2})?", compact):
+            value = float(compact.replace(",", ""))
+        elif re.fullmatch(r"\d{1,3}(?:\.\d{3})+(?:,\d{2})?", compact):
+            value = float(compact.replace(".", "").replace(",", "."))
+        elif re.fullmatch(r"\d+[,.]\d{2}", compact):
+            value = float(compact.replace(",", "."))
+        else:
+            value = float(re.sub(r"[,.]", "", compact))
+        if value < 10:
+            continue
+        if not currency and re.fullmatch(r"(?:19|20)\d{2}", compact):
+            continue
+        return raw, value, currency
+    return "", None, currency
+
+
+def candidate_text_lines(text):
+    raw_lines = [clean_text(line) for line in re.split(r"[\r\n]+", text or "") if clean_text(line)]
+    candidates = []
+    seen = set()
+
+    def add(value):
+        value = clean_text(value)
+        if not value or value in seen:
+            return
+        seen.add(value)
+        candidates.append(value)
+
+    for line in raw_lines:
+        add(line)
+    for index, line in enumerate(raw_lines):
+        _price_text, price_value, _currency = parse_price(line)
+        folded_line = fold_text(line)
+        if price_value:
+            add(" ".join(raw_lines[max(0, index - 3) : index + 1]))
+        if WINE_TEXT_RE.search(folded_line):
+            add(" ".join(raw_lines[index : min(len(raw_lines), index + 4)]))
+            add(" ".join(raw_lines[max(0, index - 1) : min(len(raw_lines), index + 3)]))
+    return candidates
+
+
+def wine_line_score(line, watches):
+    text = clean_text(line)
+    if len(text) < 8 or len(text) > 260:
+        return 0
+    folded_text = fold_text(text)
+    if BAD_LINE_RE.search(folded_text):
+        return 0
+    if re.fullmatch(r"(?:tasting\s+)?menu\s+(?:19|20)\d{2}", text, re.I):
+        return 0
+    if re.search(r"[_{}<>]|['\"]\s*:", text):
+        return 0
+    if any(normalize_name(watch["keyword"]) in normalize_name(text) for watch in watches if watch.get("active", True)):
+        return 8
+    numbers = PRICE_NUMBER_RE.findall(text)
+    price_text, price_value, currency = parse_price(text)
+    has_vintage = bool(re.search(r"\b(19|20)\d{2}\b", text))
+    has_wine_text = bool(WINE_TEXT_RE.search(folded_text))
+    score = 0
+    if has_vintage:
+        score += 2
+    if price_value:
+        score += 3
+    if currency:
+        score += 2
+    if has_wine_text:
+        score += 3
+    if len(numbers) >= 2:
+        score += 1
+    if re.fullmatch(r"(?:19|20)\d{2}", text.strip()):
+        return 0
+    has_price_context = bool(currency) or (has_wine_text and has_vintage and len(numbers) >= 2)
+    return score if score >= 5 and price_value and has_price_context else 0
 
 
 def likely_wine_line(line, watches):
-    text = clean_text(line)
-    if len(text) < 8 or len(text) > 260:
-        return False
-    if any(normalize_name(watch["keyword"]) in normalize_name(text) for watch in watches if watch.get("active", True)):
-        return True
-    if re.search(r"\b(19|20)\d{2}\b", text) and parse_price(text)[1]:
-        return True
-    return False
+    return wine_line_score(line, watches) > 0
+
+
+def source_confidence(url, source_type, text, lines, link_score):
+    if not lines:
+        return 0, "No parseable wine lines found."
+    parsed = urlparse(url)
+    haystack = fold_text(" ".join([parsed.netloc.lower(), parsed.path.lower(), text[:4000]]).replace("_", "-"))
+    score = int(link_score or 0)
+    if source_type == "pdf":
+        score += 30
+    if parsed.netloc.lower().startswith("wine.") or ".wine." in parsed.netloc.lower():
+        score += 80
+    if WINE_LINK_STRONG_RE.search(haystack):
+        score += 40
+    score += min(len(lines), 10) * 12
+    if len(lines) >= 3:
+        score += 30
+    if sum(1 for line in lines if parse_price(line)[2]) >= 2:
+        score += 20
+    if sum(1 for line in lines if CORE_WINE_TEXT_RE.search(fold_text(line))) >= 1:
+        score += 45
+    if sum(1 for line in lines if WINE_TEXT_RE.search(fold_text(line))) >= 2:
+        score += 35
+    if len(lines) < 2 and score < 180:
+        return score, "Only one parseable wine line found; review required."
+    if sum(1 for line in lines if CORE_WINE_TEXT_RE.search(fold_text(line))) == 0:
+        return score, "No Burgundy, Champagne, or Bordeaux keywords found; review required."
+    if score < 120:
+        return score, "Candidate did not look enough like a wine list."
+    return score, ""
 
 
 def html_to_lines(html):
@@ -591,7 +910,7 @@ def load_watchlist():
     return WATCH_DEFAULTS
 
 
-def scan_wine_source(con, target, url, watches):
+def scan_wine_source(con, target, url, watches, link_score=0):
     try:
         content, content_type = fetch_text(url, timeout=30)
         source_type = "pdf" if "pdf" in content_type.lower() or urlparse(url).path.lower().endswith(".pdf") else "html"
@@ -602,8 +921,15 @@ def scan_wine_source(con, target, url, watches):
             text = pdf_text(temp)
         else:
             text = html_to_lines(content)
+            if link_score >= 80:
+                quick_lines = [line for line in candidate_text_lines(text) if likely_wine_line(line, watches)]
+                if not quick_lines:
+                    rendered_text = render_page_text(url)
+                    if rendered_text:
+                        text = rendered_text
         source_id = save_wine_source(con, target, url, source_type, content, text)
-        lines = [clean_text(line) for line in re.split(r"[\r\n]+", text or "") if likely_wine_line(line, watches)]
+        lines = [clean_text(line) for line in candidate_text_lines(text) if likely_wine_line(line, watches)]
+        confidence, review_reason = source_confidence(url, source_type, text or "", lines, link_score)
         inserted = 0
         for line in lines[:1000]:
             vintage_match = re.search(r"\b(19|20)\d{2}\b", line)
@@ -635,8 +961,19 @@ def scan_wine_source(con, target, url, watches):
                 ),
             )
             inserted += 1
-        con.execute("update wine_list_sources set line_count=? where id=?", (inserted, source_id))
-        return 1, inserted, ""
+        verified = inserted > 0 and not review_reason
+        source_status = "found" if verified else "review"
+        parser_status = "parsed" if verified else "review"
+        con.execute(
+            """
+            update wine_list_sources
+            set line_count=?, status=?, parser_status=?,
+                last_error=case when ? != '' then ? else '' end
+            where id=?
+            """,
+            (inserted, source_status, parser_status, review_reason, review_reason, source_id),
+        )
+        return (1 if verified else 0), inserted, review_reason
     except Exception as exc:
         con.execute(
             "update restaurant_targets set status='review', last_error=?, last_checked_at=current_timestamp where id=?",
@@ -738,7 +1075,7 @@ def discover_targets(con, max_targets, run_id, target_count):
             html, content_type = fetch_text(target["website_url"], timeout=25)
             if not isinstance(html, str):
                 continue
-            links = candidate_wine_links(target["website_url"], html)
+            links = discover_candidate_wine_links(target["website_url"], html, max_pages=12)
             if not links:
                 con.execute(
                     "update restaurant_targets set status='no_wine_list', last_checked_at=current_timestamp where id=?",
@@ -761,11 +1098,13 @@ def discover_targets(con, max_targets, run_id, target_count):
                     errors=errors,
                     message="Reading a candidate wine list.",
                 )
-                found, lines, error = scan_wine_source(con, target, link["url"], watches)
+                found, lines, error = scan_wine_source(con, target, link["url"], watches, link.get("score", 0))
                 target_sources += found
                 target_lines += lines
                 if error:
                     errors += 1
+                if target_sources and (lines >= 10 or link.get("score", 0) >= 120):
+                    break
             status = "found" if target_sources else "review"
             con.execute(
                 "update restaurant_targets set status=?, last_checked_at=current_timestamp, last_error=null where id=?",

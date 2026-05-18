@@ -210,9 +210,9 @@ def discover_target(con, target, watches, max_links):
     if not isinstance(content, str):
         return 0, 0, "Official website returned binary content."
 
-    links = guide.candidate_wine_links(target["website_url"], content)
+    links = guide.discover_candidate_wine_links(target["website_url"], content, max_pages=max(8, min(18, max_links)))
     if direct_wine_source(target["website_url"], content, watches):
-        links.insert(0, {"url": target["website_url"], "text": "Official website"})
+        links.insert(0, {"url": target["website_url"], "text": "Official website", "score": 1})
 
     unique = []
     seen = set()
@@ -224,7 +224,7 @@ def discover_target(con, target, watches, max_links):
         if key in seen:
             continue
         seen.add(key)
-        unique.append({"url": key, "text": link.get("text", "")})
+        unique.append({"url": key, "text": link.get("text", ""), "score": link.get("score", 0)})
 
     if not unique:
         con.execute(
@@ -237,11 +237,13 @@ def discover_target(con, target, watches, max_links):
     lines = 0
     errors = []
     for link in unique[:max_links]:
-        found, count, error = guide.scan_wine_source(con, target, link["url"], watches)
+        found, count, error = guide.scan_wine_source(con, target, link["url"], watches, link.get("score", 0))
         sources += found
         lines += count
         if error:
             errors.append(error)
+        if sources and (count >= 10 or link.get("score", 0) >= 120):
+            break
 
     con.execute(
         """
@@ -360,7 +362,7 @@ def export_status(con, run_id, watch_hits=0):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-targets", type=int, default=0, help="0 means all restaurant targets.")
-    parser.add_argument("--max-links", type=int, default=8)
+    parser.add_argument("--max-links", type=int, default=20)
     parser.add_argument("--skip-google", action="store_true")
     parser.add_argument("--refresh-websites", action="store_true", help="Resolve Google Places even if website_url already exists.")
     parser.add_argument("--recheck-all", action="store_true", help="Recheck targets that were already found or already had no wine list.")
