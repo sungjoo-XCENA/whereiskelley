@@ -4,8 +4,6 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from _local_proxy import proxy_json
-
 
 def json_response(handler, payload, status=200):
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -36,6 +34,30 @@ def fetch_firebase(path):
     if not url:
         return None
     request = Request(url, headers={"accept": "application/json"})
+    with urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8") or "null")
+
+
+def local_base():
+    return os.environ.get("WHEREISKELLEY_LOCAL_API_BASE", "").rstrip("/")
+
+
+def local_token():
+    return os.environ.get("WHEREISKELLEY_LOCAL_API_TOKEN", "").strip()
+
+
+def proxy_json(path, query=""):
+    base = local_base()
+    if not base:
+        return None
+    url = f"{base}{path}"
+    if query:
+        url = f"{url}?{query}"
+    headers = {"accept": "application/json"}
+    token = local_token()
+    if token:
+        headers["x-whereiskelley-token"] = token
+    request = Request(url, headers=headers)
     with urlopen(request, timeout=10) as response:
         return json.loads(response.read().decode("utf-8") or "null")
 
