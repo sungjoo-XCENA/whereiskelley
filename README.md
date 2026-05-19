@@ -90,6 +90,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover
 ```
 
 Use this to resume wine-list discovery. It reuses the saved restaurant candidates, skips restaurants already marked `found` or `no_wine_list`, resolves missing official websites through Google Places, then checks official restaurant websites for wine-list pages or PDFs.
+By default, paid Google Places calls are disabled. The discovery step only uses websites already saved in the DB unless you explicitly enable Places.
 
 For a weekly full refresh, recheck every saved restaurant:
 
@@ -97,11 +98,11 @@ For a weekly full refresh, recheck every saved restaurant:
 powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover -RecheckAll
 ```
 
-Local discovery needs a Google key with `Places API` enabled because the weekly job needs official restaurant websites, not just map pins:
+To allow paid Google Places lookup for missing official websites, pass an explicit request cap:
 
 ```powershell
 $env:GOOGLE_MAPS_API_KEY="your_google_maps_key"
-powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover
+powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover -EnableGooglePlaces -MaxGoogleRequests 200
 ```
 
 You can also save the key in `.env.local`:
@@ -109,6 +110,8 @@ You can also save the key in `.env.local`:
 ```text
 GOOGLE_MAPS_API_KEY=your_google_maps_key
 ```
+
+Keep `MaxGoogleRequests` low until the Google Cloud billing page confirms the expected spend. A full 5,000+ restaurant run can create many paid Places requests if Google lookup is enabled.
 
 For remote monitoring after the local PC stops, set Firebase Realtime Database env vars locally and in Vercel:
 

@@ -68,12 +68,12 @@ def variant_rows(con, target):
     return unique
 
 
-def resolve_best(con, target, api_key):
+def resolve_best(con, target, api_key, budget=None):
     best = None
     best_variant = None
     last_error = ""
     for variant in variant_rows(con, target):
-        resolved = discover.resolve_google_place(variant, api_key)
+        resolved = discover.resolve_google_place(variant, api_key, budget)
         if resolved.get("error") and not resolved.get("website_url"):
             last_error = resolved["error"]
             continue
@@ -139,11 +139,27 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-targets", type=int, default=0)
     parser.add_argument("--sleep", type=float, default=0.12)
+    parser.add_argument("--enable-google-places", action="store_true", help="Allow paid Google Places calls. Off by default.")
+    parser.add_argument(
+        "--max-google-requests",
+        type=int,
+        default=int(discover.os.environ.get("WHEREISKELLEY_MAX_GOOGLE_REQUESTS", "200")),
+        help="Paid Google Places request cap for this audit run. 0 means no cap.",
+    )
     args = parser.parse_args()
 
-    api_key = discover.load_env_key()
-    if not api_key:
+    google_enabled = args.enable_google_places or discover.os.environ.get("WHEREISKELLEY_ENABLE_GOOGLE_PLACES") == "1"
+    api_key = discover.load_env_key() if google_enabled else ""
+    if google_enabled and not api_key:
         raise SystemExit("GOOGLE_MAPS_API_KEY or GOOGLE_PLACES_API_KEY is required.")
+    if not google_enabled:
+        raise SystemExit("Google Places audit is disabled by default. Re-run with --enable-google-places and --max-google-requests N.")
+    google_budget = {
+        "limit": max(0, int(args.max_google_requests or 0)),
+        "used": 0,
+        "findPlace": 0,
+        "details": 0,
+    }
 
     guide.init_db()
     with guide.connect() as con:
@@ -183,7 +199,7 @@ def main():
                 progressPercent=round(((index - 1) / total) * 100, 1) if total else 0,
             )
             try:
-                resolved, _variant = resolve_best(con, target, api_key)
+                resolved, _variant = resolve_best(con, target, api_key, google_budget)
                 did_change, _distance = update_target(con, target, resolved)
                 changed += 1 if did_change else 0
             except Exception as exc:
@@ -208,7 +224,7 @@ def main():
                 con.execute("select count(*) from restaurant_targets").fetchone()[0],
                 total,
                 errors,
-                json.dumps({"locationChangedOrWebsiteChanged": changed}, ensure_ascii=False),
+                json.dumps({"locationChangedOrWebsiteChanged": changed, "googlePlacesRequests": google_budget}, ensure_ascii=False),
                 run_id,
             ),
         )

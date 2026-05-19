@@ -2,12 +2,14 @@ param(
   [switch]$Quick,
   [switch]$Discover,
   [switch]$SkipGoogle,
+  [switch]$EnableGooglePlaces,
   [switch]$RefreshWebsites,
   [switch]$RecheckAll,
   [switch]$NoSnapshot,
   [switch]$Snapshot,
   [int]$MaxSourceItems = 0,
   [int]$MaxTargets = 0,
+  [int]$MaxGoogleRequests = 200,
   [string]$Sources = "michelin,laliste,worlds50best"
 )
 
@@ -43,6 +45,11 @@ try {
     )
     if ($SkipGoogle) {
       $args += "--skip-google"
+    }
+    if ($EnableGooglePlaces) {
+      $args += "--enable-google-places"
+      $args += "--max-google-requests"
+      $args += "$MaxGoogleRequests"
     }
     if ($RefreshWebsites) {
       $args += "--refresh-websites"

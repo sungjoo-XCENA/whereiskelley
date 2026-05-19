@@ -107,7 +107,17 @@ def is_food_place(candidate):
     return bool(types & food_types)
 
 
-def resolve_google_place(target, api_key):
+def charge_google_request(budget, sku):
+    if budget is None:
+        return
+    limit = int(budget.get("limit") or 0)
+    if limit and int(budget.get("used") or 0) >= limit:
+        raise RuntimeError(f"Google Places request cap reached ({limit}).")
+    budget["used"] = int(budget.get("used") or 0) + 1
+    budget[sku] = int(budget.get(sku) or 0) + 1
+
+
+def resolve_google_place(target, api_key, budget=None):
     if not api_key:
         return {"error": "Google Places API key is not configured on this PC."}
 
@@ -115,6 +125,7 @@ def resolve_google_place(target, api_key):
     candidate = None
     score = 0
     for query in google_candidates(target):
+        charge_google_request(budget, "findPlace")
         payload = http_json(
             GOOGLE_FIND_URL,
             {
@@ -145,6 +156,7 @@ def resolve_google_place(target, api_key):
     if not candidate:
         return {"error": last_error}
 
+    charge_google_request(budget, "details")
     details = http_json(
         GOOGLE_DETAILS_URL,
         {
@@ -484,6 +496,13 @@ def main():
     parser.add_argument("--max-targets", type=int, default=0, help="0 means all restaurant targets.")
     parser.add_argument("--max-links", type=int, default=5)
     parser.add_argument("--skip-google", action="store_true")
+    parser.add_argument("--enable-google-places", action="store_true", help="Allow paid Google Places calls. Off by default.")
+    parser.add_argument(
+        "--max-google-requests",
+        type=int,
+        default=int(os.environ.get("WHEREISKELLEY_MAX_GOOGLE_REQUESTS", "200")),
+        help="Paid Google Places request cap for this run. 0 means no cap.",
+    )
     parser.add_argument("--refresh-websites", action="store_true", help="Resolve Google Places even if website_url already exists.")
     parser.add_argument("--recheck-all", action="store_true", help="Recheck targets that were already found or already had no wine list.")
     parser.add_argument("--replace-existing", action="store_true", help="Replace saved wine-list sources and lines for each checked target.")
@@ -491,7 +510,17 @@ def main():
     args = parser.parse_args()
 
     guide.init_db()
-    api_key = "" if args.skip_google else load_env_key()
+    google_enabled = (
+        not args.skip_google
+        and (args.enable_google_places or os.environ.get("WHEREISKELLEY_ENABLE_GOOGLE_PLACES") == "1")
+    )
+    api_key = load_env_key() if google_enabled else ""
+    google_budget = {
+        "limit": max(0, int(args.max_google_requests or 0)),
+        "used": 0,
+        "findPlace": 0,
+        "details": 0,
+    }
     with guide.connect() as con:
         started_at = guide.now_sql()
         run = con.execute(
@@ -499,7 +528,7 @@ def main():
             (started_at, "existing_targets_google_places_wine_lists"),
         )
         run_id = run.lastrowid
-        if not api_key and not args.skip_google:
+        if google_enabled and not api_key:
             message = (
                 "GOOGLE_MAPS_API_KEY is not configured locally. "
                 "Add it to .env.local or the current PowerShell session before running full wine-list discovery."
@@ -573,7 +602,11 @@ def main():
 
             needs_google = args.refresh_websites or not target.get("website_url")
             if needs_google and not args.skip_google:
-                resolved = resolve_google_place(target, api_key)
+                try:
+                    resolved = resolve_google_place(target, api_key, google_budget)
+                except RuntimeError as exc:
+                    args.skip_google = True
+                    resolved = {"error": str(exc)}
                 update_target_from_google(con, target, resolved)
                 if resolved.get("website_url"):
                     google_resolved += 1
@@ -671,7 +704,8 @@ def main():
                     {
                         "googleResolved": google_resolved,
                         "googleMissingWebsite": google_missing,
-                        "googleEnabled": bool(api_key) and not args.skip_google,
+                        "googleEnabled": google_enabled and bool(api_key),
+                        "googlePlacesRequests": google_budget,
                         "durationSeconds": timing_payload(started_at, len(rows), len(rows), completed=True)["durationSeconds"],
                     },
                     ensure_ascii=False,
