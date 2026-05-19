@@ -5,6 +5,7 @@ param(
   [switch]$EnableGooglePlaces,
   [switch]$RefreshWebsites,
   [switch]$RecheckAll,
+  [switch]$OnlyWithWebsite,
   [switch]$NoSnapshot,
   [switch]$Snapshot,
   [int]$MaxSourceItems = 0,
@@ -56,6 +57,9 @@ try {
     }
     if ($RecheckAll) {
       $args += "--recheck-all"
+    }
+    if ($OnlyWithWebsite) {
+      $args += "--only-with-website"
     }
   } else {
     $args = @(

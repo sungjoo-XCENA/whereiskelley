@@ -506,6 +506,7 @@ def main():
     parser.add_argument("--refresh-websites", action="store_true", help="Resolve Google Places even if website_url already exists.")
     parser.add_argument("--recheck-all", action="store_true", help="Recheck targets that were already found or already had no wine list.")
     parser.add_argument("--replace-existing", action="store_true", help="Replace saved wine-list sources and lines for each checked target.")
+    parser.add_argument("--only-with-website", action="store_true", help="Only check targets that already have a saved website_url.")
     parser.add_argument("--sleep", type=float, default=0.18)
     args = parser.parse_args()
 
@@ -551,23 +552,20 @@ def main():
             con.commit()
             raise SystemExit(message)
         watches = guide.load_watchlist()
-        if args.recheck_all:
-            rows = con.execute(
-                """
-                select *
-                from restaurant_targets
-                order by priority desc, last_checked_at is not null, name
-                """
-            ).fetchall()
-        else:
-            rows = con.execute(
-                """
-                select *
-                from restaurant_targets
-                where coalesce(status, 'not_checked') not in ('found', 'no_wine_list')
-                order by priority desc, last_checked_at is not null, name
-                """
-            ).fetchall()
+        filters = []
+        if not args.recheck_all:
+            filters.append("coalesce(status, 'not_checked') not in ('found', 'no_wine_list')")
+        if args.only_with_website:
+            filters.append("website_url is not null and trim(website_url) != ''")
+        where_clause = f"where {' and '.join(filters)}" if filters else ""
+        rows = con.execute(
+            f"""
+            select *
+            from restaurant_targets
+            {where_clause}
+            order by priority desc, last_checked_at is not null, name
+            """
+        ).fetchall()
         if args.max_targets and args.max_targets > 0:
             rows = rows[: args.max_targets]
 
@@ -578,6 +576,12 @@ def main():
         errors = 0
         google_resolved = 0
         google_missing = 0
+        initial_phase = "resolving_websites" if google_enabled and not args.skip_google else "checking_saved_websites"
+        initial_message = (
+            "Resolving official website from Google Places, then checking it for wine lists."
+            if google_enabled and not args.skip_google
+            else "Checking saved restaurant websites only. Google Places is disabled for this run."
+        )
 
         for index, row in enumerate(rows, start=1):
             target = dict(row)
@@ -586,7 +590,7 @@ def main():
             write_live_progress(
                 con,
                 runId=run_id,
-                phase="resolving_websites",
+                phase=initial_phase,
                 currentTarget=target.get("name", ""),
                 currentUrl=target.get("website_url") or "",
                 targetsCollected=targets_total,
@@ -596,7 +600,7 @@ def main():
                 wineListsFound=wine_lists_found,
                 wineLinesFound=wine_lines_found,
                 errors=errors,
-                message="Resolving official website from Google Places, then checking it for wine lists.",
+                message=initial_message,
                 **timing_payload(started_at, index - 1, len(rows)),
             )
 

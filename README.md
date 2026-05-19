@@ -91,6 +91,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover
 
 Use this to resume wine-list discovery. It reuses the saved restaurant candidates, skips restaurants already marked `found` or `no_wine_list`, resolves missing official websites through Google Places, then checks official restaurant websites for wine-list pages or PDFs.
 By default, paid Google Places calls are disabled. The discovery step only uses websites already saved in the DB unless you explicitly enable Places.
+To scan only restaurants that already have a saved official website URL:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover -SkipGoogle -OnlyWithWebsite
+```
 
 For a weekly full refresh, recheck every saved restaurant:
 
