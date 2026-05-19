@@ -13,7 +13,8 @@
     activeTargetId: null,
     guideLoadInFlight: false,
     localGuideSeen: false,
-    lastLocalGuidePayload: null
+    lastLocalGuidePayload: null,
+    activeView: "search"
   };
 
   const css = document.createElement("style");
@@ -362,6 +363,7 @@
   }
 
   function activate(view) {
+    state.activeView = view;
     ensureDashboardView();
     document.querySelectorAll(".view-tab").forEach((tab) => {
       tab.classList.toggle("active", tab.dataset.view === view);
@@ -544,6 +546,7 @@
     const mapEl = document.querySelector("#dashboardDbMap");
     const fallbackEl = document.querySelector("#dashboardMapFallback");
     if (!mapEl || !fallbackEl) return;
+    if (state.activeView !== "dashboard") return;
     const targets = visibleMapTargets(payload);
     if (!targets.length) {
       if (state.dashboardMarkers.size) return;
@@ -808,7 +811,7 @@
       const payload = await fetchLiveGuideCollection();
       if (isEmptyGuidePayload(payload) && state.guidePayload) return;
       state.guidePayload = payload;
-      renderDashboard();
+      if (state.activeView === "dashboard") renderDashboard();
     } finally {
       state.guideLoadInFlight = false;
     }
