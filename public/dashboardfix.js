@@ -14,7 +14,8 @@
     guideLoadInFlight: false,
     localGuideSeen: false,
     lastLocalGuidePayload: null,
-    activeView: "search"
+    activeView: "search",
+    guideLoadedOnce: false
   };
 
   const css = document.createElement("style");
@@ -133,6 +134,22 @@
     .dash-pill.warn {
       background: #fff7ed;
       color: #b45309;
+    }
+    .dashboard-refresh {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0 12px;
+      background: #fff;
+      color: var(--ink);
+      font-weight: 850;
+      cursor: pointer;
+    }
+    .dashboard-refresh:disabled {
+      opacity: 0.55;
+      cursor: progress;
     }
     .dashboard-map-wrap {
       position: relative;
@@ -375,7 +392,10 @@
     document.querySelector(".command-bar")?.classList.toggle("hidden", !showSearch);
     document.querySelector(".workspace")?.classList.toggle("hidden", !showSearch);
     document.querySelector(".map-panel")?.classList.toggle("hidden", !showSearch);
-    if (view === "dashboard") renderDashboard();
+    if (view === "dashboard") {
+      renderDashboard();
+      if (!state.guideLoadedOnce) loadGuideStats({ force: true });
+    }
     if (showSearch) {
       try {
         if (typeof renderMap === "function") renderMap(typeof latestResults === "undefined" ? [] : latestResults);
@@ -740,7 +760,10 @@
           <p class="dash-kicker">Collect progress</p>
           <h2>${html(progressTitle)}</h2>
         </div>
-        <span class="dash-pill ${progressPillClass}">${html(values.status)}</span>
+        <div class="selected-target-actions">
+          <span class="dash-pill ${progressPillClass}">${html(values.status)}</span>
+          <button class="dashboard-refresh" type="button" data-refresh-dashboard ${state.guideLoadInFlight ? "disabled" : ""}>Refresh</button>
+        </div>
       </div>
       <div class="dash-progress" style="--dash-progress:${html(values.percent)}%"><i></i></div>
       <div class="collection-metrics">
@@ -804,13 +827,15 @@
     renderDashboardMap(payload, { fit: false });
   }
 
-  async function loadGuideStats() {
+  async function loadGuideStats(options = {}) {
     if (state.guideLoadInFlight) return;
+    if (state.guideLoadedOnce && !options.force) return;
     state.guideLoadInFlight = true;
     try {
       const payload = await fetchLiveGuideCollection();
       if (isEmptyGuidePayload(payload) && state.guidePayload) return;
       state.guidePayload = payload;
+      state.guideLoadedOnce = true;
       if (state.activeView === "dashboard") renderDashboard();
     } finally {
       state.guideLoadInFlight = false;
@@ -830,9 +855,12 @@
       event.preventDefault();
       clearDashboardSelection();
     });
+    document.body.addEventListener("click", (event) => {
+      if (!event.target.closest("[data-refresh-dashboard]")) return;
+      event.preventDefault();
+      loadGuideStats({ force: true });
+    });
     activate("search");
-    loadGuideStats();
-    window.setInterval(loadGuideStats, 5000);
   }
 
   if (document.readyState === "loading") {
