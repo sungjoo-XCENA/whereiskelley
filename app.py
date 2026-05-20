@@ -259,7 +259,8 @@ def guide_collection_status():
               sum(case when status = 'missing_website' then 1 else 0 end) as missingWebsite,
               sum(case when status in ('review','error') then 1 else 0 end) as needsReview,
               sum(case when status = 'error' then 1 else 0 end) as errors,
-              sum(case when lat is not null and lng is not null then 1 else 0 end) as mappedTargets
+              sum(case when status != 'not_checked' and lat is not null and lng is not null then 1 else 0 end) as mappedTargets,
+              sum(case when status != 'not_checked' and lat is not null and lng is not null and website_url is not null and trim(website_url) != '' then 1 else 0 end) as mappedWithWebsite
             from restaurant_targets
             """
         ).fetchone()
@@ -366,6 +367,8 @@ def guide_collection_status():
                 where t.status != 'not_checked'
                   and t.lat is not null
                   and t.lng is not null
+                  and t.website_url is not null
+                  and trim(t.website_url) != ''
                 order by
                   case
                     when t.status = 'found' then 0

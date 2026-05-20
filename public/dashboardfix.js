@@ -463,6 +463,7 @@
   function visibleMapTargets(payload) {
     return (payload?.mapTargets || [])
       .filter((target) => target.lat !== null && target.lng !== null && target.lat !== "" && target.lng !== "")
+      .filter((target) => String(target.websiteUrl || "").trim() !== "")
       .map((target) => ({ ...target, lat: Number(target.lat), lng: Number(target.lng) }))
       .filter((target) => Number.isFinite(target.lat) && Number.isFinite(target.lng));
   }
@@ -536,7 +537,18 @@
 
   function mapSignature(targets) {
     return targets
-      .map((target) => [target.id, target.status, target.lat, target.lng, target.wineListCount, target.wineLineCount].join(":"))
+      .map((target) => [
+        target.id,
+        target.status,
+        target.lat,
+        target.lng,
+        target.wineListCount,
+        target.wineLineCount,
+        target.verifiedWineListCount,
+        target.reviewSourceCount,
+        target.wineListParserStatus,
+        target.chosenWineLineCount
+      ].join(":"))
       .join("|");
   }
 
@@ -721,6 +733,7 @@
     const summary = values.summary;
     const progress = values.progress;
     const mapped = visibleMapTargets(payload).length;
+    const mappedWithWebsite = number(summary.mappedWithWebsite) || mapped;
     const progressCounts = progress.dbCounts || {};
     const sourceCount = Math.max(
       number(summary.totalSources),
@@ -792,7 +805,7 @@
         <div class="metric-box"><span>No wine list</span><b>${html(fmtInt(none))}</b></div>
         <div class="metric-box"><span>Pending / no website</span><b>${html(fmtInt(pending))}</b></div>
         <div class="metric-box"><span>Parsing review</span><b>${html(fmtInt(reviewSources))}</b></div>
-        <div class="metric-box"><span>Mapped</span><b>${html(fmtInt(mapped))}</b></div>
+        <div class="metric-box"><span>Mapped with URL</span><b>${html(fmtInt(mappedWithWebsite))}</b></div>
       </div>
     </section>`;
 

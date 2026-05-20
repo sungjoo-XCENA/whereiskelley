@@ -328,7 +328,8 @@ def dashboard_payload(con, progress_payload):
           sum(case when status in ('not_checked','missing_website') then 1 else 0 end) as pending,
           sum(case when status in ('review','error') then 1 else 0 end) as needsReview,
           sum(case when status = 'error' then 1 else 0 end) as errors,
-          sum(case when status != 'not_checked' and lat is not null and lng is not null then 1 else 0 end) as mappedTargets
+          sum(case when status != 'not_checked' and lat is not null and lng is not null then 1 else 0 end) as mappedTargets,
+          sum(case when status != 'not_checked' and lat is not null and lng is not null and website_url is not null and trim(website_url) != '' then 1 else 0 end) as mappedWithWebsite
         from restaurant_targets
         """
     ).fetchone()
@@ -414,6 +415,8 @@ def dashboard_payload(con, progress_payload):
             where t.status != 'not_checked'
               and t.lat is not null
               and t.lng is not null
+              and t.website_url is not null
+              and trim(t.website_url) != ''
             order by t.last_checked_at desc, t.name asc
             limit 7000
             """
