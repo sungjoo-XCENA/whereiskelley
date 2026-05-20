@@ -432,7 +432,7 @@
 
   function statusLabel(status) {
     const labels = {
-      found: "Wine list found",
+      found: "Candidate found",
       no_wine_list: "No wine list",
       not_checked: "Not checked yet",
       missing_website: "Website missing",
@@ -456,7 +456,7 @@
   function targetPill(target) {
     const kind = targetKind(target);
     const cls = kind === "found" ? "good" : kind === "none" ? "bad" : "warn";
-    const label = kind === "found" ? "Found" : kind === "none" ? "None" : statusLabel(target.status);
+    const label = kind === "found" ? "Verified wine list" : kind === "none" ? "No wine list" : "Needs review";
     return `<span class="dash-pill ${cls}">${html(label)}</span>`;
   }
 
