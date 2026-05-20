@@ -805,7 +805,7 @@
         <div class="metric-box"><span>No wine list</span><b>${html(fmtInt(none))}</b></div>
         <div class="metric-box"><span>Pending / no website</span><b>${html(fmtInt(pending))}</b></div>
         <div class="metric-box"><span>Parsing review</span><b>${html(fmtInt(reviewSources))}</b></div>
-        <div class="metric-box"><span>Mapped with URL</span><b>${html(fmtInt(mappedWithWebsite))}</b></div>
+        <div class="metric-box"><span>Mapped DB URLs</span><b>${html(fmtInt(mappedWithWebsite))}</b></div>
       </div>
     </section>`;
 
