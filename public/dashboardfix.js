@@ -479,6 +479,12 @@
     return "R";
   }
 
+  function markerZIndex(kind) {
+    if (kind === "found") return 300;
+    if (kind === "none") return 200;
+    return 100;
+  }
+
   function getGoogleMapsKey() {
     return window.STARWINE_CONFIG?.googleMapsApiKey || localStorage.getItem("googleMapsApiKey") || "";
   }
@@ -608,6 +614,7 @@
         state.dashboardDataLayer = new maps.Data({ map: state.dashboardMap });
         state.dashboardDataLayer.setStyle((feature) => ({
           icon: markerIcon(maps, markerColor(feature.getProperty("kind")), markerLabel(feature.getProperty("kind"))),
+          zIndex: markerZIndex(feature.getProperty("kind")),
           title: feature.getProperty("name") || "Restaurant"
         }));
       }
