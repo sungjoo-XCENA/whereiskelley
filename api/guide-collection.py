@@ -8,6 +8,12 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_DATA_DIR = ROOT / "public" / "data"
+PUBLIC_DATA_DIRS = [
+    PUBLIC_DATA_DIR,
+    Path.cwd() / "public" / "data",
+    ROOT.parent / "public" / "data",
+    Path("/var/task/public/data"),
+]
 
 
 def json_response(handler, payload, status=200):
@@ -44,13 +50,30 @@ def fetch_firebase(path):
 
 
 def read_public_json(name, fallback):
-    path = PUBLIC_DATA_DIR / name
-    if not path.exists():
-        return fallback
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return fallback
+    for directory in PUBLIC_DATA_DIRS:
+        path = directory / name
+        if not path.exists():
+            continue
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+    deployed_host = os.environ.get("VERCEL_URL") or "whereiskelley.vercel.app"
+    deployed_host = deployed_host.replace("https://", "").replace("http://", "").strip("/")
+    if deployed_host:
+        try:
+            request = Request(
+                f"https://{deployed_host}/data/{quote(name, safe='')}",
+                headers={
+                    "accept": "application/json",
+                    "user-agent": "whereiskelley-dashboard-snapshot/1.0",
+                },
+            )
+            with urlopen(request, timeout=5) as response:
+                return json.loads(response.read().decode("utf-8") or "null")
+        except Exception:
+            return fallback
+    return fallback
 
 
 def local_base():
