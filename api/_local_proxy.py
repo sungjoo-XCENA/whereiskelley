@@ -1,6 +1,5 @@
 import json
 import os
-from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
@@ -10,6 +9,13 @@ def local_base():
 
 def local_token():
     return os.environ.get("WHEREISKELLEY_LOCAL_API_TOKEN", "").strip()
+
+
+def local_timeout():
+    try:
+        return max(5, int(os.environ.get("WHEREISKELLEY_LOCAL_API_TIMEOUT", "60")))
+    except ValueError:
+        return 60
 
 
 def json_response(handler, payload, status=200):
@@ -29,12 +35,15 @@ def proxy_json(path, query=""):
     url = f"{base}{path}"
     if query:
         url = f"{url}?{query}"
-    headers = {"accept": "application/json"}
+    headers = {
+        "accept": "application/json",
+        "user-agent": "whereiskelley-vercel-proxy/1.0",
+    }
     token = local_token()
     if token:
         headers["x-whereiskelley-token"] = token
     request = Request(url, headers=headers)
-    with urlopen(request, timeout=25) as response:
+    with urlopen(request, timeout=local_timeout()) as response:
         return json.loads(response.read().decode("utf-8") or "null")
 
 

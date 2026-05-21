@@ -28,6 +28,26 @@ The local Dashboard reads live collection state from `/api/guide-collection`, wh
 
 When the PC is on, keep the full SQLite DB and downloaded files on the PC. The deployed Vercel app can read this PC through a HTTPS tunnel, so the full DB does not need to be uploaded to Firebase.
 
+Fast path:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-remote-dashboard.ps1
+```
+
+That command starts the local API server if needed, checks `/api/health`, and starts a Cloudflare quick tunnel. Copy the `https://*.trycloudflare.com` URL printed by `cloudflared`.
+
+Add these environment variables in Vercel:
+
+```text
+WHEREISKELLEY_LOCAL_API_BASE=https://your-tunnel-url.trycloudflare.com
+WHEREISKELLEY_LOCAL_API_TOKEN=the-token-printed-by-the-script
+WHEREISKELLEY_LOCAL_API_TIMEOUT=60
+```
+
+The quick tunnel URL changes when restarted. For regular use, create a named Cloudflare Tunnel with a fixed hostname, then put that fixed hostname in `WHEREISKELLEY_LOCAL_API_BASE`.
+
+Manual setup:
+
 1. Set a local API token in `.env.local`:
 
 ```text
@@ -52,6 +72,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-local-tunnel.ps1
 ```text
 WHEREISKELLEY_LOCAL_API_BASE=https://your-tunnel-url.trycloudflare.com
 WHEREISKELLEY_LOCAL_API_TOKEN=make-a-private-token
+WHEREISKELLEY_LOCAL_API_TIMEOUT=60
 ```
 
 With this setup, the deployed Dashboard reads live progress and watched-wine matches from the local SQLite DB while the PC and tunnel are running.

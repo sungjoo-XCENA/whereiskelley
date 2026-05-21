@@ -18,21 +18,6 @@ DB_PATH = ROOT / "db" / "starwine.sqlite"
 SNAPSHOT_STATUS_PATH = PUBLIC_DIR / "data" / "collection-status.json"
 GUIDE_PROGRESS_PATH = PUBLIC_DIR / "data" / "guide-progress.json"
 GUIDE_STATUS_PATH = PUBLIC_DIR / "data" / "guide-status.json"
-PORT = 4317
-HOST = os.environ.get("WHEREISKELLEY_HOST", "127.0.0.1")
-API_TOKEN = os.environ.get("WHEREISKELLEY_API_TOKEN", "").strip()
-ALLOWED_ORIGIN = os.environ.get("WHEREISKELLEY_ALLOWED_ORIGIN", "*").strip() or "*"
-SCRIPTS_DIR = ROOT / "scripts"
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-
-import sync_search_api
-
-
-PRICE_TOKEN_RE = sync_search_api.re.compile(
-    rf"(?:{sync_search_api.PRICE_CURRENCY_RE})?\s*(?:\d{{1,3}}(?:[,\s.]\d{{3}})+|\d{{2,6}}[oO]\s*[,\.]\s*[oO0]{{2}}|\d{{2,6}}(?:\s*[,\.]\s*[oO0]{{2}})?)(?!\d)",
-    sync_search_api.re.I,
-)
 
 
 def load_local_env():
@@ -51,6 +36,22 @@ def load_local_env():
 
 
 load_local_env()
+
+PORT = 4317
+HOST = os.environ.get("WHEREISKELLEY_HOST", "127.0.0.1")
+API_TOKEN = os.environ.get("WHEREISKELLEY_API_TOKEN", "").strip()
+ALLOWED_ORIGIN = os.environ.get("WHEREISKELLEY_ALLOWED_ORIGIN", "*").strip() or "*"
+SCRIPTS_DIR = ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+import sync_search_api
+
+
+PRICE_TOKEN_RE = sync_search_api.re.compile(
+    rf"(?:{sync_search_api.PRICE_CURRENCY_RE})?\s*(?:\d{{1,3}}(?:[,\s.]\d{{3}})+|\d{{2,6}}[oO]\s*[,\.]\s*[oO0]{{2}}|\d{{2,6}}(?:\s*[,\.]\s*[oO0]{{2}})?)(?!\d)",
+    sync_search_api.re.I,
+)
 
 
 def connect():
@@ -1020,6 +1021,16 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
         try:
+            if parsed.path == "/api/health":
+                return json_response(
+                    self,
+                    {
+                        "ok": True,
+                        "service": "whereiskelley-local-api",
+                        "database": DB_PATH.exists(),
+                        "authRequired": bool(API_TOKEN),
+                    },
+                )
             if parsed.path.startswith("/api/") and not self.api_authorized(params):
                 return json_response(self, {"error": "Unauthorized"}, status=401)
             if parsed.path == "/api/stats":
