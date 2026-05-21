@@ -58,9 +58,13 @@ def read_public_json(name, fallback):
             return json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             continue
-    deployed_host = os.environ.get("VERCEL_URL") or "whereiskelley.vercel.app"
-    deployed_host = deployed_host.replace("https://", "").replace("http://", "").strip("/")
-    if deployed_host:
+    hosts = [os.environ.get("VERCEL_URL", ""), "whereiskelley.vercel.app"]
+    seen_hosts = set()
+    for deployed_host in hosts:
+        deployed_host = deployed_host.replace("https://", "").replace("http://", "").strip("/")
+        if not deployed_host or deployed_host in seen_hosts:
+            continue
+        seen_hosts.add(deployed_host)
         try:
             request = Request(
                 f"https://{deployed_host}/data/{quote(name, safe='')}",
@@ -72,7 +76,7 @@ def read_public_json(name, fallback):
             with urlopen(request, timeout=5) as response:
                 return json.loads(response.read().decode("utf-8") or "null")
         except Exception:
-            return fallback
+            continue
     return fallback
 
 
