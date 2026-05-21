@@ -5,8 +5,6 @@ from pathlib import Path
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from _local_proxy import proxy_json as proxy_local_json
-
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_DATA_DIR = ROOT / "public" / "data"
@@ -55,8 +53,38 @@ def read_public_json(name, fallback):
         return fallback
 
 
+def local_base():
+    return os.environ.get("WHEREISKELLEY_LOCAL_API_BASE", "").rstrip("/")
+
+
+def local_token():
+    return os.environ.get("WHEREISKELLEY_LOCAL_API_TOKEN", "").strip()
+
+
+def local_timeout():
+    try:
+        return max(5, int(os.environ.get("WHEREISKELLEY_LOCAL_API_TIMEOUT", "60")))
+    except ValueError:
+        return 60
+
+
 def proxy_json(path, query=""):
-    return proxy_local_json(path, query)
+    base = local_base()
+    if not base:
+        return None
+    url = f"{base}{path}"
+    if query:
+        url = f"{url}?{query}"
+    headers = {
+        "accept": "application/json",
+        "user-agent": "whereiskelley-vercel-proxy/1.0",
+    }
+    token = local_token()
+    if token:
+        headers["x-whereiskelley-token"] = token
+    request = Request(url, headers=headers)
+    with urlopen(request, timeout=local_timeout()) as response:
+        return json.loads(response.read().decode("utf-8") or "null")
 
 
 def static_snapshot_payload(local_error=""):
