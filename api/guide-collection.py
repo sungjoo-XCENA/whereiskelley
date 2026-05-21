@@ -168,6 +168,7 @@ def static_snapshot_payload(local_error=""):
 
 def payload():
     local_error = ""
+    firebase_error = ""
     try:
         local_payload = proxy_json("/api/guide-collection")
     except Exception as exc:
@@ -177,16 +178,23 @@ def payload():
         if isinstance(local_payload, dict):
             local_payload.setdefault("source", "local_api")
         return local_payload
-    progress = fetch_firebase("progress") or {}
-    if isinstance(progress, dict) and (progress.get("collectionSummary") or progress.get("mapTargets")):
-        progress.setdefault("source", "firebase")
-        return progress
-    result = fetch_firebase("result") or {}
-    if isinstance(result, dict) and (result.get("collectionSummary") or result.get("mapTargets")):
-        result.setdefault("source", "firebase_result")
-        return result
+    try:
+        progress = fetch_firebase("progress") or {}
+        if isinstance(progress, dict) and (progress.get("collectionSummary") or progress.get("mapTargets")):
+            progress.setdefault("source", "firebase")
+            return progress
+        result = fetch_firebase("result") or {}
+        if isinstance(result, dict) and (result.get("collectionSummary") or result.get("mapTargets")):
+            result.setdefault("source", "firebase_result")
+            return result
+    except Exception as exc:
+        progress = {}
+        result = {}
+        firebase_error = str(exc)
     static_payload = static_snapshot_payload(local_error)
     if static_payload.get("collectionSummary", {}).get("totalTargets") or static_payload.get("counts", {}).get("targets"):
+        if firebase_error:
+            static_payload["firebaseError"] = firebase_error
         return static_payload
     status = result.get("guide_status") or result.get("guide-status") or {}
     hits = result.get("guide_watch_hits") or result.get("guide-watch-hits") or []
