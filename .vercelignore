@@ -3,6 +3,6 @@
 .vercel
 __pycache__
 *.pyc
-data
+/data/
 db/*.sqlite
 db/*.sqlite-*
