@@ -14,7 +14,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC_DIR = ROOT / "public"
-DB_PATH = ROOT / "db" / "starwine.sqlite"
 SNAPSHOT_STATUS_PATH = PUBLIC_DIR / "data" / "collection-status.json"
 GUIDE_PROGRESS_PATH = PUBLIC_DIR / "data" / "guide-progress.json"
 GUIDE_STATUS_PATH = PUBLIC_DIR / "data" / "guide-status.json"
@@ -29,7 +28,7 @@ def load_local_env():
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, value = line.split("=", 1)
-            key = key.strip()
+            key = key.strip().lstrip("\ufeff")
             value = value.strip().strip('"').strip("'")
             if key and key not in os.environ:
                 os.environ[key] = value
@@ -37,6 +36,22 @@ def load_local_env():
 
 load_local_env()
 
+
+def resolve_db_path():
+    configured = os.environ.get("WHEREISKELLEY_DB_PATH", "").strip()
+    if configured:
+        return Path(configured)
+    candidates = [
+        ROOT / "db" / "starwine.sqlite",
+        ROOT.parent.parent / "db" / "starwine.sqlite",
+    ]
+    existing = [path for path in candidates if path.exists()]
+    if not existing:
+        return candidates[0]
+    return max(existing, key=lambda path: path.stat().st_size)
+
+
+DB_PATH = resolve_db_path()
 PORT = 4317
 HOST = os.environ.get("WHEREISKELLEY_HOST", "127.0.0.1")
 API_TOKEN = os.environ.get("WHEREISKELLEY_API_TOKEN", "").strip()
