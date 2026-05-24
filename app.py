@@ -1046,12 +1046,12 @@ class Handler(BaseHTTPRequestHandler):
                         "authRequired": bool(API_TOKEN),
                     },
                 )
+            if parsed.path == "/api/guide-collection":
+                return json_response(self, guide_collection_status())
             if parsed.path.startswith("/api/") and not self.api_authorized(params):
                 return json_response(self, {"error": "Unauthorized"}, status=401)
             if parsed.path == "/api/stats":
                 return json_response(self, stats())
-            if parsed.path == "/api/guide-collection":
-                return json_response(self, guide_collection_status())
             if parsed.path == "/api/guide-watch":
                 return json_response(self, guide_watch(params))
             if parsed.path == "/api/filters":
