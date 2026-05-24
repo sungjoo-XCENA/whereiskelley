@@ -17,10 +17,26 @@ from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DB_PATH = ROOT / "db" / "starwine.sqlite"
 SCHEMA_PATH = ROOT / "db" / "schema.sql"
 DATA_DIR = ROOT / "data" / "guide"
 PUBLIC_DATA_DIR = ROOT / "public" / "data"
+
+
+def resolve_db_path():
+    configured = os.environ.get("WHEREISKELLEY_DB_PATH", "").strip()
+    if configured:
+        return Path(configured)
+    candidates = [
+        ROOT / "db" / "starwine.sqlite",
+        ROOT.parent.parent / "db" / "starwine.sqlite",
+    ]
+    existing = [path for path in candidates if path.exists()]
+    if not existing:
+        return candidates[0]
+    return max(existing, key=lambda path: path.stat().st_size)
+
+
+DB_PATH = resolve_db_path()
 
 GUIDE_SOURCES = {
     "laliste": {
@@ -212,7 +228,7 @@ def write_progress(**payload):
 
 
 def connect():
-    con = sqlite3.connect(DB_PATH)
+    con = sqlite3.connect(str(DB_PATH), timeout=30)
     con.row_factory = sqlite3.Row
     con.execute("pragma foreign_keys = on")
     return con
@@ -220,8 +236,14 @@ def connect():
 
 def init_db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with connect() as con:
-        con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    con = connect()
+    try:
+        has_guide_sources = con.execute(
+            "select 1 from sqlite_master where type = 'table' and name = 'guide_sources'"
+        ).fetchone()
+        if not has_guide_sources:
+            con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            con.commit()
         for code, source in GUIDE_SOURCES.items():
             con.execute(
                 """
@@ -235,6 +257,8 @@ def init_db():
                 (code, source["name"], source["urls"][0]),
             )
         con.commit()
+    finally:
+        con.close()
 
 
 def fetch_text(url, timeout=8):
