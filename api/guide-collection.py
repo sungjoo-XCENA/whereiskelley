@@ -81,7 +81,10 @@ def read_public_json(name, fallback):
 
 
 def local_base():
-    return os.environ.get("WHEREISKELLEY_LOCAL_API_BASE", "").rstrip("/")
+    return (
+        os.environ.get("WHEREISKELLEY_LOCAL_API_BASE", "")
+        or "https://actually-impressed-lens-strips.trycloudflare.com"
+    ).rstrip("/")
 
 
 def local_token():
