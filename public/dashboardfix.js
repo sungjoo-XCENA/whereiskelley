@@ -161,6 +161,12 @@
       font-size: 12px;
       font-weight: 800;
     }
+    .dashboard-progress-actions {
+      justify-content: flex-end;
+      margin-left: auto;
+      max-width: min(760px, 60vw);
+      text-align: right;
+    }
     .dashboard-action-note.good {
       color: #047857;
     }
@@ -281,6 +287,12 @@
     @media (max-width: 640px) {
       .collection-head {
         display: grid;
+      }
+      .dashboard-progress-actions {
+        justify-content: flex-start;
+        margin-left: 0;
+        max-width: 100%;
+        text-align: left;
       }
       .collection-metrics,
       .db-health-grid {
@@ -833,7 +845,7 @@
           <p class="dash-kicker">Collect progress</p>
           <h2>${html(progressTitle)}</h2>
         </div>
-        <div class="selected-target-actions">
+        <div class="selected-target-actions dashboard-progress-actions">
           <span class="dash-pill ${progressPillClass}">${html(values.status)}</span>
           <button class="dashboard-refresh" type="button" data-start-guide-collection ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(state.guideActionInFlight ? "Starting..." : "Start recollection")}</button>
           <button class="dashboard-refresh" type="button" data-refresh-dashboard ${state.guideLoadInFlight ? "disabled" : ""}>${html(state.guideLoadInFlight ? "Refreshing..." : "Refresh")}</button>
@@ -907,13 +919,25 @@
     if (state.guideLoadInFlight) return;
     if (state.guideLoadedOnce && !options.force) return;
     state.guideLoadInFlight = true;
+    if (options.force) {
+      state.guideActionKind = "";
+      state.guideActionMessage = "Refreshing dashboard data...";
+      if (state.activeView === "dashboard") renderDashboard();
+    }
     try {
       const payload = await fetchLiveGuideCollection();
       if (isEmptyGuidePayload(payload) && state.guidePayload) return;
       state.guidePayload = payload;
       state.guideLoadedOnce = true;
       state.lastRefreshAt = new Date().toLocaleTimeString();
+      if (options.force && !state.guideActionMessage.includes("started")) {
+        state.guideActionKind = "good";
+        state.guideActionMessage = "Dashboard data refreshed.";
+      }
       if (state.activeView === "dashboard") renderDashboard();
+    } catch (error) {
+      state.guideActionKind = "bad";
+      state.guideActionMessage = `Refresh failed: ${error.message || error}`;
     } finally {
       state.guideLoadInFlight = false;
       if (state.activeView === "dashboard") renderDashboard();
