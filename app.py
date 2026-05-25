@@ -21,7 +21,12 @@ GUIDE_STATUS_PATH = PUBLIC_DIR / "data" / "guide-status.json"
 
 
 def load_local_env():
-    for env_path in (ROOT / ".env.local", ROOT / ".env"):
+    for env_path in (
+        ROOT / ".env.local",
+        ROOT / ".env",
+        ROOT.parent.parent / ".env.local",
+        ROOT.parent.parent / ".env",
+    ):
         if not env_path.exists():
             continue
         for raw_line in env_path.read_text(encoding="utf-8").splitlines():
