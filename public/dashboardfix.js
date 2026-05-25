@@ -859,6 +859,7 @@
       if (state.activeView === "dashboard") renderDashboard();
     } finally {
       state.guideLoadInFlight = false;
+      if (state.activeView === "dashboard") renderDashboard();
     }
   }
 
