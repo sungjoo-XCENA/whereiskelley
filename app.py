@@ -1127,8 +1127,6 @@ class Handler(BaseHTTPRequestHandler):
                 )
             if parsed.path == "/api/guide-collection":
                 return json_response(self, guide_collection_status())
-            if parsed.path.startswith("/api/") and not self.api_authorized(params):
-                return json_response(self, {"error": "Unauthorized"}, status=401)
             if parsed.path == "/api/stats":
                 return json_response(self, stats())
             if parsed.path == "/api/guide-watch":
@@ -1147,6 +1145,8 @@ class Handler(BaseHTTPRequestHandler):
                 return json_response(self, unparsed(params))
             if parsed.path in ("/config.js", "/api/config"):
                 return javascript_response(self, config_js())
+            if parsed.path.startswith("/api/") and not self.api_authorized(params):
+                return json_response(self, {"error": "Unauthorized"}, status=401)
             if parsed.path.startswith("/files/"):
                 return self.serve_data_file(parsed.path.removeprefix("/files/"))
             return self.serve_static(parsed.path)
