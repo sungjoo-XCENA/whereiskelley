@@ -53,6 +53,7 @@ Manual setup:
 ```text
 WHEREISKELLEY_API_TOKEN=make-a-private-token
 WHEREISKELLEY_ALLOWED_ORIGIN=https://whereiskelley.vercel.app
+WHEREISKELLEY_ADMIN_PASSWORD=choose-your-recollection-password
 ```
 
 2. Start the local server:
@@ -76,6 +77,15 @@ WHEREISKELLEY_LOCAL_API_TIMEOUT=60
 ```
 
 With this setup, the deployed Dashboard reads live progress and watched-wine matches from the local SQLite DB while the PC and tunnel are running.
+
+To start wine-list recollection from the deployed Dashboard, keep the local server and tunnel running, open the Dashboard, click `Start recollection`, and enter `WHEREISKELLEY_ADMIN_PASSWORD`.
+The button starts the local collector with saved restaurant website URLs only:
+
+```text
+guide_discover_wine_lists.py --skip-google --only-with-website --recheck-all --replace-existing
+```
+
+So it does not make paid Google Places calls. It replaces old wine-list sources target by target as each restaurant is checked.
 
 ## Guide collection and watchlist
 

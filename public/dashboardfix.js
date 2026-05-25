@@ -15,7 +15,8 @@
     localGuideSeen: false,
     lastLocalGuidePayload: null,
     activeView: "search",
-    guideLoadedOnce: false
+    guideLoadedOnce: false,
+    guideActionInFlight: false
   };
 
   const css = document.createElement("style");
@@ -348,6 +349,33 @@
     const proxied = await fetchJson("/api/guide-collection", null);
     if (!isEmptyGuidePayload(proxied)) return proxied;
     return proxied;
+  }
+
+  async function startGuideRecollection() {
+    if (state.guideActionInFlight) return;
+    const password = window.prompt("Enter the recollection password.");
+    if (!password) return;
+    state.guideActionInFlight = true;
+    renderDashboard();
+    try {
+      const response = await fetch("/api/guide-collection", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ password })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        window.alert(payload.error || "Could not start recollection.");
+        return;
+      }
+      window.alert(payload.message || "Recollection started.");
+      state.guideLoadedOnce = false;
+      await loadGuideStats({ force: true });
+    } finally {
+      state.guideActionInFlight = false;
+      if (state.activeView === "dashboard") renderDashboard();
+    }
   }
 
   function ensureDashboardView() {
@@ -782,6 +810,7 @@
         </div>
         <div class="selected-target-actions">
           <span class="dash-pill ${progressPillClass}">${html(values.status)}</span>
+          <button class="dashboard-refresh" type="button" data-start-guide-collection ${values.running || state.guideActionInFlight ? "disabled" : ""}>Start recollection</button>
           <button class="dashboard-refresh" type="button" data-refresh-dashboard ${state.guideLoadInFlight ? "disabled" : ""}>Refresh</button>
         </div>
       </div>
@@ -880,6 +909,11 @@
       if (!event.target.closest("[data-refresh-dashboard]")) return;
       event.preventDefault();
       loadGuideStats({ force: true });
+    });
+    document.body.addEventListener("click", (event) => {
+      if (!event.target.closest("[data-start-guide-collection]")) return;
+      event.preventDefault();
+      startGuideRecollection();
     });
     activate("search");
   }

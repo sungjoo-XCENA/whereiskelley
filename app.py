@@ -2,6 +2,7 @@ import io
 import json
 import mimetypes
 import os
+import subprocess
 import sqlite3
 import sys
 import unicodedata
@@ -55,12 +56,16 @@ DB_PATH = resolve_db_path()
 PORT = 4317
 HOST = os.environ.get("WHEREISKELLEY_HOST", "127.0.0.1")
 API_TOKEN = os.environ.get("WHEREISKELLEY_API_TOKEN", "").strip()
+ADMIN_PASSWORD = os.environ.get("WHEREISKELLEY_ADMIN_PASSWORD", "").strip()
 ALLOWED_ORIGIN = os.environ.get("WHEREISKELLEY_ALLOWED_ORIGIN", "*").strip() or "*"
 SCRIPTS_DIR = ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import sync_search_api
+
+
+COLLECTOR_PROCESS = None
 
 
 PRICE_TOKEN_RE = sync_search_api.re.compile(
@@ -91,6 +96,75 @@ def json_response(handler, payload, status=200):
     handler.send_header("content-length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def collector_is_running():
+    global COLLECTOR_PROCESS
+    if COLLECTOR_PROCESS is None:
+        return False
+    if COLLECTOR_PROCESS.poll() is None:
+        return True
+    COLLECTOR_PROCESS = None
+    return False
+
+
+def start_wine_collection(payload):
+    global COLLECTOR_PROCESS
+    if not ADMIN_PASSWORD:
+        return {
+            "ok": False,
+            "error": "Admin password is not configured on the local server.",
+            "hint": "Set WHEREISKELLEY_ADMIN_PASSWORD in .env.local, then restart run-server.ps1.",
+        }, 503
+    if str(payload.get("password") or "") != ADMIN_PASSWORD:
+        return {"ok": False, "error": "Wrong password."}, 401
+    if collector_is_running():
+        return {"ok": True, "running": True, "message": "Collection is already running.", "pid": COLLECTOR_PROCESS.pid}, 200
+
+    max_links = int(payload.get("maxLinks") or os.environ.get("WHEREISKELLEY_COLLECT_MAX_LINKS", "12"))
+    max_targets = int(payload.get("maxTargets") or 0)
+    sleep_seconds = str(payload.get("sleep") or os.environ.get("WHEREISKELLEY_COLLECT_SLEEP", "0.08"))
+    command = [
+        sys.executable,
+        str(SCRIPTS_DIR / "guide_discover_wine_lists.py"),
+        "--skip-google",
+        "--only-with-website",
+        "--recheck-all",
+        "--replace-existing",
+        "--max-links",
+        str(max_links),
+        "--sleep",
+        sleep_seconds,
+    ]
+    if max_targets > 0:
+        command.extend(["--max-targets", str(max_targets)])
+
+    log_dir = ROOT / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stdout = open(log_dir / "web-recollect.log", "ab")
+    stderr = open(log_dir / "web-recollect.err.log", "ab")
+    env = os.environ.copy()
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    try:
+        COLLECTOR_PROCESS = subprocess.Popen(
+            command,
+            cwd=str(ROOT),
+            stdout=stdout,
+            stderr=stderr,
+            env=env,
+            creationflags=creationflags,
+        )
+    finally:
+        stdout.close()
+        stderr.close()
+    return {
+        "ok": True,
+        "running": True,
+        "pid": COLLECTOR_PROCESS.pid,
+        "message": "Wine-list recollection started on the local PC.",
+        "command": " ".join(command),
+    }, 202
 
 
 def text_response(handler, text, status=200):
@@ -1021,7 +1095,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("access-control-allow-origin", ALLOWED_ORIGIN)
         self.send_header("access-control-allow-headers", "content-type, x-whereiskelley-token")
-        self.send_header("access-control-allow-methods", "GET, OPTIONS")
+        self.send_header("access-control-allow-methods", "GET, POST, OPTIONS")
         self.send_header("access-control-allow-private-network", "true")
         self.end_headers()
 
@@ -1073,6 +1147,22 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_static(parsed.path)
         except Exception as exc:
             return json_response(self, {"error": str(exc)}, status=500)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        try:
+            length = int(self.headers.get("content-length") or 0)
+            raw_body = self.rfile.read(length) if length else b"{}"
+            try:
+                payload = json.loads(raw_body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return json_response(self, {"ok": False, "error": "Invalid JSON body."}, status=400)
+            if parsed.path in ("/api/guide-collection", "/api/guide-collection/run"):
+                result, status = start_wine_collection(payload if isinstance(payload, dict) else {})
+                return json_response(self, result, status=status)
+            return json_response(self, {"ok": False, "error": "Not found."}, status=404)
+        except Exception as exc:
+            return json_response(self, {"ok": False, "error": str(exc)}, status=500)
 
     def serve_static(self, request_path):
         safe = "index.html" if request_path == "/" else request_path.lstrip("/")

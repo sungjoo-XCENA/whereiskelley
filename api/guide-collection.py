@@ -117,6 +117,27 @@ def proxy_json(path, query=""):
         return json.loads(response.read().decode("utf-8") or "null")
 
 
+def proxy_post_json(path, payload):
+    base = local_base()
+    if not base:
+        return None, 503
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json; charset=utf-8",
+        "user-agent": "whereiskelley-vercel-proxy/1.0",
+    }
+    token = local_token()
+    if token:
+        headers["x-whereiskelley-token"] = token
+    request = Request(f"{base}{path}", data=data, headers=headers, method="POST")
+    try:
+        with urlopen(request, timeout=local_timeout()) as response:
+            return json.loads(response.read().decode("utf-8") or "null"), response.status
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "source": "local_api_proxy"}, 502
+
+
 def static_snapshot_payload(local_error=""):
     status = read_public_json("guide-status.json", {}) or {}
     progress_file = read_public_json("guide-progress.json", {}) or {}
@@ -273,3 +294,16 @@ class handler(BaseHTTPRequestHandler):
             json_response(self, payload())
         except Exception as exc:
             json_response(self, {"error": str(exc), "source": "firebase"}, status=500)
+
+    def do_POST(self):
+        try:
+            length = int(self.headers.get("content-length") or 0)
+            raw_body = self.rfile.read(length) if length else b"{}"
+            try:
+                body = json.loads(raw_body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return json_response(self, {"ok": False, "error": "Invalid JSON body."}, status=400)
+            result, status = proxy_post_json("/api/guide-collection/run", body if isinstance(body, dict) else {})
+            json_response(self, result or {"ok": False, "error": "Local API is not configured."}, status=status)
+        except Exception as exc:
+            json_response(self, {"ok": False, "error": str(exc), "source": "local_api_proxy"}, status=500)
