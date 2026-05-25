@@ -16,7 +16,10 @@
     lastLocalGuidePayload: null,
     activeView: "search",
     guideLoadedOnce: false,
-    guideActionInFlight: false
+    guideActionInFlight: false,
+    guideActionMessage: "",
+    guideActionKind: "",
+    lastRefreshAt: ""
   };
 
   const css = document.createElement("style");
@@ -151,6 +154,19 @@
     .dashboard-refresh:disabled {
       opacity: 0.55;
       cursor: progress;
+    }
+    .dashboard-action-note {
+      flex-basis: 100%;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .dashboard-action-note.good {
+      color: #047857;
+    }
+    .dashboard-action-note.warn,
+    .dashboard-action-note.bad {
+      color: #b45309;
     }
     .dashboard-map-wrap {
       position: relative;
@@ -356,6 +372,8 @@
     const password = window.prompt("Enter the recollection password.");
     if (!password) return;
     state.guideActionInFlight = true;
+    state.guideActionKind = "";
+    state.guideActionMessage = "Starting recollection...";
     renderDashboard();
     try {
       const response = await fetch("/api/guide-collection", {
@@ -366,12 +384,19 @@
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.ok === false) {
-        window.alert(payload.error || "Could not start recollection.");
+        state.guideActionKind = "bad";
+        state.guideActionMessage = payload.error || `Could not start recollection. HTTP ${response.status}`;
         return;
       }
-      window.alert(payload.message || "Recollection started.");
+      state.guideActionKind = "good";
+      state.guideActionMessage = payload.message || "Recollection started.";
       state.guideLoadedOnce = false;
       await loadGuideStats({ force: true });
+      window.setTimeout(() => loadGuideStats({ force: true }), 2500);
+      window.setTimeout(() => loadGuideStats({ force: true }), 8000);
+    } catch (error) {
+      state.guideActionKind = "bad";
+      state.guideActionMessage = `Could not reach the collection API: ${error.message || error}`;
     } finally {
       state.guideActionInFlight = false;
       if (state.activeView === "dashboard") renderDashboard();
@@ -810,8 +835,10 @@
         </div>
         <div class="selected-target-actions">
           <span class="dash-pill ${progressPillClass}">${html(values.status)}</span>
-          <button class="dashboard-refresh" type="button" data-start-guide-collection ${values.running || state.guideActionInFlight ? "disabled" : ""}>Start recollection</button>
-          <button class="dashboard-refresh" type="button" data-refresh-dashboard ${state.guideLoadInFlight ? "disabled" : ""}>Refresh</button>
+          <button class="dashboard-refresh" type="button" data-start-guide-collection ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(state.guideActionInFlight ? "Starting..." : "Start recollection")}</button>
+          <button class="dashboard-refresh" type="button" data-refresh-dashboard ${state.guideLoadInFlight ? "disabled" : ""}>${html(state.guideLoadInFlight ? "Refreshing..." : "Refresh")}</button>
+          ${state.guideActionMessage ? `<span class="dashboard-action-note ${html(state.guideActionKind)}">${html(state.guideActionMessage)}</span>` : ""}
+          ${state.lastRefreshAt ? `<span class="dashboard-action-note">Last refreshed ${html(state.lastRefreshAt)}</span>` : ""}
         </div>
       </div>
       <div class="dash-progress" style="--dash-progress:${html(values.percent)}%"><i></i></div>
@@ -885,6 +912,7 @@
       if (isEmptyGuidePayload(payload) && state.guidePayload) return;
       state.guidePayload = payload;
       state.guideLoadedOnce = true;
+      state.lastRefreshAt = new Date().toLocaleTimeString();
       if (state.activeView === "dashboard") renderDashboard();
     } finally {
       state.guideLoadInFlight = false;
