@@ -606,6 +606,39 @@ def same_site_or_wine_host(base_url, href):
     return host == base_host or host_root == base_root or host.startswith("wine.") or ".wine." in host
 
 
+WINE_SOURCE_URL_RE = re.compile(
+    r"(?:"
+    r"wine[-_/ ]?list|winelist|wine[-_/ ]?card|wine[-_/ ]?menu|"
+    r"wine[-_/ ]?book|wine[-_/ ]?cellar|"
+    r"wijnkaart|weinkarte|wein[-_/ ]?karte|"
+    r"carte[-_/ ]?des[-_/ ]?vins|carte[-_/ ]?vins|"
+    r"carta[-_/ ]?dei[-_/ ]?vini|lista[-_/ ]?de[-_/ ]?vinos|carta[-_/ ]?de[-_/ ]?vinos|"
+    r"carta[-_/ ]?de[-_/ ]?vinhos|vinkort|vinliste|dryckeslista|viinilista|"
+    r"drink[-_/ ]?list|drink[-_/ ]?menu|drinks[-_/ ]?menu|beverage[-_/ ]?list|beverage[-_/ ]?menu"
+    r")",
+    re.I,
+)
+GENERIC_SOURCE_PATH_RE = re.compile(
+    r"^/?$|^/(?:restaurant|restaurants|menu|menus|food|dining|about|contact|home|en|fr|de|it|es|nl|ja|ko)/?$",
+    re.I,
+)
+
+
+def source_url_signal(url, source_type, link_score=0):
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    path = fold_text(unescape(parsed.path or "").replace("_", "-"))
+    if source_type == "pdf" or path.endswith(".pdf"):
+        return True
+    if host.startswith("wine.") or ".wine." in host:
+        return True
+    if WINE_SOURCE_URL_RE.search(path):
+        return True
+    if int(link_score or 0) >= 70 and not GENERIC_SOURCE_PATH_RE.search(path):
+        return True
+    return False
+
+
 def generated_wine_link_candidates(base_url):
     parsed = urlparse(base_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -701,7 +734,7 @@ def crawlable_page_links(base_url, page_url, html):
 
 
 def discover_candidate_wine_links(base_url, html, max_pages=40):
-    links = [{"url": base_url, "text": "Official website", "score": 1}, *candidate_wine_links(base_url, html)]
+    links = candidate_wine_links(base_url, html)
     queue = sorted(crawlable_page_links(base_url, base_url, html), key=lambda item: item.get("score", 0), reverse=True)
     seen = {link["url"].split("#", 1)[0] for link in links}
     queued = {link["url"].split("#", 1)[0] for link in queue}
@@ -829,6 +862,8 @@ def likely_wine_line(line, watches):
 def source_confidence(url, source_type, text, lines, link_score):
     if not lines:
         return 0, "No parseable wine lines found."
+    if not source_url_signal(url, source_type, link_score):
+        return int(link_score or 0), "Candidate URL is not a wine-list page or file."
     parsed = urlparse(url)
     haystack = fold_text(" ".join([parsed.netloc.lower(), parsed.path.lower(), text[:4000]]).replace("_", "-"))
     score = int(link_score or 0)

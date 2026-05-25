@@ -2,7 +2,6 @@ import argparse
 import calendar
 import json
 import os
-import re
 import sqlite3
 import time
 from difflib import SequenceMatcher
@@ -209,22 +208,12 @@ def update_target_from_google(con, target, resolved):
     )
 
 
-def direct_wine_source(url, html, watches):
-    text = guide.html_to_lines(html)
-    lines = [line for line in re.split(r"[\r\n]+", text or "") if guide.likely_wine_line(line, watches)]
-    if len(lines) >= 2:
-        return True
-    return bool(re.search(r"\b(?:wine list|winelist|carte des vins|vinkort|wein(?:karte)?|lista de vinos)\b", text, re.I))
-
-
 def discover_target(con, target, watches, max_links):
     content, content_type = guide.fetch_text(target["website_url"], timeout=6)
     if not isinstance(content, str):
         return 0, 0, "Official website returned binary content."
 
     links = guide.discover_candidate_wine_links(target["website_url"], content, max_pages=max(2, min(4, max_links)))
-    if direct_wine_source(target["website_url"], content, watches):
-        links.insert(0, {"url": target["website_url"], "text": "Official website", "score": 1})
 
     unique = []
     seen = set()
@@ -378,12 +367,14 @@ def dashboard_payload(con, progress_payload):
                     partition by s.target_id
                     order by
                       case when s.status = 'found' and s.parser_status = 'parsed' and coalesce(s.line_count, 0) > 0 then 0 else 1 end,
+                      case when rt.website_url is not null and rt.website_url != '' and s.url = rt.website_url then 1 else 0 end,
                       case when s.source_type = 'pdf' then 0 else 1 end,
                       coalesce(s.line_count, 0) desc,
                       s.last_checked_at desc,
                       s.discovered_at desc
                   ) as choice_rank
                 from wine_list_sources s
+                join restaurant_targets rt on rt.id = s.target_id
               )
               where choice_rank = 1
             )
