@@ -688,9 +688,6 @@ function renderResultList() {
     return;
   }
   const groups = sortGroups(groupedVenues(results));
-  groups.forEach((group) => {
-    if (groupPdfLists(group).length) window.setTimeout(() => loadPdfLines(group), 0);
-  });
   const rows = groups.map((group) => renderPlaceRow(group)).join("");
   resultsEl.innerHTML = `${liveLine}<div class="table-wrap">
     <table class="result-table">
@@ -1033,7 +1030,9 @@ getJson("/api/filters")
   .then((filters) => {
     renderFilters(filters);
     queryInput.value = "William Kelley";
-    return runSearch();
+    resultsEl.innerHTML = `<div class="empty-list"><h3>Ready to search</h3><p>Enter a wine name and press Search.</p></div>`;
+    mapSummaryEl.textContent = "Waiting for search";
+    showMapFallback("Search results will draw the map.", "Ready", false);
   })
   .catch((error) => {
     resultsEl.innerHTML = `<div class="empty-list"><h3>Load error</h3><p>${escapeHtml(error.message)}</p></div>`;

@@ -10,6 +10,31 @@ powershell -ExecutionPolicy Bypass -File .\run-server.ps1
 
 Open `http://localhost:4317`.
 
+## Public local web app, no Vercel functions
+
+Preferred setup while the PC is on:
+
+```powershell
+.\run-public-web.cmd
+```
+
+or:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-public-web.ps1
+```
+
+This starts the local Where is Kelley web server at `http://localhost:4317`, then opens a Cloudflare quick tunnel to the whole local app. Use the `https://*.trycloudflare.com` URL printed by Cloudflare from any browser or phone.
+
+In this mode:
+
+- the web page is served by this PC, not Vercel
+- search, PDF parsing, dashboard, and SQLite reads all run locally
+- Vercel Function CPU is not used
+- the window running `run-public-web.ps1` must stay open while using the public URL
+
+The quick tunnel URL changes each time it is restarted. If you later want a permanent URL, use a named Cloudflare Tunnel and point it at `http://localhost:4317`.
+
 To use this PC as the collection monitor/server, keep the local server running while collection runs:
 
 ```powershell
@@ -25,6 +50,8 @@ powershell -ExecutionPolicy Bypass -File .\run-server.ps1 -Public
 The local Dashboard reads live collection state from `/api/guide-collection`, which reads SQLite and `public/data/guide-progress.json` directly. This does not require GitHub or Vercel.
 
 ## Use this PC as the deployed dashboard API
+
+This mode is now secondary. Use it only if you still want the Vercel-hosted page to read the local PC API.
 
 When the PC is on, keep the full SQLite DB and downloaded files on the PC. The deployed Vercel app can read this PC through a HTTPS tunnel, so the full DB does not need to be uploaded to Firebase.
 
@@ -253,6 +280,8 @@ This repo includes a lightweight Vercel version:
 - serverless live search at `api/search.py`
 - Google Maps config at `api/config.js`
 - static DB snapshot files from `public/data/`
+
+For heavy usage, prefer `run-public-web.ps1` instead of the Vercel URL. The Vercel version still uses serverless functions for live search and PDF-line parsing, so repeated searches or expanded PDF checks can consume Vercel Function CPU.
 
 The Vercel version merges two sources in the same search results:
 
