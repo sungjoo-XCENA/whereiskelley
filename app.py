@@ -499,6 +499,15 @@ def guide_collection_status():
         int(payload["collectionSummary"].get("parseReviewSources") or 0),
         max(0, int(payload["collectionSummary"].get("totalSources") or 0) - int(payload["collectionSummary"].get("parsedSources") or 0)),
     )
+    if payload["progress"].get("status") == "completed":
+        total_targets = int(payload["collectionSummary"].get("totalTargets") or payload["counts"].get("targets") or 0)
+        checked_targets = int(payload["collectionSummary"].get("checkedTargets") or 0)
+        if total_targets and checked_targets:
+            payload["progress"]["processedTargets"] = checked_targets
+            payload["progress"]["websitesChecked"] = checked_targets
+            payload["progress"]["totalWebsites"] = total_targets
+            payload["progress"]["targetCount"] = total_targets
+            payload["progress"]["progressPercent"] = round(min(100, (checked_targets / total_targets) * 100), 1)
     return payload
 
 
