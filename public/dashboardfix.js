@@ -518,7 +518,8 @@
     if (number(target.verifiedWineListCount) > 0 || (
       target.wineListStatus === "found" &&
       target.wineListParserStatus === "parsed" &&
-      number(target.chosenWineLineCount) > 0
+      number(target.chosenWineLineCount) > 0 &&
+      !String(target.wineListLastError || "").trim()
     )) return "found";
     if (status === "no_wine_list") return "none";
     return "pending";
