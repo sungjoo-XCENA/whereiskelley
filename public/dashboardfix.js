@@ -563,22 +563,28 @@
 
   function loadDashboardGoogleMaps() {
     if (window.google?.maps) return Promise.resolve(window.google.maps);
-    if (typeof window.loadGoogleMaps === "function") return window.loadGoogleMaps();
     const key = getGoogleMapsKey();
     if (!key) return Promise.resolve(null);
     if (state.dashboardMapPromise) return state.dashboardMapPromise;
     state.dashboardMapPromise = new Promise((resolve, reject) => {
       const callbackName = `initDashboardMap${Date.now()}`;
       const previousAuthFailure = window.gm_authFailure;
+      let settled = false;
       window.gm_authFailure = () => {
         window.gm_authFailure = previousAuthFailure;
         if (typeof previousAuthFailure === "function") previousAuthFailure();
-        reject(new Error("Google Maps key does not allow this site."));
+        if (!settled) {
+          settled = true;
+          reject(new Error(`Google Maps rejected ${window.location.origin}. Add ${window.location.origin}/* to this API key's Website restrictions and make sure Maps JavaScript API and billing are enabled.`));
+        }
       };
       window[callbackName] = () => {
         delete window[callbackName];
         window.gm_authFailure = previousAuthFailure;
-        resolve(window.google.maps);
+        if (!settled) {
+          settled = true;
+          resolve(window.google.maps);
+        }
       };
       const script = document.createElement("script");
       script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=${callbackName}&v=weekly&loading=async`;
@@ -586,7 +592,10 @@
       script.defer = true;
       script.onerror = () => {
         window.gm_authFailure = previousAuthFailure;
-        reject(new Error("Google Maps failed to load."));
+        if (!settled) {
+          settled = true;
+          reject(new Error("Google Maps failed to load. Check the API key, billing, and allowed Website restrictions."));
+        }
       };
       document.head.appendChild(script);
     });
@@ -723,7 +732,7 @@
       if (state.activeTargetId) selectDashboardTarget(state.activeTargetId, false);
     } catch (error) {
       fallbackEl.classList.remove("hidden");
-      fallbackEl.innerHTML = `<b>Map unavailable</b><span>${html(error.message)} Add http://localhost:4317/* and http://127.0.0.1:4317/* to the Google Maps key referrers for local dashboard use.</span>`;
+      fallbackEl.innerHTML = `<b>Map unavailable</b><span>${html(error.message)}</span>`;
     }
   }
 
