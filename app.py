@@ -1188,6 +1188,7 @@ class Handler(BaseHTTPRequestHandler):
         body = file_path.read_bytes()
         self.send_response(200)
         self.send_header("content-type", mimetypes.guess_type(file_path.name)[0] or "application/octet-stream")
+        self.send_header("cache-control", "no-store")
         self.send_header("content-length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
