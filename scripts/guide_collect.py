@@ -85,7 +85,8 @@ NON_WINE_MENU_RE = re.compile(r"\b(?:food|lunch|dinner|breakfast|brunch|tasting-
 CRAWL_SKIP_RE = re.compile(
     r"\.(?:jpg|jpeg|png|gif|webp|svg|ico|css|js|zip|mp4|mov|avi|woff2?|ttf|eot)(?:[?#]|$)|"
     r"\b(?:privacy|terms|cookie|career|jobs|press|newsletter|gift-card|giftcard|voucher|"
-    r"instagram|facebook|twitter|linkedin|youtube|tripadvisor|reservation|booking|book-a-table)\b",
+    r"instagram|facebook|twitter|linkedin|youtube|tripadvisor|reservation|booking|book-a-table|"
+    r"room|rooms|suite|suites|hotel|accommodation|zimmer|chambre|camera|habitacion|spa|wellness)\b",
     re.I,
 )
 WINE_TEXT_RE = re.compile(
@@ -137,6 +138,10 @@ WATCH_DEFAULTS = [
     {"keyword": "William Kelley", "vintage": "", "active": True},
 ]
 CURRENCY_RE = r"HK\$|SG\$|S\$|A\$|C\$|US\$|\u20ac|\$|\u00a3|\u00a5|\u20a9|(?<![A-Z])(?:CHF|DKK|SEK|NOK|USD|EUR|GBP|CAD|AUD|SGD|HKD|AED|CNY|CZK|ARS|JPY|KRW)(?![A-Z])"
+MAX_DISCOVERY_FETCHES = int(os.environ.get("WHEREISKELLEY_MAX_DISCOVERY_FETCHES", "18"))
+MAX_DISCOVERY_DEPTH = int(os.environ.get("WHEREISKELLEY_MAX_DISCOVERY_DEPTH", "2"))
+MAX_WEAK_DISCOVERY_FETCHES = int(os.environ.get("WHEREISKELLEY_MAX_WEAK_DISCOVERY_FETCHES", "4"))
+STRONG_LINK_SCORE = 70
 CURRENCY_ALIASES = {
     "HK$": "HKD",
     "SG$": "SGD",
@@ -733,21 +738,35 @@ def crawlable_page_links(base_url, page_url, html):
     return links
 
 
-def discover_candidate_wine_links(base_url, html, max_pages=40):
+def discover_candidate_wine_links(base_url, html, max_pages=40, max_depth=None, max_weak_pages=None):
+    max_fetches = min(max_pages or MAX_DISCOVERY_FETCHES, MAX_DISCOVERY_FETCHES)
+    max_depth = MAX_DISCOVERY_DEPTH if max_depth is None else max_depth
+    max_weak_pages = MAX_WEAK_DISCOVERY_FETCHES if max_weak_pages is None else max_weak_pages
     links = candidate_wine_links(base_url, html)
     queue = sorted(crawlable_page_links(base_url, base_url, html), key=lambda item: item.get("score", 0), reverse=True)
+    for item in queue:
+        item["depth"] = 1
     seen = {link["url"].split("#", 1)[0] for link in links}
     queued = {link["url"].split("#", 1)[0] for link in queue}
     scanned_pages = 0
-    while queue and scanned_pages < max_pages:
+    weak_scanned_pages = 0
+    while queue and scanned_pages < max_fetches:
         queue.sort(key=lambda item: item.get("score", 0), reverse=True)
         link = queue.pop(0)
         key = link["url"].split("#", 1)[0]
         if key in seen:
             continue
+        score = int(link.get("score", 0) or 0)
+        depth = int(link.get("depth", 1) or 1)
+        if score < STRONG_LINK_SCORE:
+            if weak_scanned_pages >= max_weak_pages:
+                continue
+            weak_scanned_pages += 1
         seen.add(key)
         links.append(link)
         if urlparse(link["url"]).path.lower().endswith(".pdf"):
+            continue
+        if depth >= max_depth:
             continue
         try:
             content, content_type = fetch_text(link["url"], timeout=5)
@@ -756,11 +775,15 @@ def discover_candidate_wine_links(base_url, html, max_pages=40):
         if not isinstance(content, str) or "html" not in content_type.lower():
             continue
         scanned_pages += 1
+        folded_content = fold_text(content[:12000])
+        if CORE_WINE_TEXT_RE.search(folded_content) and score >= 10:
+            link["score"] = score + 35
         child_links = crawlable_page_links(base_url, link["url"], content)
         for child in child_links:
             key = child["url"].split("#", 1)[0]
             if key in seen or key in queued:
                 continue
+            child["depth"] = depth + 1
             queued.add(key)
             queue.append(child)
     return sorted(links, key=lambda item: item.get("score", 0), reverse=True)
@@ -832,13 +855,16 @@ def wine_line_score(line, watches):
         return 0
     if re.search(r"[_{}<>]|['\"]\s*:", text):
         return 0
-    if any(normalize_name(watch["keyword"]) in normalize_name(text) for watch in watches if watch.get("active", True)):
-        return 8
+    watch_hit = any(normalize_name(watch["keyword"]) in normalize_name(text) for watch in watches if watch.get("active", True))
     numbers = PRICE_NUMBER_RE.findall(text)
     price_text, price_value, currency = parse_price(text)
     has_vintage = bool(re.search(r"\b(19|20)\d{2}\b", text))
     has_wine_text = bool(WINE_TEXT_RE.search(folded_text))
+    if not has_wine_text and not watch_hit:
+        return 0
     score = 0
+    if watch_hit:
+        score += 5
     if has_vintage:
         score += 2
     if price_value:
@@ -851,7 +877,7 @@ def wine_line_score(line, watches):
         score += 1
     if re.fullmatch(r"(?:19|20)\d{2}", text.strip()):
         return 0
-    has_price_context = bool(currency) or (has_wine_text and has_vintage and len(numbers) >= 2)
+    has_price_context = bool(currency) or (has_vintage and len(numbers) >= 2)
     return score if score >= 5 and price_value and has_price_context else 0
 
 
@@ -862,11 +888,14 @@ def likely_wine_line(line, watches):
 def source_confidence(url, source_type, text, lines, link_score):
     if not lines:
         return 0, "No parseable wine lines found."
-    if not source_url_signal(url, source_type, link_score):
-        return int(link_score or 0), "Candidate URL is not a wine-list page or file."
     parsed = urlparse(url)
     haystack = fold_text(" ".join([parsed.netloc.lower(), parsed.path.lower(), text[:4000]]).replace("_", "-"))
     score = int(link_score or 0)
+    core_count = sum(1 for line in lines if CORE_WINE_TEXT_RE.search(fold_text(line)))
+    wine_text_count = sum(1 for line in lines if WINE_TEXT_RE.search(fold_text(line)))
+    has_source_signal = source_url_signal(url, source_type, link_score)
+    if not has_source_signal and core_count < 3:
+        return score, "Candidate URL is not a wine-list page or file."
     if source_type == "pdf":
         score += 30
     if parsed.netloc.lower().startswith("wine.") or ".wine." in parsed.netloc.lower():
@@ -878,13 +907,13 @@ def source_confidence(url, source_type, text, lines, link_score):
         score += 30
     if sum(1 for line in lines if parse_price(line)[2]) >= 2:
         score += 20
-    if sum(1 for line in lines if CORE_WINE_TEXT_RE.search(fold_text(line))) >= 1:
+    if core_count >= 1:
         score += 45
-    if sum(1 for line in lines if WINE_TEXT_RE.search(fold_text(line))) >= 2:
+    if wine_text_count >= 2:
         score += 35
     if len(lines) < 2 and score < 180:
         return score, "Only one parseable wine line found; review required."
-    if sum(1 for line in lines if CORE_WINE_TEXT_RE.search(fold_text(line))) == 0:
+    if core_count == 0:
         return score, "No Burgundy, Champagne, or Bordeaux keywords found; review required."
     if score < 120:
         return score, "Candidate did not look enough like a wine list."
@@ -902,7 +931,7 @@ def html_to_lines(html):
     return "\n".join(lines)
 
 
-def save_wine_source(con, target, url, source_type, content, text, error=""):
+def save_wine_source(con, target, url, source_type, content, text, status="review", parser_status="review", line_count=0, error=""):
     target_id = target["id"]
     digest = hashlib.sha256(content if isinstance(content, bytes) else content.encode("utf-8", errors="ignore")).hexdigest()
     stem = f"{target_id}-{digest[:12]}"
@@ -919,9 +948,9 @@ def save_wine_source(con, target, url, source_type, content, text, error=""):
         """
         insert into wine_list_sources(
           target_id, url, source_type, status, content_path, text_path, checksum,
-          last_checked_at, parser_status, last_error
+          last_checked_at, parser_status, line_count, last_error
         )
-        values(?, ?, ?, ?, ?, ?, ?, current_timestamp, ?, ?)
+        values(?, ?, ?, ?, ?, ?, ?, current_timestamp, ?, ?, ?)
         on conflict(target_id, url) do update set
           source_type=excluded.source_type,
           status=excluded.status,
@@ -930,6 +959,7 @@ def save_wine_source(con, target, url, source_type, content, text, error=""):
           checksum=excluded.checksum,
           last_checked_at=current_timestamp,
           parser_status=excluded.parser_status,
+          line_count=excluded.line_count,
           last_error=excluded.last_error
         returning id
         """,
@@ -937,11 +967,12 @@ def save_wine_source(con, target, url, source_type, content, text, error=""):
             target_id,
             url,
             source_type,
-            "found" if not error else "review",
+            status,
             str(content_path.relative_to(ROOT)),
             str(text_path.relative_to(ROOT)),
             digest,
-            "parsed" if text else "review",
+            parser_status,
+            line_count,
             error,
         ),
     )
@@ -987,10 +1018,25 @@ def scan_wine_source(con, target, url, watches, link_score=0):
                     rendered_text = render_page_text(url)
                     if rendered_text:
                         text = rendered_text
-        source_id = save_wine_source(con, target, url, source_type, content, text)
         lines = [clean_text(line) for line in candidate_text_lines(text) if likely_wine_line(line, watches)]
         confidence, review_reason = source_confidence(url, source_type, text or "", lines, link_score)
+        verified = bool(lines) and not review_reason
+        inserted_limit = min(len(lines), 1000) if verified else 0
+        source_id = save_wine_source(
+            con,
+            target,
+            url,
+            source_type,
+            content,
+            text,
+            status="found" if verified else "review",
+            parser_status="parsed" if verified else "review",
+            line_count=inserted_limit,
+            error=review_reason,
+        )
         inserted = 0
+        if not verified:
+            return 0, 0, review_reason
         for line in lines[:1000]:
             vintage_match = re.search(r"\b(19|20)\d{2}\b", line)
             price_text, price_value, currency = parse_price(line)
@@ -1021,19 +1067,9 @@ def scan_wine_source(con, target, url, watches, link_score=0):
                 ),
             )
             inserted += 1
-        verified = inserted > 0 and not review_reason
-        source_status = "found" if verified else "review"
-        parser_status = "parsed" if verified else "review"
-        con.execute(
-            """
-            update wine_list_sources
-            set line_count=?, status=?, parser_status=?,
-                last_error=case when ? != '' then ? else '' end
-            where id=?
-            """,
-            (inserted, source_status, parser_status, review_reason, review_reason, source_id),
-        )
-        return (1 if verified else 0), inserted, review_reason
+        if inserted != inserted_limit:
+            con.execute("update wine_list_sources set line_count=? where id=?", (inserted, source_id))
+        return 1, inserted, ""
     except Exception as exc:
         con.execute(
             "update restaurant_targets set status='review', last_error=?, last_checked_at=current_timestamp where id=?",
@@ -1135,7 +1171,7 @@ def discover_targets(con, max_targets, run_id, target_count):
             html, content_type = fetch_text(target["website_url"], timeout=25)
             if not isinstance(html, str):
                 continue
-            links = discover_candidate_wine_links(target["website_url"], html, max_pages=12)
+            links = discover_candidate_wine_links(target["website_url"], html, max_pages=18)
             if not links:
                 con.execute(
                     "update restaurant_targets set status='no_wine_list', last_checked_at=current_timestamp where id=?",
@@ -1144,6 +1180,7 @@ def discover_targets(con, max_targets, run_id, target_count):
                 continue
             target_sources = 0
             target_lines = 0
+            review_reasons = []
             for link in links[:5]:
                 write_progress(
                     runId=run_id,
@@ -1162,13 +1199,15 @@ def discover_targets(con, max_targets, run_id, target_count):
                 target_sources += found
                 target_lines += lines
                 if error:
+                    review_reasons.append(error)
                     errors += 1
                 if target_sources and (lines >= 10 or link.get("score", 0) >= 120):
                     break
             status = "found" if target_sources else "review"
+            last_error = "" if target_sources else "; ".join(dict.fromkeys(review_reasons[:3]))
             con.execute(
-                "update restaurant_targets set status=?, last_checked_at=current_timestamp, last_error=null where id=?",
-                (status, target["id"]),
+                "update restaurant_targets set status=?, last_checked_at=current_timestamp, last_error=? where id=?",
+                (status, last_error, target["id"]),
             )
             sources_found += target_sources
             lines_found += target_lines
