@@ -475,12 +475,12 @@
     const summary = payload?.collectionSummary || {};
     const running = progress.status === "running" && !progress.stale;
     const stopped = progress.status === "stalled" || Boolean(progress.stale);
-    const completed = progress.status === "completed" || latestRun.status === "completed";
+    const completed = !running && (progress.status === "completed" || latestRun.status === "completed");
     const summaryTotal = number(summary.totalTargets || counts.targets || latestRun.target_count);
     const summaryChecked = number(summary.checkedTargets || latestRun.websites_checked);
     const rawProcessed = number(progress.processedTargets ?? progress.websitesChecked ?? latestRun.websites_checked);
     const rawTotal = number(progress.totalWebsites || summary.totalTargets || counts.targets || latestRun.target_count);
-    const useSummaryProgress = completed && summaryTotal && summaryChecked && (!rawTotal || rawTotal < summaryTotal);
+    const useSummaryProgress = !running && completed && summaryTotal && summaryChecked && (!rawTotal || rawTotal < summaryTotal);
     const processed = useSummaryProgress ? summaryChecked : rawProcessed;
     const total = useSummaryProgress ? summaryTotal : rawTotal;
     const percent = total ? Math.min(100, Math.max(0, useSummaryProgress ? ((processed / total) * 100) : number(progress.progressPercent || ((processed / total) * 100)))) : 0;
