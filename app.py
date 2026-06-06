@@ -103,14 +103,32 @@ def json_response(handler, payload, status=200):
     handler.wfile.write(body)
 
 
-def collector_is_running():
+def running_collector_pid():
     global COLLECTOR_PROCESS
-    if COLLECTOR_PROCESS is None:
-        return False
-    if COLLECTOR_PROCESS.poll() is None:
-        return True
-    COLLECTOR_PROCESS = None
-    return False
+    if COLLECTOR_PROCESS is not None:
+        if COLLECTOR_PROCESS.poll() is None:
+            return COLLECTOR_PROCESS.pid
+        COLLECTOR_PROCESS = None
+    if os.name == "nt":
+        return None
+    try:
+        output = subprocess.check_output(
+            ["pgrep", "-f", str(SCRIPTS_DIR / "guide_discover_wine_lists.py")],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return None
+    for raw_pid in output.splitlines():
+        try:
+            return int(raw_pid.strip())
+        except ValueError:
+            continue
+    return None
+
+
+def collector_is_running():
+    return running_collector_pid() is not None
 
 
 def start_wine_collection(payload):
@@ -123,8 +141,9 @@ def start_wine_collection(payload):
         }, 503
     if str(payload.get("password") or "") != ADMIN_PASSWORD:
         return {"ok": False, "error": "Wrong password."}, 401
-    if collector_is_running():
-        return {"ok": True, "running": True, "message": "Collection is already running.", "pid": COLLECTOR_PROCESS.pid}, 200
+    running_pid = running_collector_pid()
+    if running_pid is not None:
+        return {"ok": True, "running": True, "message": "Collection is already running.", "pid": running_pid}, 200
 
     max_links = int(payload.get("maxLinks") or os.environ.get("WHEREISKELLEY_COLLECT_MAX_LINKS", "12"))
     max_targets = int(payload.get("maxTargets") or 0)
@@ -150,16 +169,18 @@ def start_wine_collection(payload):
     stderr = open(log_dir / "web-recollect.err.log", "ab")
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
-    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    popen_kwargs = {
+        "cwd": str(ROOT),
+        "stdout": stdout,
+        "stderr": stderr,
+        "env": env,
+    }
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_kwargs["start_new_session"] = True
     try:
-        COLLECTOR_PROCESS = subprocess.Popen(
-            command,
-            cwd=str(ROOT),
-            stdout=stdout,
-            stderr=stderr,
-            env=env,
-            creationflags=creationflags,
-        )
+        COLLECTOR_PROCESS = subprocess.Popen(command, **popen_kwargs)
     finally:
         stdout.close()
         stderr.close()
