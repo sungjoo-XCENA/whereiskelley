@@ -74,7 +74,7 @@ COLLECTOR_PROCESS = None
 
 
 PRICE_TOKEN_RE = sync_search_api.re.compile(
-    rf"(?:{sync_search_api.PRICE_CURRENCY_RE})?\s*(?:\d{{1,3}}(?:[,\s.]\d{{3}})+|\d{{2,6}}[oO]\s*[,\.]\s*[oO0]{{2}}|\d{{2,6}}(?:\s*[,\.]\s*[oO0]{{2}})?)(?!\d)",
+    rf"(?:{sync_search_api.PRICE_CURRENCY_RE})?\s*(?:\d{{1,3}}(?:[,\s.]\s*\d{{3}})+|\d{{2,6}}[oO]\s*[,\.]\s*[oO0]{{2}}|\d{{2,6}}(?:\s*[,\.]\s*[oO0]{{2}})?)(?!\d)",
     sync_search_api.re.I,
 )
 

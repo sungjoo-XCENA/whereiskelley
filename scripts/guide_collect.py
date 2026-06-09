@@ -161,7 +161,7 @@ CORE_WINE_TEXT_RE = re.compile(
     r")\b",
     re.I,
 )
-PRICE_NUMBER_RE = re.compile(r"(?<!\d)(?:\d{1,3}(?:[,\s.]\d{3})+|\d{2,6})(?:[,.]\d{2})?(?!\d)")
+PRICE_NUMBER_RE = re.compile(r"(?<!\d)(?:\d{1,3}(?:[,\s.]\s*\d{3})+|\d{2,6})(?:[,.]\d{2})?(?!\d)")
 WATCH_DEFAULTS = [
     {"keyword": "Romanee-Conti", "vintage": "", "active": True},
     {"keyword": "William Kelley", "vintage": "", "active": True},
