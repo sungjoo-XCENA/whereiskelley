@@ -16,7 +16,7 @@ from search_v2 import PRICE_CURRENCY_RE, parse_price
 
 
 PRICE_TOKEN_RE = re.compile(
-    rf"(?:{PRICE_CURRENCY_RE})?\s*(?:\d{{1,3}}(?:[,\s.]\s*\d{{3}})+|\d{{2,6}}[oO]\s*[,\.]\s*[oO0]{{2}}|\d{{2,6}}(?:\s*[,\.]\s*[oO0]{{2}})?)(?!\d)",
+    rf"(?:{PRICE_CURRENCY_RE})?\s*(?:\d{{1,3}}(?:[,\s.]\s*\d{{3}})+|\d{{2,6}}[oO]\s*[,\.]\s*[oO0]{{2}}|\d{{2,6}}(?:\s*[,\.]\s*[oO0]{{2}})?)(?![\d%])",
     re.I,
 )
 VINTAGE_RE = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")

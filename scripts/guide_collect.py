@@ -161,7 +161,7 @@ CORE_WINE_TEXT_RE = re.compile(
     r")\b",
     re.I,
 )
-PRICE_NUMBER_RE = re.compile(r"(?<!\d)(?:\d{1,3}(?:[,\s.]\s*\d{3})+|\d{2,6})(?:[,.]\d{2})?(?!\d)")
+PRICE_NUMBER_RE = re.compile(r"(?<!\d)(?:\d{1,3}(?:[,\s.]\s*\d{3})+|\d{2,6})(?:[,.]\d{2})?(?![\d%])")
 WATCH_DEFAULTS = [
     {"keyword": "Romanee-Conti", "vintage": "", "active": True},
     {"keyword": "William Kelley", "vintage": "", "active": True},
@@ -855,7 +855,8 @@ def parse_price(line):
     if currency_match:
         token = currency_match.group(0)
         currency = CURRENCY_ALIASES.get(token, token.upper())
-    numbers = list(PRICE_NUMBER_RE.finditer(line))
+    price_line = re.sub(r"\b\d{1,3}\s*%\s*", " ", line)
+    numbers = list(PRICE_NUMBER_RE.finditer(price_line))
     if not numbers:
         return "", None, currency
     for match in reversed(numbers):

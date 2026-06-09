@@ -35,14 +35,14 @@ def parse_price(line, country="", page_number=None, require_edge=False):
     text = re.sub(r"\b\d{1,3}\s*%\s*", " ", text)
     price_number = r"(?:\d{1,3}(?:[,\s.]\s*\d{3})+|\d{2,6}[oO]\s*[,\.]\s*[oO0]{2}|\d{2,6}(?:\s*[,\.]\s*[oO0]{2})?)"
     patterns = [
-        rf"(?<![\w])(?:{PRICE_CURRENCY_RE})\s*{price_number}(?!\d)",
+        rf"(?<![\w])(?:{PRICE_CURRENCY_RE})\s*{price_number}(?![\d%])",
         rf"(?<!\d){price_number}\s*(?:{PRICE_CURRENCY_RE})(?![\w])",
-        r"(?<!\d)\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?!\d)",
-        r"(?<!\d)\d{1,3}(?:,\s*\d{3})+(?:\.\d{2})?(?!\d)",
-        r"(?<!\d)\d{1,3}(?:[ .]\d{3})+(?:,\d{2})?(?!\d)",
+        r"(?<!\d)\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?![\d%])",
+        r"(?<!\d)\d{1,3}(?:,\s*\d{3})+(?:\.\d{2})?(?![\d%])",
+        r"(?<!\d)\d{1,3}(?:[ .]\d{3})+(?:,\d{2})?(?![\d%])",
         r"(?<!\d)\d{2,6}[oO]\s*[,\.]\s*[oO0]{2}(?!\w)",
-        r"(?<!\d)\d{2,6}\s*[,\.]\s*[oO0]{2}(?!\d)",
-        r"(?<!\d)\d{2,6}(?!\d)",
+        r"(?<!\d)\d{2,6}\s*[,\.]\s*[oO0]{2}(?![\d%])",
+        r"(?<!\d)\d{2,6}(?![\d%])",
     ]
     candidates = []
     used_spans = []
