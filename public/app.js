@@ -290,12 +290,71 @@ function sortByCheapest(results) {
   });
 }
 
-function groupUpdatedValue(group) {
+const UPDATED_MONTHS = {
+  jan: 0,
+  january: 0,
+  feb: 1,
+  february: 1,
+  mar: 2,
+  march: 2,
+  apr: 3,
+  april: 3,
+  may: 4,
+  jun: 5,
+  june: 5,
+  jul: 6,
+  july: 6,
+  aug: 7,
+  august: 7,
+  sep: 8,
+  sept: 8,
+  september: 8,
+  oct: 9,
+  october: 9,
+  nov: 10,
+  november: 10,
+  dec: 11,
+  december: 11
+};
+
+function parseUpdatedTime(value = "") {
+  const text = String(value || "").trim().replace(/\s+/g, " ");
+  if (!text) return 0;
+
+  const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    return Date.UTC(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+  }
+
+  const englishMatch = text.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/);
+  if (englishMatch) {
+    const month = UPDATED_MONTHS[englishMatch[2].toLowerCase()];
+    if (month !== undefined) {
+      return Date.UTC(Number(englishMatch[3]), month, Number(englishMatch[1]));
+    }
+  }
+
+  const parsed = Date.parse(text);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function groupUpdatedEntries(group) {
   return group.results
     .map((result) => result.wineList?.updatedDate || result.wineList?.updatedText || "")
-    .filter(Boolean)
-    .sort()
+    .filter(Boolean);
+}
+
+function groupUpdatedValue(group) {
+  return groupUpdatedEntries(group)
+    .sort((a, b) => {
+      const timeDiff = parseUpdatedTime(a) - parseUpdatedTime(b);
+      return timeDiff || String(a).localeCompare(String(b));
+    })
     .at(-1) || "";
+}
+
+function groupUpdatedSortValue(group) {
+  return parseUpdatedTime(groupUpdatedValue(group));
 }
 
 function groupLowestPriceResult(group) {
@@ -557,8 +616,8 @@ function sortGroups(groups) {
       left = a.venue?.country || "";
       right = b.venue?.country || "";
     } else if (sortState.key === "updated") {
-      left = groupUpdatedValue(a);
-      right = groupUpdatedValue(b);
+      left = groupUpdatedSortValue(a);
+      right = groupUpdatedSortValue(b);
     } else if (sortState.key === "matches") {
       left = a.results.length;
       right = b.results.length;
@@ -1033,7 +1092,7 @@ resultsEl.addEventListener("click", (event) => {
     if (sortState.key === key) {
       sortState.direction = sortState.direction === "asc" ? "desc" : "asc";
     } else {
-      sortState = { key, direction: key === "krw" || key === "matches" ? "desc" : "asc" };
+      sortState = { key, direction: key === "krw" || key === "matches" || key === "updated" ? "desc" : "asc" };
     }
     renderResultList();
     return;
