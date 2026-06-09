@@ -132,15 +132,44 @@ CORE_WINE_TEXT_RE = re.compile(
     r"reims|epernay|cote\s+d['’]?or|cote\s+de\s+nuits|cote\s+des\s+blancs)\b",
     re.I,
 )
+WINE_TEXT_RE = re.compile(
+    r"\b(?:"
+    r"burgundy|bourgogne|bordeaux|champagne|chablis|"
+    r"cote\s+d[' ]?or|cote\s+de\s+nuits|cote\s+de\s+beaune|"
+    r"meursault|puligny|chassagne|volnay|pommard|gevrey|chambolle|"
+    r"vosne|vosnee|vosne[-\s]?romanee|vosnee[-\s]?romanee|romanee|romanee[-\s]?conti|"
+    r"la\s+tache|richebourg|echezeaux|grands?\s+echezeaux|clos\s+de\s+vougeot|"
+    r"nuits|beaune|morey|vougeot|"
+    r"margaux|pauillac|pomerol|saint[-\s]?emilion|st[-\s]?emilion|saint[-\s]?julien|st[-\s]?julien|"
+    r"saint[-\s]?estephe|st[-\s]?estephe|pessac|leognan|sauternes|barsac|medoc|haut[-\s]?medoc|"
+    r"reims|epernay|montagne\s+de\s+reims|cote\s+des\s+blancs|vallee\s+de\s+la\s+marne|"
+    r"blanc\s+de\s+blancs|blanc\s+de\s+noirs|brut|extra\s+brut|sec|demi-sec|"
+    r"cru|village|villages|domaine|domain|chateau|weingut|estate|reserve|reserva|"
+    r"grand|premier|pinot\s+noir|chardonnay|cabernet\s+sauvignon|merlot"
+    r")\b",
+    re.I,
+)
+CORE_WINE_TEXT_RE = re.compile(
+    r"\b(?:"
+    r"burgundy|bourgogne|champagne|chablis|cote\s+d[' ]?or|cote\s+de\s+nuits|cote\s+de\s+beaune|"
+    r"meursault|puligny|chassagne|volnay|pommard|gevrey|chambolle|"
+    r"vosne|vosnee|vosne[-\s]?romanee|vosnee[-\s]?romanee|romanee|romanee[-\s]?conti|"
+    r"la\s+tache|richebourg|echezeaux|grands?\s+echezeaux|clos\s+de\s+vougeot|"
+    r"domaine|domain|"
+    r"reims|epernay|cote\s+des\s+blancs|montagne\s+de\s+reims|blanc\s+de\s+blancs|"
+    r"bordeaux|margaux|pauillac|pomerol|saint[-\s]?emilion|st[-\s]?emilion|sauternes|medoc"
+    r")\b",
+    re.I,
+)
 PRICE_NUMBER_RE = re.compile(r"(?<!\d)(?:\d{1,3}(?:[,\s.]\d{3})+|\d{2,6})(?:[,.]\d{2})?(?!\d)")
 WATCH_DEFAULTS = [
     {"keyword": "Romanee-Conti", "vintage": "", "active": True},
     {"keyword": "William Kelley", "vintage": "", "active": True},
 ]
 CURRENCY_RE = r"HK\$|SG\$|S\$|A\$|C\$|US\$|\u20ac|\$|\u00a3|\u00a5|\u20a9|(?<![A-Z])(?:CHF|DKK|SEK|NOK|USD|EUR|GBP|CAD|AUD|SGD|HKD|AED|CNY|CZK|ARS|JPY|KRW)(?![A-Z])"
-MAX_DISCOVERY_FETCHES = int(os.environ.get("WHEREISKELLEY_MAX_DISCOVERY_FETCHES", "18"))
-MAX_DISCOVERY_DEPTH = int(os.environ.get("WHEREISKELLEY_MAX_DISCOVERY_DEPTH", "2"))
-MAX_WEAK_DISCOVERY_FETCHES = int(os.environ.get("WHEREISKELLEY_MAX_WEAK_DISCOVERY_FETCHES", "4"))
+MAX_DISCOVERY_FETCHES = int(os.environ.get("WHEREISKELLEY_MAX_DISCOVERY_FETCHES", "120"))
+MAX_DISCOVERY_DEPTH = int(os.environ.get("WHEREISKELLEY_MAX_DISCOVERY_DEPTH", "5"))
+MAX_WEAK_DISCOVERY_FETCHES = int(os.environ.get("WHEREISKELLEY_MAX_WEAK_DISCOVERY_FETCHES", "35"))
 STRONG_LINK_SCORE = 70
 CURRENCY_ALIASES = {
     "HK$": "HKD",
@@ -274,7 +303,7 @@ def fetch_text(url, timeout=8):
     with urlopen(Request(url, headers=headers), timeout=timeout, context=SSL_CONTEXT) as response:
         content_type = response.headers.get("content-type", "")
         data = response.read()
-    if "pdf" in content_type.lower() or urlparse(url).path.lower().endswith(".pdf"):
+    if data.lstrip().startswith(b"%PDF"):
         return data, content_type
     return data.decode("utf-8", errors="replace"), content_type
 
@@ -470,7 +499,7 @@ def source_id(con, code):
 def upsert_guide_place(con, source_code, source_url, place):
     sid = source_id(con, source_code)
     key = target_key(place["name"], place.get("city", ""), place.get("country", ""))
-    cur = con.execute(
+    con.execute(
         """
         insert into guide_places(
           source_id, source_key, name, normalized_name, country, city, address, lat, lng,
@@ -488,7 +517,6 @@ def upsert_guide_place(con, source_code, source_url, place):
           place_url=coalesce(nullif(excluded.place_url, ''), guide_places.place_url),
           website_url=coalesce(nullif(excluded.website_url, ''), guide_places.website_url),
           last_seen_at=current_timestamp
-        returning id
         """,
         (
             sid,
@@ -504,7 +532,10 @@ def upsert_guide_place(con, source_code, source_url, place):
             place.get("website_url", ""),
         ),
     )
-    guide_place_id = cur.fetchone()["id"]
+    guide_place_id = con.execute(
+        "select id from guide_places where source_id=? and source_key=?",
+        (sid, key),
+    ).fetchone()["id"]
     con.execute(
         """
         insert into guide_rankings(guide_place_id, source_id, guide_year, list_name, rank, score, source_url)
@@ -742,11 +773,35 @@ def discover_candidate_wine_links(base_url, html, max_pages=40, max_depth=None, 
     max_fetches = min(max_pages or MAX_DISCOVERY_FETCHES, MAX_DISCOVERY_FETCHES)
     max_depth = MAX_DISCOVERY_DEPTH if max_depth is None else max_depth
     max_weak_pages = MAX_WEAK_DISCOVERY_FETCHES if max_weak_pages is None else max_weak_pages
-    links = candidate_wine_links(base_url, html)
+    links = []
+    link_keys = set()
+
+    def add_candidate(link, bonus=0):
+        url = (link.get("url") or "").split("#", 1)[0]
+        if not url or url in link_keys:
+            return
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            return
+        item = dict(link)
+        item["url"] = url
+        item["score"] = int(item.get("score", 0) or 0) + bonus
+        link_keys.add(url)
+        links.append(item)
+
+    def page_has_wine_evidence(text):
+        folded = fold_text(text[:16000])
+        return bool(CORE_WINE_TEXT_RE.search(folded) and len(PRICE_NUMBER_RE.findall(folded)) >= 2)
+
+    if page_has_wine_evidence(html):
+        add_candidate({"url": base_url, "text": "Official website", "score": 45})
+    for link in candidate_wine_links(base_url, html, include_review_candidates=False):
+        add_candidate(link)
+
     queue = sorted(crawlable_page_links(base_url, base_url, html), key=lambda item: item.get("score", 0), reverse=True)
     for item in queue:
         item["depth"] = 1
-    seen = {link["url"].split("#", 1)[0] for link in links}
+    crawled = set()
     queued = {link["url"].split("#", 1)[0] for link in queue}
     scanned_pages = 0
     weak_scanned_pages = 0
@@ -754,7 +809,7 @@ def discover_candidate_wine_links(base_url, html, max_pages=40, max_depth=None, 
         queue.sort(key=lambda item: item.get("score", 0), reverse=True)
         link = queue.pop(0)
         key = link["url"].split("#", 1)[0]
-        if key in seen:
+        if key in crawled:
             continue
         score = int(link.get("score", 0) or 0)
         depth = int(link.get("depth", 1) or 1)
@@ -762,11 +817,11 @@ def discover_candidate_wine_links(base_url, html, max_pages=40, max_depth=None, 
             if weak_scanned_pages >= max_weak_pages:
                 continue
             weak_scanned_pages += 1
-        seen.add(key)
-        links.append(link)
+        crawled.add(key)
         if urlparse(link["url"]).path.lower().endswith(".pdf"):
+            add_candidate(link, 30)
             continue
-        if depth >= max_depth:
+        if depth > max_depth:
             continue
         try:
             content, content_type = fetch_text(link["url"], timeout=5)
@@ -775,13 +830,16 @@ def discover_candidate_wine_links(base_url, html, max_pages=40, max_depth=None, 
         if not isinstance(content, str) or "html" not in content_type.lower():
             continue
         scanned_pages += 1
-        folded_content = fold_text(content[:12000])
-        if CORE_WINE_TEXT_RE.search(folded_content) and score >= 10:
-            link["score"] = score + 35
+        if page_has_wine_evidence(content) or source_url_signal(link["url"], "html", score):
+            add_candidate(link, 55 if page_has_wine_evidence(content) else 0)
+        for child in candidate_wine_links(link["url"], content, include_review_candidates=False):
+            add_candidate(child)
+        if depth >= max_depth:
+            continue
         child_links = crawlable_page_links(base_url, link["url"], content)
         for child in child_links:
             key = child["url"].split("#", 1)[0]
-            if key in seen or key in queued:
+            if key in crawled or key in queued:
                 continue
             child["depth"] = depth + 1
             queued.add(key)
@@ -889,13 +947,21 @@ def source_confidence(url, source_type, text, lines, link_score):
     if not lines:
         return 0, "No parseable wine lines found."
     parsed = urlparse(url)
-    haystack = fold_text(" ".join([parsed.netloc.lower(), parsed.path.lower(), text[:4000]]).replace("_", "-"))
+    path = fold_text(unescape(parsed.path or "").replace("_", "-"))
+    haystack = fold_text(" ".join([parsed.netloc.lower(), path, text[:4000]]).replace("_", "-"))
     score = int(link_score or 0)
     core_count = sum(1 for line in lines if CORE_WINE_TEXT_RE.search(fold_text(line)))
     wine_text_count = sum(1 for line in lines if WINE_TEXT_RE.search(fold_text(line)))
+    price_line_count = sum(1 for line in lines if parse_price(line)[1])
+    vintage_line_count = sum(1 for line in lines if re.search(r"\b(19|20)\d{2}\b", line))
     has_source_signal = source_url_signal(url, source_type, link_score)
-    if not has_source_signal and core_count < 3:
+    generic_source = bool(GENERIC_SOURCE_PATH_RE.search(path))
+    if generic_source and source_type != "pdf" and core_count < 4:
+        return score, "Main website page did not contain enough Burgundy or Champagne wine-list evidence."
+    if not has_source_signal and (core_count < 2 or wine_text_count < 2):
         return score, "Candidate URL is not a wine-list page or file."
+    if price_line_count < 2 and len(lines) < 3:
+        return score, "Not enough priced wine rows were found; review required."
     if source_type == "pdf":
         score += 30
     if parsed.netloc.lower().startswith("wine.") or ".wine." in parsed.netloc.lower():
@@ -906,6 +972,8 @@ def source_confidence(url, source_type, text, lines, link_score):
     if len(lines) >= 3:
         score += 30
     if sum(1 for line in lines if parse_price(line)[2]) >= 2:
+        score += 20
+    if vintage_line_count >= 2:
         score += 20
     if core_count >= 1:
         score += 45
@@ -944,7 +1012,7 @@ def save_wine_source(con, target, url, source_type, content, text, status="revie
     else:
         content_path.write_text(content, encoding="utf-8")
     text_path.write_text(text or "", encoding="utf-8")
-    cur = con.execute(
+    con.execute(
         """
         insert into wine_list_sources(
           target_id, url, source_type, status, content_path, text_path, checksum,
@@ -961,7 +1029,6 @@ def save_wine_source(con, target, url, source_type, content, text, status="revie
           parser_status=excluded.parser_status,
           line_count=excluded.line_count,
           last_error=excluded.last_error
-        returning id
         """,
         (
             target_id,
@@ -976,7 +1043,10 @@ def save_wine_source(con, target, url, source_type, content, text, status="revie
             error,
         ),
     )
-    return cur.fetchone()["id"]
+    return con.execute(
+        "select id from wine_list_sources where target_id=? and url=?",
+        (target_id, url),
+    ).fetchone()["id"]
 
 
 def pdf_text(pdf_path):
@@ -1004,7 +1074,7 @@ def load_watchlist():
 def scan_wine_source(con, target, url, watches, link_score=0):
     try:
         content, content_type = fetch_text(url, timeout=6)
-        source_type = "pdf" if "pdf" in content_type.lower() or urlparse(url).path.lower().endswith(".pdf") else "html"
+        source_type = "pdf" if isinstance(content, bytes) and content.lstrip().startswith(b"%PDF") else "html"
         if source_type == "pdf":
             temp = DATA_DIR / "_temp.pdf"
             DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -1171,7 +1241,12 @@ def discover_targets(con, max_targets, run_id, target_count):
             html, content_type = fetch_text(target["website_url"], timeout=25)
             if not isinstance(html, str):
                 continue
-            links = discover_candidate_wine_links(target["website_url"], html, max_pages=18)
+            links = discover_candidate_wine_links(
+                target["website_url"],
+                html,
+                max_pages=MAX_DISCOVERY_FETCHES,
+                max_depth=MAX_DISCOVERY_DEPTH,
+            )
             if not links:
                 con.execute(
                     "update restaurant_targets set status='no_wine_list', last_checked_at=current_timestamp where id=?",

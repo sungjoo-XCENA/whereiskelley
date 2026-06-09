@@ -213,7 +213,12 @@ def discover_target(con, target, watches, max_links):
     if not isinstance(content, str):
         return 0, 0, "Official website returned binary content."
 
-    links = guide.discover_candidate_wine_links(target["website_url"], content, max_pages=max(2, min(4, max_links)))
+    links = guide.discover_candidate_wine_links(
+        target["website_url"],
+        content,
+        max_pages=guide.MAX_DISCOVERY_FETCHES,
+        max_depth=guide.MAX_DISCOVERY_DEPTH,
+    )
 
     unique = []
     seen = set()

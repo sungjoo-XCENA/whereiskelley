@@ -503,7 +503,7 @@
 
   function statusLabel(status) {
     const labels = {
-      found: "Candidate found",
+      found: "Verified wine list",
       no_wine_list: "No wine list",
       not_checked: "Not checked yet",
       missing_website: "Website missing",
@@ -816,17 +816,13 @@
     const mapped = visibleMapTargets(payload).length;
     const mappedWithWebsite = number(summary.mappedWithWebsite) || mapped;
     const progressCounts = progress.dbCounts || {};
-    const sourceCount = Math.max(
-      number(summary.totalSources),
-      number(payload.counts?.wineListSources),
-      number(progressCounts.wineListSources),
-      number(progress.wineListsFound)
-    );
-    const savedLines = Math.max(
-      number(payload.counts?.wineLines),
-      number(progressCounts.wineLines),
-      number(progress.wineLinesFound)
-    );
+    const sourceCount = number(payload.counts?.wineListSources)
+      || number(summary.totalSources)
+      || number(progressCounts.wineListSources)
+      || number(progress.wineListsFound);
+    const savedLines = number(payload.counts?.wineLines)
+      || number(progressCounts.wineLines)
+      || number(progress.wineLinesFound);
     const parsedSources = number(summary.parsedSources);
     const reviewSources = Math.max(number(summary.parseReviewSources), Math.max(0, sourceCount - parsedSources));
     const found = number(summary.foundWineList);

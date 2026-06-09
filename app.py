@@ -302,7 +302,6 @@ def mark_stale_progress(progress):
 def guide_collection_status():
     progress = mark_stale_progress(read_json_file(GUIDE_PROGRESS_PATH, {}))
     snapshot = read_json_file(GUIDE_STATUS_PATH, {})
-    progress_counts = progress.get("dbCounts") if isinstance(progress.get("dbCounts"), dict) else {}
     payload = {
         "generatedAt": progress.get("generatedAt") or snapshot.get("generatedAt"),
         "progress": progress,
@@ -511,17 +510,13 @@ def guide_collection_status():
                 """
             )
         ]
-    for key in ["wineListSources", "wineLines", "review"]:
-        payload["counts"][key] = max(int(payload["counts"].get(key) or 0), int(progress_counts.get(key) or 0))
-    payload["collectionSummary"]["totalSources"] = max(
-        int(payload["collectionSummary"].get("totalSources") or 0),
-        int(payload["counts"].get("wineListSources") or 0),
-        int(progress.get("wineListsFound") or 0),
-    )
-    payload["collectionSummary"]["parseReviewSources"] = max(
-        int(payload["collectionSummary"].get("parseReviewSources") or 0),
-        max(0, int(payload["collectionSummary"].get("totalSources") or 0) - int(payload["collectionSummary"].get("parsedSources") or 0)),
-    )
+    payload["progress"]["dbCounts"] = {
+        "targets": int(payload["counts"].get("targets") or 0),
+        "withWebsite": int(payload["counts"].get("withWebsite") or 0),
+        "wineListSources": int(payload["counts"].get("wineListSources") or 0),
+        "wineLines": int(payload["counts"].get("wineLines") or 0),
+        "review": int(payload["counts"].get("review") or 0),
+    }
     if payload["progress"].get("status") == "completed":
         total_targets = int(payload["collectionSummary"].get("totalTargets") or payload["counts"].get("targets") or 0)
         checked_targets = int(payload["collectionSummary"].get("checkedTargets") or 0)
