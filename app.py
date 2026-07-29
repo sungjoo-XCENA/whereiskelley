@@ -5,6 +5,7 @@ import os
 import subprocess
 import sqlite3
 import sys
+import threading
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,17 +72,21 @@ import sync_search_api
 
 
 COLLECTOR_PROCESS = None
+SEARCH_REFRESH_LOCK = threading.Lock()
+SEARCH_REFRESH_CACHE = {}
+SEARCH_REFRESH_CACHE_TTL = int(os.environ.get("WHEREISKELLEY_SEARCH_CACHE_SECONDS", "900"))
 
 
 PRICE_TOKEN_RE = sync_search_api.re.compile(
-    rf"(?:{sync_search_api.PRICE_CURRENCY_RE})?\s*(?:\d{{1,3}}(?:[,\s.]\d{{3}})+|\d{{2,6}}[oO]\s*[,\.]\s*[oO0]{{2}}|\d{{2,6}}(?:\s*[,\.]\s*[oO0]{{2}})?)(?!\d)",
+    rf"(?:{sync_search_api.PRICE_CURRENCY_RE})?\s*(?:\d{{1,3}}(?:[,\s.]\s*\d{{3}})+|\d{{2,6}}[oO]\s*[,\.]\s*[oO0]{{2}}|\d{{2,6}}(?:\s*[,\.]\s*[oO0]{{2}})?)(?![\d%])",
     sync_search_api.re.I,
 )
 
 
 def connect():
-    con = sqlite3.connect(DB_PATH)
+    con = sqlite3.connect(DB_PATH, timeout=30)
     con.row_factory = sqlite3.Row
+    con.execute("pragma busy_timeout=30000")
     return con
 
 
@@ -103,14 +108,32 @@ def json_response(handler, payload, status=200):
     handler.wfile.write(body)
 
 
-def collector_is_running():
+def running_collector_pid():
     global COLLECTOR_PROCESS
-    if COLLECTOR_PROCESS is None:
-        return False
-    if COLLECTOR_PROCESS.poll() is None:
-        return True
-    COLLECTOR_PROCESS = None
-    return False
+    if COLLECTOR_PROCESS is not None:
+        if COLLECTOR_PROCESS.poll() is None:
+            return COLLECTOR_PROCESS.pid
+        COLLECTOR_PROCESS = None
+    if os.name == "nt":
+        return None
+    try:
+        output = subprocess.check_output(
+            ["pgrep", "-f", str(SCRIPTS_DIR / "guide_discover_wine_lists.py")],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return None
+    for raw_pid in output.splitlines():
+        try:
+            return int(raw_pid.strip())
+        except ValueError:
+            continue
+    return None
+
+
+def collector_is_running():
+    return running_collector_pid() is not None
 
 
 def start_wine_collection(payload):
@@ -123,8 +146,9 @@ def start_wine_collection(payload):
         }, 503
     if str(payload.get("password") or "") != ADMIN_PASSWORD:
         return {"ok": False, "error": "Wrong password."}, 401
-    if collector_is_running():
-        return {"ok": True, "running": True, "message": "Collection is already running.", "pid": COLLECTOR_PROCESS.pid}, 200
+    running_pid = running_collector_pid()
+    if running_pid is not None:
+        return {"ok": True, "running": True, "message": "Collection is already running.", "pid": running_pid}, 200
 
     max_links = int(payload.get("maxLinks") or os.environ.get("WHEREISKELLEY_COLLECT_MAX_LINKS", "12"))
     max_targets = int(payload.get("maxTargets") or 0)
@@ -150,16 +174,18 @@ def start_wine_collection(payload):
     stderr = open(log_dir / "web-recollect.err.log", "ab")
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
-    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    popen_kwargs = {
+        "cwd": str(ROOT),
+        "stdout": stdout,
+        "stderr": stderr,
+        "env": env,
+    }
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_kwargs["start_new_session"] = True
     try:
-        COLLECTOR_PROCESS = subprocess.Popen(
-            command,
-            cwd=str(ROOT),
-            stdout=stdout,
-            stderr=stderr,
-            env=env,
-            creationflags=creationflags,
-        )
+        COLLECTOR_PROCESS = subprocess.Popen(command, **popen_kwargs)
     finally:
         stdout.close()
         stderr.close()
@@ -281,7 +307,6 @@ def mark_stale_progress(progress):
 def guide_collection_status():
     progress = mark_stale_progress(read_json_file(GUIDE_PROGRESS_PATH, {}))
     snapshot = read_json_file(GUIDE_STATUS_PATH, {})
-    progress_counts = progress.get("dbCounts") if isinstance(progress.get("dbCounts"), dict) else {}
     payload = {
         "generatedAt": progress.get("generatedAt") or snapshot.get("generatedAt"),
         "progress": progress,
@@ -363,8 +388,8 @@ def guide_collection_status():
             """
             select
               count(1) as totalSources,
-              count(distinct case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 then target_id end) as foundWineList,
-              sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 then 1 else 0 end) as parsedSources,
+              count(distinct case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 and coalesce(last_error, '') = '' then target_id end) as foundWineList,
+              sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 and coalesce(last_error, '') = '' then 1 else 0 end) as parsedSources,
               sum(case when status != 'found' or parser_status != 'parsed' or coalesce(line_count, 0) = 0 or (last_error is not null and last_error != '') then 1 else 0 end) as parseReviewSources,
               sum(case when parser_status = 'parsed' and coalesce(line_count, 0) = 0 then 1 else 0 end) as emptyParsedSources
             from wine_list_sources
@@ -394,7 +419,7 @@ def guide_collection_status():
                 """
                 with source_counts as (
                   select target_id, count(1) as source_count,
-                         sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 then 1 else 0 end) as verified_source_count,
+                         sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 and coalesce(last_error, '') = '' then 1 else 0 end) as verified_source_count,
                          sum(case when status != 'found' or parser_status != 'parsed' or coalesce(line_count, 0) = 0 or (last_error is not null and last_error != '') then 1 else 0 end) as review_source_count
                   from wine_list_sources
                   group by target_id
@@ -405,7 +430,7 @@ def guide_collection_status():
                   group by target_id
                 ),
                 wine_choices as (
-                  select target_id, url, source_type, status as source_status, parser_status, line_count
+                  select target_id, url, source_type, status as source_status, parser_status, line_count, last_error
                   from (
                     select
                       s.target_id,
@@ -414,10 +439,11 @@ def guide_collection_status():
                       s.status,
                       s.parser_status,
                       s.line_count,
+                      s.last_error,
                       row_number() over (
                         partition by s.target_id
                         order by
-                          case when s.status = 'found' and s.parser_status = 'parsed' and coalesce(s.line_count, 0) > 0 then 0 else 1 end,
+                          case when s.status = 'found' and s.parser_status = 'parsed' and coalesce(s.line_count, 0) > 0 and coalesce(s.last_error, '') = '' then 0 else 1 end,
                           case when rt.website_url is not null and rt.website_url != '' and s.url = rt.website_url then 1 else 0 end,
                           case when s.source_type = 'pdf' then 0 else 1 end,
                           case
@@ -450,6 +476,7 @@ def guide_collection_status():
                   wc.source_type as wineListType,
                   wc.source_status as wineListStatus,
                   wc.parser_status as wineListParserStatus,
+                  wc.last_error as wineListLastError,
                   coalesce(wc.line_count, 0) as chosenWineLineCount,
                   coalesce(sc.source_count, 0) as wineListCount,
                   coalesce(sc.verified_source_count, 0) as verifiedWineListCount,
@@ -488,17 +515,22 @@ def guide_collection_status():
                 """
             )
         ]
-    for key in ["wineListSources", "wineLines", "review"]:
-        payload["counts"][key] = max(int(payload["counts"].get(key) or 0), int(progress_counts.get(key) or 0))
-    payload["collectionSummary"]["totalSources"] = max(
-        int(payload["collectionSummary"].get("totalSources") or 0),
-        int(payload["counts"].get("wineListSources") or 0),
-        int(progress.get("wineListsFound") or 0),
-    )
-    payload["collectionSummary"]["parseReviewSources"] = max(
-        int(payload["collectionSummary"].get("parseReviewSources") or 0),
-        max(0, int(payload["collectionSummary"].get("totalSources") or 0) - int(payload["collectionSummary"].get("parsedSources") or 0)),
-    )
+    payload["progress"]["dbCounts"] = {
+        "targets": int(payload["counts"].get("targets") or 0),
+        "withWebsite": int(payload["counts"].get("withWebsite") or 0),
+        "wineListSources": int(payload["counts"].get("wineListSources") or 0),
+        "wineLines": int(payload["counts"].get("wineLines") or 0),
+        "review": int(payload["counts"].get("review") or 0),
+    }
+    if payload["progress"].get("status") == "completed":
+        total_targets = int(payload["collectionSummary"].get("totalTargets") or payload["counts"].get("targets") or 0)
+        checked_targets = int(payload["collectionSummary"].get("checkedTargets") or 0)
+        if total_targets and checked_targets:
+            payload["progress"]["processedTargets"] = checked_targets
+            payload["progress"]["websitesChecked"] = checked_targets
+            payload["progress"]["totalWebsites"] = total_targets
+            payload["progress"]["targetCount"] = total_targets
+            payload["progress"]["progressPercent"] = round(min(100, (checked_targets / total_targets) * 100), 1)
     return payload
 
 
@@ -663,7 +695,7 @@ def search(params):
     live_pages_raw = params.get("livePages", ["2"])[0] or "2"
     live_page_cap = min(int(params.get("livePageCap", ["200"])[0] or 200), 300)
     live_pages = live_pages_raw if live_pages_raw == "all" else min(int(live_pages_raw), live_page_cap)
-    live_max_pdfs = min(int(params.get("liveMaxPdfs", ["3"])[0] or 3), 50)
+    live_max_pdfs = min(int(params.get("liveMaxPdfs", ["0"])[0] or 0), 50)
     live_refresh = None
     live_source_ids = []
     if live and q:
@@ -976,6 +1008,12 @@ def pdf_lines(params):
 
 
 def refresh_from_search_api(query, pages=2, max_pdfs=3, page_cap=50):
+    cache_key = (query.strip().casefold(), str(pages), int(max_pdfs), int(page_cap))
+    cached = SEARCH_REFRESH_CACHE.get(cache_key)
+    now_ts = sync_search_api.time.time()
+    if cached and now_ts - cached["storedAt"] <= SEARCH_REFRESH_CACHE_TTL:
+        return {**cached["payload"], "cached": True}
+
     sync_search_api.init_db()
     source_ids = []
     entries = 0
@@ -984,32 +1022,38 @@ def refresh_from_search_api(query, pages=2, max_pdfs=3, page_cap=50):
     requested_all = pages == "all"
     max_pages = page_cap if requested_all else int(pages)
     last_page = None
-    with sync_search_api.connect() as con:
-        for page in range(1, max_pages + 1):
-            payload, page_entries, page_pdfs = sync_search_api.sync_page(
-                con,
-                page,
-                query,
-                "",
-                True,
-                max_pdfs,
-                pdf_counter,
-            )
-            con.commit()
-            entries += page_entries
-            pdfs += page_pdfs
-            meta = payload.get("meta") or {}
-            last_page = int(meta.get("last_page") or page)
-            source_ids.extend(
-                str(item.get("item_id"))
-                for item in payload.get("data", [])
-                if item.get("item_type") == "wine_list_line" and item.get("item_id")
-            )
-            if page >= last_page:
-                break
-            if requested_all:
-                sync_search_api.time.sleep(0.15)
-    return {
+    with SEARCH_REFRESH_LOCK:
+        cached = SEARCH_REFRESH_CACHE.get(cache_key)
+        now_ts = sync_search_api.time.time()
+        if cached and now_ts - cached["storedAt"] <= SEARCH_REFRESH_CACHE_TTL:
+            return {**cached["payload"], "cached": True}
+
+        with sync_search_api.connect() as con:
+            for page in range(1, max_pages + 1):
+                payload, page_entries, page_pdfs = sync_search_api.sync_page(
+                    con,
+                    page,
+                    query,
+                    "",
+                    max_pdfs > 0,
+                    max_pdfs,
+                    pdf_counter,
+                )
+                con.commit()
+                entries += page_entries
+                pdfs += page_pdfs
+                meta = payload.get("meta") or {}
+                last_page = int(meta.get("last_page") or page)
+                source_ids.extend(
+                    str(item.get("item_id"))
+                    for item in payload.get("data", [])
+                    if item.get("item_type") == "wine_list_line" and item.get("item_id")
+                )
+                if page >= last_page:
+                    break
+                if requested_all:
+                    sync_search_api.time.sleep(0.15)
+    payload = {
         "query": query,
         "pages": max_pages if requested_all else int(pages),
         "lastPage": last_page,
@@ -1019,6 +1063,8 @@ def refresh_from_search_api(query, pages=2, max_pdfs=3, page_cap=50):
         "pdfs": pdfs,
         "sourceItemIds": list(dict.fromkeys(source_ids)),
     }
+    SEARCH_REFRESH_CACHE[cache_key] = {"storedAt": sync_search_api.time.time(), "payload": payload}
+    return payload
 
 
 def unparsed(params):
@@ -1179,6 +1225,7 @@ class Handler(BaseHTTPRequestHandler):
         body = file_path.read_bytes()
         self.send_response(200)
         self.send_header("content-type", mimetypes.guess_type(file_path.name)[0] or "application/octet-stream")
+        self.send_header("cache-control", "no-store")
         self.send_header("content-length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

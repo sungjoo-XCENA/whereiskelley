@@ -82,7 +82,9 @@ def slugify(value):
 
 def init_db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(DB_PATH) as con:
+    with sqlite3.connect(DB_PATH, timeout=30) as con:
+        con.execute("pragma busy_timeout=30000")
+        con.execute("pragma journal_mode=WAL")
         con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         wine_list_columns = {row[1] for row in con.execute("pragma table_info(wine_lists)").fetchall()}
         if "last_error" not in wine_list_columns:
@@ -105,8 +107,9 @@ def init_db():
 
 
 def connect():
-    con = sqlite3.connect(DB_PATH)
+    con = sqlite3.connect(DB_PATH, timeout=30)
     con.row_factory = sqlite3.Row
+    con.execute("pragma busy_timeout=30000")
     con.execute("pragma foreign_keys = on")
     return con
 
@@ -255,16 +258,17 @@ def parse_price_v2(line, country="", page_number=None, require_edge=False):
     text = re.sub(r"\b(?:page|p\.?)\s*\d{1,4}\b", " ", text, flags=re.I)
     text = re.sub(r"\b0\s*[,\.]\s*(?:187|375|5|50|70|75|750|150|1500)\s*(?:l|lt|liter|litre)?\b", " ", text, flags=re.I)
     text = re.sub(r"\b(?:37\.?5|75|187|375|500|750|1500)\s*(?:ml|cl)\b", " ", text, flags=re.I)
-    price_number = r"(?:\d{1,3}(?:[,\s.]\d{3})+|\d{2,6}[oO]\s*[,\.]\s*[oO0]{2}|\d{2,6}(?:\s*[,\.]\s*[oO0]{2})?)"
+    text = re.sub(r"\b\d{1,3}\s*%\s*", " ", text)
+    price_number = r"(?:\d{1,3}(?:[,\s.]\s*\d{3})+|\d{2,6}[oO]\s*[,\.]\s*[oO0]{2}|\d{2,6}(?:\s*[,\.]\s*[oO0]{2})?)"
     patterns = [
-        rf"(?<![\w])(?:{PRICE_CURRENCY_RE})\s*{price_number}(?!\d)",
+        rf"(?<![\w])(?:{PRICE_CURRENCY_RE})\s*{price_number}(?![\d%])",
         rf"(?<!\d){price_number}\s*(?:{PRICE_CURRENCY_RE})(?![\w])",
-        r"(?<!\d)\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?!\d)",
-        r"(?<!\d)\d{1,3}(?:,\s*\d{3})+(?:\.\d{2})?(?!\d)",
-        r"(?<!\d)\d{1,3}(?:[ .]\d{3})+(?:,\d{2})?(?!\d)",
+        r"(?<!\d)\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?![\d%])",
+        r"(?<!\d)\d{1,3}(?:,\s*\d{3})+(?:\.\d{2})?(?![\d%])",
+        r"(?<!\d)\d{1,3}(?:[ .]\d{3})+(?:,\d{2})?(?![\d%])",
         r"(?<!\d)\d{2,6}[oO]\s*[,\.]\s*[oO0]{2}(?!\w)",
-        r"(?<!\d)\d{2,6}\s*[,\.]\s*[oO0]{2}(?!\d)",
-        r"(?<!\d)\d{2,6}(?!\d)",
+        r"(?<!\d)\d{2,6}\s*[,\.]\s*[oO0]{2}(?![\d%])",
+        r"(?<!\d)\d{2,6}(?![\d%])",
     ]
     candidates = []
     used_spans = []
@@ -497,6 +501,7 @@ def sync_page(con, page, query, region, download_pdfs, max_pdfs, pdf_counter):
         upsert_entry(con, result, venue_id, wine_list_row["id"])
         count += 1
         if download_pdfs and pdf_counter[0] < max_pdfs:
+            con.commit()
             refreshed_row = con.execute("select * from wine_lists where id = ?", (wine_list_row["id"],)).fetchone()
             try:
                 if download_pdf(con, refreshed_row):
@@ -504,6 +509,7 @@ def sync_page(con, page, query, region, download_pdfs, max_pdfs, pdf_counter):
                     pdf_counter[0] += 1
             except Exception as exc:
                 con.execute("update wine_lists set last_error=? where id=?", (str(exc), wine_list_row["id"]))
+            con.commit()
     return payload, count, downloaded
 
 
