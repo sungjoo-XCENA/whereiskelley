@@ -1,5 +1,17 @@
 {
   "version": 2,
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "http://140.238.12.133/",
+      "permanent": false
+    },
+    {
+      "source": "/:path*",
+      "destination": "http://140.238.12.133/:path*",
+      "permanent": false
+    }
+  ],
   "functions": {
     "api/search.py": {
       "maxDuration": 60
