@@ -3,12 +3,12 @@
   "redirects": [
     {
       "source": "/",
-      "destination": "http://140.238.12.133/",
+      "destination": "http://168.107.35.204/",
       "permanent": false
     },
     {
       "source": "/:path*",
-      "destination": "http://140.238.12.133/:path*",
+      "destination": "http://168.107.35.204/:path*",
       "permanent": false
     }
   ],
