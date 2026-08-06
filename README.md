@@ -164,14 +164,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover 
 To allow paid Google Places lookup for missing official websites, pass an explicit request cap:
 
 ```powershell
-$env:GOOGLE_MAPS_API_KEY="your_google_maps_key"
+$env:GOOGLE_PLACES_API_KEY="your_google_api_key"
 powershell -ExecutionPolicy Bypass -File .\scripts\collect-guides.ps1 -Discover -EnableGooglePlaces -MaxGoogleRequests 200
 ```
 
 You can also save the key in `.env.local`:
 
 ```text
-GOOGLE_MAPS_API_KEY=your_google_maps_key
+GOOGLE_PLACES_API_KEY=your_google_api_key
 ```
 
 Keep `MaxGoogleRequests` low until the Google Cloud billing page confirms the expected spend. A full 5,000+ restaurant run can create many paid Places requests if Google lookup is enabled.
@@ -314,18 +314,13 @@ The weekly local flow is:
 5. Run active keyword watches.
 6. Export `public/data/guide-*.json` and the search snapshot for the web app.
 
-Set this environment variable in Vercel Project Settings:
+Set this environment variable in the server's `.env.local` file:
 
 ```text
-GOOGLE_MAPS_API_KEY=your_google_maps_browser_key
+GOOGLE_PLACES_API_KEY=your_google_api_key
 ```
 
-Restrict the Google key to:
-
-```text
-http://localhost:4317/*
-http://127.0.0.1:4317/*
-https://your-vercel-project.vercel.app/*
-```
-
-and restrict it to the `Maps JavaScript API`.
+This single key is used by the browser map and the server-side collector. Enable
+`Maps JavaScript API`, `Places API`, and `Geocoding API`. When sharing one key
+between browser and server requests, set Application restrictions to `None` and
+use API restrictions plus conservative quotas to limit exposure.
