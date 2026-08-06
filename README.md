@@ -324,3 +324,19 @@ This single key is used by the browser map and the server-side collector. Enable
 `Maps JavaScript API`, `Places API`, and `Geocoding API`. When sharing one key
 between browser and server requests, set Application restrictions to `None` and
 use API restrictions plus conservative quotas to limit exposure.
+
+## Oracle server deployment
+
+The Oracle server runs the web UI, API, collector, and SQLite database. After
+changes are merged into `main`, deploy them from the server with:
+
+```bash
+cd /home/opc/whereiskelley
+bash scripts/deploy-oracle.sh
+```
+
+The deploy script refuses to run while collection is active. It backs up
+`.env.local`, `db/starwine.sqlite`, and `public/data`, resets tracked code to
+`origin/main`, restores the runtime data, restarts `whereiskelley.service`, and
+checks the local health endpoint. Backups are stored under
+`/home/opc/whereiskelley-backups`.
