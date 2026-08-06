@@ -227,7 +227,7 @@ def javascript_response(handler, text, status=200):
 
 def config_js():
     payload = {
-        "googleMapsApiKey": os.environ.get("GOOGLE_MAPS_API_KEY", ""),
+        "googleMapsApiKey": os.environ.get("GOOGLE_PLACES_API_KEY", ""),
     }
     return f"window.STARWINE_CONFIG = {json.dumps(payload)};"
 

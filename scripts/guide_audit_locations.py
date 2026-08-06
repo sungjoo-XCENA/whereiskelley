@@ -151,7 +151,7 @@ def main():
     google_enabled = args.enable_google_places or discover.os.environ.get("WHEREISKELLEY_ENABLE_GOOGLE_PLACES") == "1"
     api_key = discover.load_env_key() if google_enabled else ""
     if google_enabled and not api_key:
-        raise SystemExit("GOOGLE_MAPS_API_KEY or GOOGLE_PLACES_API_KEY is required.")
+        raise SystemExit("GOOGLE_PLACES_API_KEY is required.")
     if not google_enabled:
         raise SystemExit("Google Places audit is disabled by default. Re-run with --enable-google-places and --max-google-requests N.")
     google_budget = {

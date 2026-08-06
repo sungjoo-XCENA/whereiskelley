@@ -31,7 +31,7 @@ BLOCKED_HOSTS = {
 
 
 def load_env_key():
-    key = os.environ.get("GOOGLE_MAPS_API_KEY") or os.environ.get("GOOGLE_PLACES_API_KEY")
+    key = os.environ.get("GOOGLE_PLACES_API_KEY")
     if key:
         return key.strip()
     for filename in [".env.local", ".env"]:
@@ -42,7 +42,7 @@ def load_env_key():
             if not line or line.lstrip().startswith("#") or "=" not in line:
                 continue
             name, value = line.split("=", 1)
-            if name.strip() in {"GOOGLE_MAPS_API_KEY", "GOOGLE_PLACES_API_KEY"}:
+            if name.strip() == "GOOGLE_PLACES_API_KEY":
                 return value.strip().strip('"').strip("'")
     return ""
 
@@ -532,7 +532,7 @@ def main():
         run_id = run.lastrowid
         if google_enabled and not api_key:
             message = (
-                "GOOGLE_MAPS_API_KEY is not configured locally. "
+                "GOOGLE_PLACES_API_KEY is not configured locally. "
                 "Add it to .env.local or the current PowerShell session before running full wine-list discovery."
             )
             con.execute(

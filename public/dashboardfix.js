@@ -363,17 +363,6 @@
   }
 
   async function fetchLiveGuideCollection() {
-    const local = await fetchJson("http://localhost:4317/api/guide-collection", null);
-    if (!isEmptyGuidePayload(local)) {
-      local.source = "browser_localhost";
-      state.localGuideSeen = true;
-      state.lastLocalGuidePayload = local;
-      return local;
-    }
-    if (state.localGuideSeen && state.lastLocalGuidePayload) {
-      state.lastLocalGuidePayload.source = "browser_localhost_stale";
-      return state.lastLocalGuidePayload;
-    }
     const proxied = await fetchJson("/api/guide-collection", null);
     if (!isEmptyGuidePayload(proxied)) return proxied;
     return proxied;
