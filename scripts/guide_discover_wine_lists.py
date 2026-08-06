@@ -213,7 +213,12 @@ def discover_target(con, target, watches, max_links):
     if not isinstance(content, str):
         return 0, 0, "Official website returned binary content."
 
-    links = guide.discover_candidate_wine_links(target["website_url"], content, max_pages=max(2, min(4, max_links)))
+    links = guide.discover_candidate_wine_links(
+        target["website_url"],
+        content,
+        max_pages=guide.MAX_DISCOVERY_FETCHES,
+        max_depth=guide.MAX_DISCOVERY_DEPTH,
+    )
 
     unique = []
     seen = set()
@@ -326,9 +331,9 @@ def dashboard_payload(con, progress_payload):
         """
         select
           count(1) as totalSources,
-          count(distinct case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 then target_id end) as foundWineList,
-          sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 then 1 else 0 end) as parsedSources,
-          sum(case when status != 'found' or parser_status != 'parsed' or coalesce(line_count, 0) = 0 then 1 else 0 end) as parseReviewSources,
+          count(distinct case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 and coalesce(last_error, '') = '' then target_id end) as foundWineList,
+          sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 and coalesce(last_error, '') = '' then 1 else 0 end) as parsedSources,
+          sum(case when status != 'found' or parser_status != 'parsed' or coalesce(line_count, 0) = 0 or (last_error is not null and last_error != '') then 1 else 0 end) as parseReviewSources,
           sum(case when parser_status = 'parsed' and coalesce(line_count, 0) = 0 then 1 else 0 end) as emptyParsedSources
         from wine_list_sources
         """
@@ -343,8 +348,8 @@ def dashboard_payload(con, progress_payload):
             with source_counts as (
               select target_id,
                      count(1) as source_count,
-                     sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 then 1 else 0 end) as verified_source_count,
-                     sum(case when status != 'found' or parser_status != 'parsed' or coalesce(line_count, 0) = 0 then 1 else 0 end) as review_source_count
+                     sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 and coalesce(last_error, '') = '' then 1 else 0 end) as verified_source_count,
+                     sum(case when status != 'found' or parser_status != 'parsed' or coalesce(line_count, 0) = 0 or (last_error is not null and last_error != '') then 1 else 0 end) as review_source_count
               from wine_list_sources
               group by target_id
             ),
@@ -354,7 +359,7 @@ def dashboard_payload(con, progress_payload):
               group by target_id
             ),
             wine_choices as (
-              select target_id, url, source_type, status as source_status, parser_status, line_count
+              select target_id, url, source_type, status as source_status, parser_status, line_count, last_error
               from (
                 select
                   s.target_id,
@@ -363,10 +368,11 @@ def dashboard_payload(con, progress_payload):
                   s.status,
                   s.parser_status,
                   s.line_count,
+                  s.last_error,
                   row_number() over (
                     partition by s.target_id
                     order by
-                      case when s.status = 'found' and s.parser_status = 'parsed' and coalesce(s.line_count, 0) > 0 then 0 else 1 end,
+                      case when s.status = 'found' and s.parser_status = 'parsed' and coalesce(s.line_count, 0) > 0 and coalesce(s.last_error, '') = '' then 0 else 1 end,
                       case when rt.website_url is not null and rt.website_url != '' and s.url = rt.website_url then 1 else 0 end,
                       case when s.source_type = 'pdf' then 0 else 1 end,
                       coalesce(s.line_count, 0) desc,
@@ -394,6 +400,7 @@ def dashboard_payload(con, progress_payload):
               wc.source_type as wineListType,
               wc.source_status as wineListStatus,
               wc.parser_status as wineListParserStatus,
+              wc.last_error as wineListLastError,
               coalesce(wc.line_count, 0) as chosenWineLineCount,
               coalesce(sc.source_count, 0) as wineListCount,
               coalesce(sc.verified_source_count, 0) as verifiedWineListCount,

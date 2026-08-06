@@ -226,16 +226,17 @@ def parse_price(line, country="", page_number=None, require_edge=False):
     text = re.sub(r"\b(?:page|p\.?)\s*\d{1,4}\b", " ", text, flags=re.I)
     text = re.sub(r"\b0\s*[,\.]\s*(?:187|375|5|50|70|75|750|150|1500)\s*(?:l|lt|liter|litre)?\b", " ", text, flags=re.I)
     text = re.sub(r"\b(?:37\.?5|75|187|375|500|750|1500)\s*(?:ml|cl)\b", " ", text, flags=re.I)
-    price_number = r"(?:\d{1,3}(?:[,\s.]\d{3})+|\d{2,6}[oO]\s*[,\.]\s*[oO0]{2}|\d{2,6}(?:\s*[,\.]\s*[oO0]{2})?)"
+    text = re.sub(r"\b\d{1,3}\s*%\s*", " ", text)
+    price_number = r"(?:\d{1,3}(?:[,\s.]\s*\d{3})+|\d{2,6}[oO]\s*[,\.]\s*[oO0]{2}|\d{2,6}(?:\s*[,\.]\s*[oO0]{2})?)"
     patterns = [
-        rf"(?<![\w])(?:{PRICE_CURRENCY_RE})\s*{price_number}(?!\d)",
+        rf"(?<![\w])(?:{PRICE_CURRENCY_RE})\s*{price_number}(?![\d%])",
         rf"(?<!\d){price_number}\s*(?:{PRICE_CURRENCY_RE})(?![\w])",
-        r"(?<!\d)\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?!\d)",
-        r"(?<!\d)\d{1,3}(?:,\s*\d{3})+(?:\.\d{2})?(?!\d)",
-        r"(?<!\d)\d{1,3}(?:[ .]\d{3})+(?:,\d{2})?(?!\d)",
+        r"(?<!\d)\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?![\d%])",
+        r"(?<!\d)\d{1,3}(?:,\s*\d{3})+(?:\.\d{2})?(?![\d%])",
+        r"(?<!\d)\d{1,3}(?:[ .]\d{3})+(?:,\d{2})?(?![\d%])",
         r"(?<!\d)\d{2,6}[oO]\s*[,\.]\s*[oO0]{2}(?!\w)",
-        r"(?<!\d)\d{2,6}\s*[,\.]\s*[oO0]{2}(?!\d)",
-        r"(?<!\d)\d{2,6}(?!\d)",
+        r"(?<!\d)\d{2,6}\s*[,\.]\s*[oO0]{2}(?![\d%])",
+        r"(?<!\d)\d{2,6}(?![\d%])",
     ]
     candidates = []
     used_spans = []
