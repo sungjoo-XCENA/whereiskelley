@@ -612,7 +612,7 @@ def main():
     parser.add_argument(
         "--workers",
         type=int,
-        default=max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "12"))),
+        default=max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "24"))),
         help="Restaurant websites checked concurrently when Google Places is disabled.",
     )
     args = parser.parse_args()

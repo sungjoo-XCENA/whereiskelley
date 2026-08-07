@@ -85,7 +85,7 @@ def main():
     parser.add_argument("--max-links", type=int, default=60)
     parser.add_argument("--max-targets", type=int, default=0)
     parser.add_argument("--sleep", default="0.08")
-    parser.add_argument("--workers", type=int, default=12)
+    parser.add_argument("--workers", type=int, default=24)
     args = parser.parse_args()
 
     live_path = live_db_path().resolve()
