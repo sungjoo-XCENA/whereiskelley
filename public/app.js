@@ -226,12 +226,20 @@ function resultSource(result = {}) {
 function sourceBadge(source) {
   const value = String(source || "Live");
   const normalized = value.toLowerCase();
-  const key = normalized.includes("db") && normalized.includes("live")
+  const key = normalized.includes("collected")
+    ? "collected"
+    : normalized.includes("db") && normalized.includes("live")
     ? "both"
     : normalized.includes("db")
       ? "db"
       : "live";
-  const label = key === "both" ? "Saved DB + Live API" : key === "db" ? "Saved DB" : "Live API";
+  const label = key === "collected"
+    ? "Collected DB"
+    : key === "both"
+      ? "Saved DB + Live API"
+      : key === "db"
+        ? "Saved DB"
+        : "Live API";
   return `<span class="source-badge ${key}">${escapeHtml(label)}</span>`;
 }
 
@@ -521,6 +529,7 @@ function groupPdfLists(group) {
   const lists = [];
   for (const result of group.results) {
     const list = result.wineList || {};
+    if (result.availabilityOnly || list.availabilityOnly) continue;
     const url = pdfUrl(list);
     if (!url) continue;
     const key = String(list.id || url);
@@ -783,8 +792,12 @@ function renderPlaceRow(group) {
 }
 
 function placeLineLabel(group) {
-  const indexedLines = fallbackWineLines(group.results);
-  const verified = reconciledGroupLines(group).filter((line) => line.pdfVerified).length;
+  const collected = group.results.filter((result) => result.availabilityOnly);
+  const ordinaryGroup = { ...group, results: group.results.filter((result) => !result.availabilityOnly) };
+  const indexedLines = fallbackWineLines(ordinaryGroup.results);
+  const verified = reconciledGroupLines(ordinaryGroup).filter((line) => line.pdfVerified).length;
+  if (collected.length && !ordinaryGroup.results.length) return `${collected.length} collected match${collected.length === 1 ? "" : "es"}`;
+  if (collected.length) return `${indexedLines.length} live / ${collected.length} collected`;
   if (indexedLines.length && verified) return `${indexedLines.length} indexed / ${verified} verified`;
   if (indexedLines.length) return `${indexedLines.length} indexed lines`;
   const pdfLines = groupPdfLines(group);
@@ -794,21 +807,23 @@ function placeLineLabel(group) {
 
 function renderExpandedPlace(group) {
   const venue = group.venue || {};
-  const pdfLists = groupPdfLists(group);
-  const pdfLines = groupPdfLines(group);
-  if (groupPdfPending(group)) {
-    window.setTimeout(() => loadPdfLines(group), 0);
+  const collectedResults = group.results.filter((result) => result.availabilityOnly);
+  const ordinaryGroup = { ...group, results: group.results.filter((result) => !result.availabilityOnly) };
+  const pdfLists = groupPdfLists(ordinaryGroup);
+  const pdfLines = groupPdfLines(ordinaryGroup);
+  if (ordinaryGroup.results.length && groupPdfPending(ordinaryGroup)) {
+    window.setTimeout(() => loadPdfLines(ordinaryGroup), 0);
   }
-  const sourceLines = reconciledGroupLines(group);
-  const reviewReason = groupPdfReviewReason(group);
-  const indexedLines = fallbackWineLines(group.results);
+  const sourceLines = reconciledGroupLines(ordinaryGroup);
+  const reviewReason = groupPdfReviewReason(ordinaryGroup);
+  const indexedLines = fallbackWineLines(ordinaryGroup.results);
   const verifiedCount = sourceLines.filter((line) => line.pdfVerified).length;
   const heldPdfExtras = indexedLines.length ? Math.max(0, pdfLines.length - verifiedCount) : 0;
   const reviewNote = heldPdfExtras
     ? `<div class="review-note">Showing Star Wine List indexed rows first. ${escapeHtml(String(heldPdfExtras))} PDF-only rows were held for review instead of being added automatically.</div>`
     : pdfLines.length
       ? ""
-    : groupPdfPending(group)
+    : groupPdfPending(ordinaryGroup)
       ? `<div class="review-note">Reading the current PDF download...</div>`
       : reviewReason
         ? `<div class="review-note">${escapeHtml(reviewReason)} ${sourceLines.length ? "The rows below are from the Star Wine List search index." : "No priced wine line was found in the downloaded PDF or search index."}</div>`
@@ -824,7 +839,30 @@ function renderExpandedPlace(group) {
       <td>${escapeHtml(result.pageNumber || "")}</td>
       <td>${sourceBadge(resultSource(result))}</td>
     </tr>`)
-    .join("") || `<tr><td colspan="6" class="muted">Review needed. The search index matched text for this place, but no priced wine line was verified from the PDF.</td></tr>`;
+    .join("");
+  const collectedMarkup = collectedResults.length
+    ? `<div class="collected-list-results">
+        <div class="collected-list-head"><b>Collected wine-list matches</b><span>Prices are not parsed for this source.</span></div>
+        ${collectedResults.map((result) => {
+          const listUrl = pdfUrl(result.wineList || {});
+          return `<div class="collected-list-row">
+            <div><b>${escapeHtml(result.text || "Matching text found in this wine list")}</b>${result.vintage ? `<span>Vintage ${escapeHtml(result.vintage)}</span>` : ""}</div>
+            <div>${sourceBadge(resultSource(result))}${listUrl ? `<a class="secondary" href="${escapeHtml(listUrl)}" target="_blank" rel="noreferrer">Open wine list</a>` : ""}</div>
+          </div>`;
+        }).join("")}
+      </div>`
+    : "";
+  const ordinaryTable = ordinaryGroup.results.length || pdfLines.length
+    ? `<table class="line-table">
+        <thead>
+          <tr><th>Matched PDF/search line</th><th>Vintage</th><th>Price</th><th>KRW</th><th>Page</th><th>Source</th></tr>
+        </thead>
+        <tbody>${lines || `<tr><td colspan="6" class="muted">Review needed. No priced wine line was verified from the PDF.</td></tr>`}</tbody>
+      </table>`
+    : "";
+  const collectedListUrls = collectedResults
+    .map((result) => pdfUrl(result.wineList || {}))
+    .filter((url, index, values) => url && values.indexOf(url) === index);
   return `<tr class="expanded-row">
     <td colspan="6">
       <div class="expanded-place">
@@ -835,17 +873,14 @@ function renderExpandedPlace(group) {
           </div>
           <div class="actions compact">
             ${pdfLinksMarkup(pdfLists)}
-            ${venue.starWineMapUrl ? `<a class="secondary" href="${escapeHtml(venue.starWineMapUrl)}" target="_blank" rel="noreferrer">Map</a>` : ""}
-            ${venue.url ? `<a class="secondary" href="${escapeHtml(venue.url)}" target="_blank" rel="noreferrer">Star Wine List page</a>` : ""}
+            ${collectedListUrls.slice(0, 3).map((url) => `<a class="primary-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">Wine list</a>`).join("")}
+            ${(venue.googleMapsUrl || venue.starWineMapUrl) ? `<a class="secondary" href="${escapeHtml(venue.googleMapsUrl || venue.starWineMapUrl)}" target="_blank" rel="noreferrer">Map</a>` : ""}
+            ${venue.url ? `<a class="secondary" href="${escapeHtml(venue.url)}" target="_blank" rel="noreferrer">Place page</a>` : ""}
           </div>
         </div>
+        ${collectedMarkup}
         ${reviewNote}
-        <table class="line-table">
-          <thead>
-            <tr><th>Matched PDF/search line</th><th>Vintage</th><th>Price</th><th>KRW</th><th>Page</th><th>Source</th></tr>
-          </thead>
-          <tbody>${lines}</tbody>
-        </table>
+        ${ordinaryTable}
       </div>
     </td>
   </tr>`;
@@ -1059,19 +1094,27 @@ async function runSearch() {
   }
   params.set("limit", "5000");
   try {
-    const [snapshotResult, liveResult] = await Promise.allSettled([
+    const collectedParams = new URLSearchParams(params);
+    collectedParams.delete("live");
+    collectedParams.delete("livePages");
+    collectedParams.delete("livePageCap");
+    collectedParams.delete("liveMaxPdfs");
+    const [snapshotResult, liveResult, collectedResult] = await Promise.allSettled([
       searchSnapshot(params),
-      getJson(`/api/search?${params.toString()}`)
+      getJson(`/api/search_v2?${params.toString()}`),
+      getJson(`/api/search?${collectedParams.toString()}`)
     ]);
     const snapshotPayload = snapshotResult.status === "fulfilled" ? snapshotResult.value : { results: [], liveRefresh: null };
     const livePayload = liveResult.status === "fulfilled" ? liveResult.value : { results: [], liveRefresh: null };
+    const collectedPayload = collectedResult.status === "fulfilled" ? collectedResult.value : { results: [] };
     const dbResults = (snapshotPayload.results || []).map((result) => ({ ...result, source: result.source || "DB" }));
-    const liveResults = (livePayload.results || []).map((result) => ({ ...result, source: "Live" }));
-    renderResults([...dbResults, ...liveResults], {
-      sourceSummary: "DB snapshot + live API",
+    const liveResults = (livePayload.results || []).map((result) => ({ ...result, source: result.source || "Live" }));
+    const collectedResults = (collectedPayload.results || []).filter((result) => result.source === "Collected DB");
+    renderResults([...dbResults, ...liveResults, ...collectedResults], {
+      sourceSummary: "Saved DB + live API + collected lists",
       snapshotLines: snapshotPayload.liveRefresh?.snapshotLines || 0,
       snapshotMatches: dbResults.length,
-      liveMatches: liveResults.length
+      liveMatches: liveResults.length + collectedResults.length
     });
   } finally {
     submitButton.disabled = false;

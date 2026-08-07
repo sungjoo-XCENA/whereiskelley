@@ -184,6 +184,62 @@ button:hover {
   background: var(--accent-dark);
 }
 
+.source-badge.collected {
+  background: #e8f6f3;
+  color: #176f66;
+}
+
+.primary-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.collected-list-results {
+  margin: 12px 0;
+  border: 1px solid #b9dcd6;
+  border-radius: 8px;
+  background: #f4fbf9;
+}
+
+.collected-list-head,
+.collected-list-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 14px;
+}
+
+.collected-list-head {
+  border-bottom: 1px solid #cfe7e2;
+}
+
+.collected-list-head span,
+.collected-list-row span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.collected-list-row + .collected-list-row {
+  border-top: 1px solid #dbece8;
+}
+
+.collected-list-row > div:last-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(360px, 500px) minmax(0, 1fr);

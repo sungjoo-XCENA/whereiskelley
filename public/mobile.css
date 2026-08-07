@@ -1,4 +1,15 @@
 @media (max-width: 720px) {
+  .collected-list-head,
+  .collected-list-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .collected-list-row > div:last-child {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
   .app-shell {
     width: min(100vw - 14px, 720px);
     padding: 10px 0 18px;

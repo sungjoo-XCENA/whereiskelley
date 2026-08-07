@@ -365,7 +365,9 @@ def main():
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     with con:
-        lines = load_lines(con) + load_guide_lines(con)
+        # Collected guide lists are searched from the current completed SQLite
+        # snapshot through /api/search. Keep this static export Star Wine-only.
+        lines = load_lines(con)
         venues = load_venues(con)
         run = latest_run(con)
         chunks = []

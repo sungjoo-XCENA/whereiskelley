@@ -9,7 +9,7 @@ import threading
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote_plus, urlparse
 from urllib.request import Request, urlopen
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -118,7 +118,7 @@ def running_collector_pid():
         return None
     try:
         output = subprocess.check_output(
-            ["pgrep", "-f", str(SCRIPTS_DIR / "guide_discover_wine_lists.py")],
+            ["pgrep", "-f", "run_published_wine_collection.py|guide_discover_wine_lists.py"],
             text=True,
             stderr=subprocess.DEVNULL,
         )
@@ -155,11 +155,7 @@ def start_wine_collection(payload):
     sleep_seconds = str(payload.get("sleep") or os.environ.get("WHEREISKELLEY_COLLECT_SLEEP", "0.08"))
     command = [
         sys.executable,
-        str(SCRIPTS_DIR / "guide_discover_wine_lists.py"),
-        "--skip-google",
-        "--only-with-website",
-        "--recheck-all",
-        "--replace-existing",
+        str(SCRIPTS_DIR / "run_published_wine_collection.py"),
         "--max-links",
         str(max_links),
         "--sleep",
@@ -823,12 +819,120 @@ def search(params):
         }
         item["wineList"]["localFileUrl"] = f"/files/{item['wineList']['localFilePath']}" if item["wineList"]["localFilePath"] else ""
         results.append(item)
+    results.extend(search_collected_guides(q, country, city, vintage, limit))
     return {"query": q, "count": len(results), "results": results, "liveRefresh": live_refresh}
 
 
 def fold_text(value):
     normalized = unicodedata.normalize("NFKD", (value or "").casefold())
     return "".join(char for char in normalized if not unicodedata.combining(char))
+
+
+def loose_tokens(value):
+    return [token for token in sync_search_api.re.findall(r"\w+", fold_text(value)) if len(token) >= 2]
+
+
+def search_collected_guides(query, country="", city="", vintage="", limit=5000):
+    tokens = loose_tokens(query)
+    if not tokens:
+        return []
+
+    sql = """
+        select
+          e.id as entry_id,
+          e.raw_text,
+          e.vintage,
+          e.source_url,
+          s.id as source_id,
+          s.url as list_url,
+          s.source_type,
+          s.last_checked_at as source_checked_at,
+          t.id as target_id,
+          t.name,
+          t.country,
+          t.city,
+          t.address,
+          t.lat,
+          t.lng,
+          t.website_url,
+          t.last_checked_at as target_checked_at
+        from guide_wine_entries e
+        join wine_list_sources s on s.id=e.wine_list_source_id
+        join restaurant_targets t on t.id=e.target_id
+        where s.status='found'
+        order by t.name, s.id, e.id
+    """
+    con = None
+    try:
+        con = connect()
+        rows = con.execute(sql).fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        if con is not None:
+            con.close()
+
+    country_folded = fold_text(country)
+    city_folded = fold_text(city)
+    seen_sources = set()
+    results = []
+    for row in rows:
+        raw_text = row["raw_text"] or ""
+        folded_line = fold_text(raw_text)
+        if not all(token in folded_line for token in tokens):
+            continue
+        if country_folded and country_folded != fold_text(row["country"]):
+            continue
+        if city_folded and city_folded not in fold_text(row["city"]):
+            continue
+        if vintage and str(vintage) != str(row["vintage"] or "") and str(vintage) not in raw_text:
+            continue
+        source_id = row["source_id"]
+        source_url = (row["list_url"] or row["source_url"] or "").strip()
+        source_key = source_url.casefold() or (
+            fold_text(row["name"]),
+            fold_text(row["city"]),
+            fold_text(row["country"]),
+        )
+        if source_key in seen_sources:
+            continue
+        seen_sources.add(source_key)
+        map_query = ", ".join(filter(None, (row["name"], row["address"], row["city"], row["country"])))
+        results.append(
+            {
+                "id": f"guide-{source_id}-{row['entry_id']}",
+                "text": raw_text,
+                "vintage": row["vintage"] or "",
+                "priceValue": None,
+                "currency": "",
+                "prices": [],
+                "source": "Collected DB",
+                "availabilityOnly": True,
+                "venue": {
+                    "id": f"guide-target-{row['target_id']}",
+                    "name": row["name"] or "",
+                    "type": "Restaurant",
+                    "city": row["city"] or "",
+                    "country": row["country"] or "",
+                    "lat": row["lat"],
+                    "lng": row["lng"],
+                    "address": row["address"] or "",
+                    "googleMapsUrl": f"https://www.google.com/maps/search/?api=1&query={quote_plus(map_query)}",
+                    "url": row["website_url"] or "",
+                },
+                "wineList": {
+                    "id": f"guide-source-{source_id}",
+                    "label": "Collected wine list",
+                    "downloadUrl": source_url,
+                    "fileUrl": source_url,
+                    "updatedDate": row["source_checked_at"] or row["target_checked_at"] or "",
+                    "availabilityOnly": True,
+                },
+            }
+        )
+        if len(results) >= limit:
+            break
+    return results
 
 
 def clean_fragment(value):

@@ -85,6 +85,10 @@
   function tagType(result, source) {
     const venue = { ...(result.venue || {}) };
     const originalType = String(venue.type || "Restaurant / wine bar").replace(/^\[[^\]]+\]\s*/, "");
+    if (result.availabilityOnly || result.source === "Collected DB") {
+      venue.type = originalType;
+      return { ...result, venue, source: "Collected DB" };
+    }
     venue.type = `[${source}] ${originalType}`;
     return { ...result, venue, source };
   }
@@ -94,7 +98,12 @@
     for (const result of dbResults) byKey.set(keyFor(result), tagType(result, "DB"));
     for (const result of liveResults) {
       const key = keyFor(result);
-      byKey.set(key, tagType(result, byKey.has(key) ? "DB + Live" : "Live"));
+      const source = result.availabilityOnly || result.source === "Collected DB"
+        ? "Collected DB"
+        : byKey.has(key)
+          ? "DB + Live"
+          : result.source || "Live";
+      byKey.set(key, tagType(result, source));
     }
     return [...byKey.values()];
   }

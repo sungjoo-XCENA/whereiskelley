@@ -32,10 +32,6 @@ if [[ -f "$LAST_START_FILE" ]]; then
 fi
 printf '%s\n' "$now_epoch" > "$LAST_START_FILE"
 
-exec "$PYTHON_BIN" scripts/guide_discover_wine_lists.py \
-  --skip-google \
-  --only-with-website \
-  --recheck-all \
-  --replace-existing \
+exec "$PYTHON_BIN" scripts/run_published_wine_collection.py \
   --max-links "${WHEREISKELLEY_DISCOVERY_MAX_LINKS:-60}" \
   --sleep "${WHEREISKELLEY_DISCOVERY_SLEEP:-0.08}"
