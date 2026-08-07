@@ -213,11 +213,12 @@ def discover_target(con, target, watches, max_links):
     if not isinstance(content, str):
         return 0, 0, "Official website returned binary content."
 
-    links = guide.discover_candidate_wine_links(
+    links, crawl_stats = guide.discover_candidate_wine_links(
         target["website_url"],
         content,
         max_pages=guide.MAX_DISCOVERY_FETCHES,
         max_depth=guide.MAX_DISCOVERY_DEPTH,
+        return_stats=True,
     )
 
     unique = []
@@ -233,33 +234,42 @@ def discover_target(con, target, watches, max_links):
         unique.append({"url": key, "text": link.get("text", ""), "score": link.get("score", 0)})
 
     if not unique:
+        status = "review" if crawl_stats.get("fetchLimitReached") else "no_wine_list"
         con.execute(
-            "update restaurant_targets set status='no_wine_list', last_checked_at=current_timestamp, last_error=null where id=?",
-            (target["id"],),
+            "update restaurant_targets set status=?, last_checked_at=current_timestamp, last_error=? where id=?",
+            (
+                status,
+                "Website page limit reached before the crawl finished." if status == "review" else None,
+                target["id"],
+            ),
         )
         return 0, 0, ""
 
     sources = 0
     lines = 0
-    errors = []
+    review_reasons = []
+    needs_review = bool(crawl_stats.get("fetchLimitReached"))
     for link in unique[:max_links]:
-        found, count, error = guide.scan_wine_source(con, target, link["url"], watches, link.get("score", 0))
+        found, count, error, source_needs_review = guide.scan_wine_source(
+            con, target, link["url"], watches, link.get("score", 0)
+        )
         sources += found
         lines += count
-        if error:
-            errors.append(error)
-        if sources and (count >= 10 or link.get("score", 0) >= 120):
-            break
+        needs_review = needs_review or source_needs_review
+        if error and source_needs_review:
+            review_reasons.append(error)
 
+    status = "found" if sources else ("review" if needs_review else "no_wine_list")
+    last_error = "; ".join(dict.fromkeys(review_reasons[:3])) if status == "review" else None
     con.execute(
         """
         update restaurant_targets
         set status=?, last_checked_at=current_timestamp, last_error=?
         where id=?
         """,
-        ("found" if sources else "review", "; ".join(errors[:3]) if errors else None, target["id"]),
+        (status, last_error, target["id"]),
     )
-    return sources, lines, "; ".join(errors[:3])
+    return sources, lines, last_error or ""
 
 
 def write_watch_hits(con):
@@ -333,7 +343,7 @@ def dashboard_payload(con, progress_payload):
           count(1) as totalSources,
           count(distinct case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 and coalesce(last_error, '') = '' then target_id end) as foundWineList,
           sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 and coalesce(last_error, '') = '' then 1 else 0 end) as parsedSources,
-          sum(case when status != 'found' or parser_status != 'parsed' or coalesce(line_count, 0) = 0 or (last_error is not null and last_error != '') then 1 else 0 end) as parseReviewSources,
+          sum(case when status = 'review' or parser_status = 'review' then 1 else 0 end) as parseReviewSources,
           sum(case when parser_status = 'parsed' and coalesce(line_count, 0) = 0 then 1 else 0 end) as emptyParsedSources
         from wine_list_sources
         """
@@ -349,7 +359,7 @@ def dashboard_payload(con, progress_payload):
               select target_id,
                      count(1) as source_count,
                      sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 and coalesce(last_error, '') = '' then 1 else 0 end) as verified_source_count,
-                     sum(case when status != 'found' or parser_status != 'parsed' or coalesce(line_count, 0) = 0 or (last_error is not null and last_error != '') then 1 else 0 end) as review_source_count
+                     sum(case when status = 'review' or parser_status = 'review' then 1 else 0 end) as review_source_count
               from wine_list_sources
               group by target_id
             ),
@@ -495,7 +505,12 @@ def export_status(con, run_id, watch_hits=0):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-targets", type=int, default=0, help="0 means all restaurant targets.")
-    parser.add_argument("--max-links", type=int, default=5)
+    parser.add_argument(
+        "--max-links",
+        type=int,
+        default=guide.MAX_DISCOVERY_FETCHES,
+        help="Maximum candidate source pages checked per restaurant after the depth-limited crawl.",
+    )
     parser.add_argument("--skip-google", action="store_true")
     parser.add_argument("--enable-google-places", action="store_true", help="Allow paid Google Places calls. Off by default.")
     parser.add_argument(

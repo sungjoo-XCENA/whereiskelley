@@ -37,5 +37,5 @@ exec "$PYTHON_BIN" scripts/guide_discover_wine_lists.py \
   --only-with-website \
   --recheck-all \
   --replace-existing \
-  --max-links "${WHEREISKELLEY_DISCOVERY_MAX_LINKS:-12}" \
+  --max-links "${WHEREISKELLEY_DISCOVERY_MAX_LINKS:-60}" \
   --sleep "${WHEREISKELLEY_DISCOVERY_SLEEP:-0.08}"

@@ -150,7 +150,7 @@ def start_wine_collection(payload):
     if running_pid is not None:
         return {"ok": True, "running": True, "message": "Collection is already running.", "pid": running_pid}, 200
 
-    max_links = int(payload.get("maxLinks") or os.environ.get("WHEREISKELLEY_COLLECT_MAX_LINKS", "12"))
+    max_links = int(payload.get("maxLinks") or os.environ.get("WHEREISKELLEY_COLLECT_MAX_LINKS", "60"))
     max_targets = int(payload.get("maxTargets") or 0)
     sleep_seconds = str(payload.get("sleep") or os.environ.get("WHEREISKELLEY_COLLECT_SLEEP", "0.08"))
     command = [
@@ -391,7 +391,7 @@ def guide_collection_status():
               count(1) as totalSources,
               count(distinct case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 and coalesce(last_error, '') = '' then target_id end) as foundWineList,
               sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 and coalesce(last_error, '') = '' then 1 else 0 end) as parsedSources,
-              sum(case when status != 'found' or parser_status != 'parsed' or coalesce(line_count, 0) = 0 or (last_error is not null and last_error != '') then 1 else 0 end) as parseReviewSources,
+              sum(case when status = 'review' or parser_status = 'review' then 1 else 0 end) as parseReviewSources,
               sum(case when parser_status = 'parsed' and coalesce(line_count, 0) = 0 then 1 else 0 end) as emptyParsedSources
             from wine_list_sources
             """
@@ -421,7 +421,7 @@ def guide_collection_status():
                 with source_counts as (
                   select target_id, count(1) as source_count,
                          sum(case when status = 'found' and parser_status = 'parsed' and coalesce(line_count, 0) > 0 and coalesce(last_error, '') = '' then 1 else 0 end) as verified_source_count,
-                         sum(case when status != 'found' or parser_status != 'parsed' or coalesce(line_count, 0) = 0 or (last_error is not null and last_error != '') then 1 else 0 end) as review_source_count
+                         sum(case when status = 'review' or parser_status = 'review' then 1 else 0 end) as review_source_count
                   from wine_list_sources
                   group by target_id
                 ),

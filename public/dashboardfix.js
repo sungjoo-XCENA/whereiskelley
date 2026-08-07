@@ -813,7 +813,7 @@
       || number(progressCounts.wineLines)
       || number(progress.wineLinesFound);
     const parsedSources = number(summary.parsedSources);
-    const reviewSources = Math.max(number(summary.parseReviewSources), Math.max(0, sourceCount - parsedSources));
+    const reviewSources = number(summary.parseReviewSources);
     const found = number(summary.foundWineList);
     const none = number(summary.noWineList);
     const pending = number(summary.pending) + number(summary.missingWebsite);
@@ -838,8 +838,8 @@
     const cardsHtml = `<div class="dashboard-grid" data-dashboard-section="cards">
       <div class="dashboard-card"><span>Collection</span><b>${html(values.status)}</b><small>${html(collectionText)}<br>DB updated ${html(lastCollectionText)}<br>Every other Monday 03:00 KST</small></div>
       <div class="dashboard-card"><span>Progress</span><b>${html(values.percent.toFixed(1))}%</b><small>${html(fmtInt(values.processed))} checked / ${html(fmtInt(values.remaining))} left / ${html(fmtInt(values.total))} total</small></div>
-      <div class="dashboard-card"><span>Wine-list sources</span><b>${html(fmtInt(sourceCount))}</b><small>${html(fmtInt(parsedSources))} verified sources, ${html(fmtInt(savedLines))} saved wine lines.</small></div>
-      <div class="dashboard-card"><span>Needs review</span><b>${html(fmtInt(reviewSources + errorCount))}</b><small>${html(fmtInt(reviewSources))} parser reviews / ${html(fmtInt(errorCount))} restaurant errors.</small></div>
+      <div class="dashboard-card"><span>Verified wine lists</span><b>${html(fmtInt(found))}</b><small>${html(fmtInt(parsedSources))} exact list sources, ${html(fmtInt(savedLines))} saved wine lines.</small></div>
+      <div class="dashboard-card"><span>Needs review</span><b>${html(fmtInt(number(summary.needsReview)))}</b><small>${html(fmtInt(reviewSources))} inconclusive sources / ${html(fmtInt(errorCount))} restaurant errors.</small></div>
     </div>`;
 
     const progressHtml = `<section class="dash-panel" data-dashboard-section="progress">
