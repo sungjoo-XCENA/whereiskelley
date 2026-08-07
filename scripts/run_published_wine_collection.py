@@ -85,13 +85,9 @@ def main():
     parser.add_argument("--max-links", type=int, default=60)
     parser.add_argument("--max-targets", type=int, default=0)
     parser.add_argument("--sleep", default="0.08")
-    parser.add_argument("--workers", type=int, default=24)
-    parser.add_argument("--source-workers", type=int, default=12)
-    parser.add_argument(
-        "--pdf-workers",
-        type=int,
-        default=max(1, round((os.cpu_count() or 2) * 0.8)),
-    )
+    parser.add_argument("--workers", type=int, default=48)
+    parser.add_argument("--source-workers", type=int, default=36)
+    parser.add_argument("--pdf-workers", type=int, default=3)
     args = parser.parse_args()
 
     live_path = live_db_path().resolve()

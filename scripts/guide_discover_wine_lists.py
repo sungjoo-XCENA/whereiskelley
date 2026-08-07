@@ -745,7 +745,6 @@ def export_status(con, run_id, watch_hits=0):
 
 
 def main():
-    default_pdf_workers = max(1, round((os.cpu_count() or 2) * 0.8))
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-targets", type=int, default=0, help="0 means all restaurant targets.")
     parser.add_argument(
@@ -770,19 +769,19 @@ def main():
     parser.add_argument(
         "--workers",
         type=int,
-        default=max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "24"))),
+        default=max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "48"))),
         help="Restaurant websites crawled concurrently when Google Places is disabled.",
     )
     parser.add_argument(
         "--source-workers",
         type=int,
-        default=max(1, int(os.environ.get("WHEREISKELLEY_SOURCE_WORKERS", "12"))),
+        default=max(1, int(os.environ.get("WHEREISKELLEY_SOURCE_WORKERS", "36"))),
         help="HTML wine-list candidates validated concurrently after discovery.",
     )
     parser.add_argument(
         "--pdf-workers",
         type=int,
-        default=max(1, int(os.environ.get("WHEREISKELLEY_PDF_WORKERS", str(default_pdf_workers)))),
+        default=max(1, int(os.environ.get("WHEREISKELLEY_PDF_WORKERS", "3"))),
         help="PDF candidates extracted concurrently after HTML validation.",
     )
     args = parser.parse_args()
