@@ -1,5 +1,5 @@
 [Unit]
-Description=Where is Kelley weekly wine-list collection
+Description=Where is Kelley biweekly wine-list collection
 After=network-online.target whereiskelley.service
 Wants=network-online.target
 

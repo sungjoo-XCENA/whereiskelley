@@ -836,7 +836,7 @@
     const progressPillClass = values.running ? "good" : values.stopped ? "warn" : "";
 
     const cardsHtml = `<div class="dashboard-grid" data-dashboard-section="cards">
-      <div class="dashboard-card"><span>Collection</span><b>${html(values.status)}</b><small>${html(collectionText)}<br>DB updated ${html(lastCollectionText)}<br>Weekly: Monday 03:00 KST</small></div>
+      <div class="dashboard-card"><span>Collection</span><b>${html(values.status)}</b><small>${html(collectionText)}<br>DB updated ${html(lastCollectionText)}<br>Every other Monday 03:00 KST</small></div>
       <div class="dashboard-card"><span>Progress</span><b>${html(values.percent.toFixed(1))}%</b><small>${html(fmtInt(values.processed))} checked / ${html(fmtInt(values.remaining))} left / ${html(fmtInt(values.total))} total</small></div>
       <div class="dashboard-card"><span>Wine-list sources</span><b>${html(fmtInt(sourceCount))}</b><small>${html(fmtInt(parsedSources))} verified sources, ${html(fmtInt(savedLines))} saved wine lines.</small></div>
       <div class="dashboard-card"><span>Needs review</span><b>${html(fmtInt(reviewSources + errorCount))}</b><small>${html(fmtInt(reviewSources))} parser reviews / ${html(fmtInt(errorCount))} restaurant errors.</small></div>
