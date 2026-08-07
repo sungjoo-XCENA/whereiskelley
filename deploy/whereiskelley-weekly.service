@@ -9,7 +9,7 @@ User=opc
 Group=opc
 WorkingDirectory=/home/opc/whereiskelley
 EnvironmentFile=-/home/opc/whereiskelley/.env.local
-ExecStart=/home/opc/whereiskelley/scripts/weekly-oracle-collection.sh
+ExecStart=/usr/bin/bash /home/opc/whereiskelley/scripts/weekly-oracle-collection.sh
 Nice=10
 
 [Install]
