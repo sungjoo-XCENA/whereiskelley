@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import urlencode, urljoin, urlparse
@@ -253,6 +254,7 @@ def discover_target(con, target, watches, max_links):
         found, count, error, source_needs_review = guide.scan_wine_source(
             con, target, link["url"], watches, link.get("score", 0)
         )
+        con.commit()
         sources += found
         lines += count
         needs_review = needs_review or source_needs_review
@@ -270,6 +272,89 @@ def discover_target(con, target, watches, max_links):
         (status, last_error, target["id"]),
     )
     return sources, lines, last_error or ""
+
+
+def collect_saved_target(target, watches, max_links, replace_existing):
+    with guide.connect() as con:
+        try:
+            if replace_existing:
+                con.execute("delete from guide_wine_entries where target_id=?", (target["id"],))
+                con.execute("delete from wine_list_sources where target_id=?", (target["id"],))
+                con.commit()
+            sources, lines, error = discover_target(con, target, watches, max_links)
+            con.commit()
+            return {
+                "target": target,
+                "sources": sources,
+                "lines": lines,
+                "error": error,
+                "failed": False,
+            }
+        except Exception as exc:
+            con.rollback()
+            con.execute(
+                "update restaurant_targets set status='error', last_error=?, last_checked_at=current_timestamp where id=?",
+                (str(exc), target["id"]),
+            )
+            con.commit()
+            return {
+                "target": target,
+                "sources": 0,
+                "lines": 0,
+                "error": str(exc),
+                "failed": True,
+            }
+
+
+def collect_saved_targets_parallel(
+    con,
+    rows,
+    watches,
+    max_links,
+    replace_existing,
+    workers,
+    run_id,
+    started_at,
+    targets_total,
+):
+    websites_checked = 0
+    wine_lists_found = 0
+    wine_lines_found = 0
+    errors = 0
+    total = len(rows)
+    targets = [dict(row) for row in rows]
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="wine-site") as executor:
+        futures = {
+            executor.submit(collect_saved_target, target, watches, max_links, replace_existing): target
+            for target in targets
+        }
+        for completed, future in enumerate(as_completed(futures), start=1):
+            result = future.result()
+            target = result["target"]
+            websites_checked += 1
+            wine_lists_found += result["sources"]
+            wine_lines_found += result["lines"]
+            if result["failed"] or result["error"]:
+                errors += 1
+            write_live_progress(
+                con,
+                runId=run_id,
+                phase="checking_saved_websites",
+                currentTarget=target.get("name", ""),
+                currentUrl=target.get("website_url") or "",
+                targetsCollected=targets_total,
+                processedTargets=completed,
+                websitesChecked=websites_checked,
+                totalWebsites=total,
+                wineListsFound=wine_lists_found,
+                wineLinesFound=wine_lines_found,
+                errors=errors,
+                message=(
+                    f"Checking saved restaurant websites with {workers} parallel workers."
+                ),
+                **timing_payload(started_at, completed, total),
+            )
+    return websites_checked, wine_lists_found, wine_lines_found, errors
 
 
 def write_watch_hits(con):
@@ -524,6 +609,12 @@ def main():
     parser.add_argument("--replace-existing", action="store_true", help="Replace saved wine-list sources and lines for each checked target.")
     parser.add_argument("--only-with-website", action="store_true", help="Only check targets that already have a saved website_url.")
     parser.add_argument("--sleep", type=float, default=0.18)
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "12"))),
+        help="Restaurant websites checked concurrently when Google Places is disabled.",
+    )
     args = parser.parse_args()
 
     guide.init_db()
@@ -598,6 +689,22 @@ def main():
             if google_enabled and not args.skip_google
             else "Checking saved restaurant websites only. Google Places is disabled for this run."
         )
+
+        work_total = len(rows)
+        if args.skip_google and args.workers > 1:
+            con.commit()
+            websites_checked, wine_lists_found, wine_lines_found, errors = collect_saved_targets_parallel(
+                con,
+                rows,
+                watches,
+                args.max_links,
+                args.replace_existing,
+                args.workers,
+                run_id,
+                started_at,
+                targets_total,
+            )
+            rows = []
 
         for index, row in enumerate(rows, start=1):
             target = dict(row)
@@ -726,7 +833,7 @@ def main():
                         "googleMissingWebsite": google_missing,
                         "googleEnabled": google_enabled and bool(api_key),
                         "googlePlacesRequests": google_budget,
-                        "durationSeconds": timing_payload(started_at, len(rows), len(rows), completed=True)["durationSeconds"],
+                        "durationSeconds": timing_payload(started_at, work_total, work_total, completed=True)["durationSeconds"],
                     },
                     ensure_ascii=False,
                 ),
@@ -739,14 +846,14 @@ def main():
             status="completed",
             phase="completed",
             targetsCollected=targets_total,
-            processedTargets=len(rows),
+            processedTargets=work_total,
             websitesChecked=websites_checked,
-            totalWebsites=len(rows),
+            totalWebsites=work_total,
             wineListsFound=wine_lists_found,
             wineLinesFound=wine_lines_found,
             errors=errors,
             message="Wine-list discovery completed.",
-            **timing_payload(started_at, len(rows), len(rows), completed=True),
+            **timing_payload(started_at, work_total, work_total, completed=True),
         )
         export_status(con, run_id, watch_hits)
         result_payload = {}

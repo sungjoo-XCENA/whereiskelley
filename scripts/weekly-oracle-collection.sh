@@ -34,4 +34,5 @@ printf '%s\n' "$now_epoch" > "$LAST_START_FILE"
 
 exec "$PYTHON_BIN" scripts/run_published_wine_collection.py \
   --max-links "${WHEREISKELLEY_DISCOVERY_MAX_LINKS:-60}" \
+  --workers "${WHEREISKELLEY_DISCOVERY_WORKERS:-12}" \
   --sleep "${WHEREISKELLEY_DISCOVERY_SLEEP:-0.08}"

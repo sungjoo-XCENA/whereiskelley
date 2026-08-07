@@ -6,6 +6,8 @@ import re
 import sqlite3
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import ssl
 import unicodedata
@@ -195,6 +197,8 @@ CURRENCY_RE = r"HK\$|SG\$|S\$|A\$|C\$|US\$|\u20ac|\$|\u00a3|\u00a5|\u20a9|(?<![A
 MAX_DISCOVERY_FETCHES = int(os.environ.get("WHEREISKELLEY_MAX_DISCOVERY_FETCHES", "60"))
 MAX_DISCOVERY_DEPTH = int(os.environ.get("WHEREISKELLEY_MAX_DISCOVERY_DEPTH", "5"))
 MAX_WEAK_DISCOVERY_FETCHES = int(os.environ.get("WHEREISKELLEY_MAX_WEAK_DISCOVERY_FETCHES", "60"))
+PDF_EXTRACTION_SLOTS = max(1, int(os.environ.get("WHEREISKELLEY_PDF_EXTRACTION_SLOTS", "2")))
+PDF_EXTRACTION_SEMAPHORE = threading.BoundedSemaphore(PDF_EXTRACTION_SLOTS)
 STRONG_LINK_SCORE = 70
 CURRENCY_ALIASES = {
     "HK$": "HKD",
@@ -289,6 +293,7 @@ def write_progress(**payload):
 def connect():
     con = sqlite3.connect(str(DB_PATH), timeout=30)
     con.row_factory = sqlite3.Row
+    con.execute("pragma busy_timeout = 60000")
     con.execute("pragma foreign_keys = on")
     return con
 
@@ -1185,10 +1190,19 @@ def scan_wine_source(con, target, url, watches, link_score=0):
         content, content_type = fetch_text(url, timeout=6)
         source_type = "pdf" if isinstance(content, bytes) and content.lstrip().startswith(b"%PDF") else "html"
         if source_type == "pdf":
-            temp = DATA_DIR / "_temp.pdf"
             DATA_DIR.mkdir(parents=True, exist_ok=True)
-            temp.write_bytes(content)
-            text = pdf_text(temp)
+            temp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    prefix="wine-source-", suffix=".pdf", dir=DATA_DIR, delete=False
+                ) as temp:
+                    temp.write(content)
+                    temp_path = Path(temp.name)
+                with PDF_EXTRACTION_SEMAPHORE:
+                    text = pdf_text(temp_path)
+            finally:
+                if temp_path:
+                    temp_path.unlink(missing_ok=True)
         else:
             text = html_to_lines(content)
             if link_score >= 80:

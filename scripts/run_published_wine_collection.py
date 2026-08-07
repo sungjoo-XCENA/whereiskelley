@@ -85,6 +85,7 @@ def main():
     parser.add_argument("--max-links", type=int, default=60)
     parser.add_argument("--max-targets", type=int, default=0)
     parser.add_argument("--sleep", default="0.08")
+    parser.add_argument("--workers", type=int, default=12)
     args = parser.parse_args()
 
     live_path = live_db_path().resolve()
@@ -114,6 +115,8 @@ def main():
         str(args.max_links),
         "--sleep",
         str(args.sleep),
+        "--workers",
+        str(max(1, args.workers)),
     ]
     if args.max_targets > 0:
         command.extend(["--max-targets", str(args.max_targets)])
