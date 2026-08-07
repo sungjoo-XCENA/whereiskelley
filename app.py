@@ -339,6 +339,7 @@ def guide_collection_status():
         "mapTargets": [],
         "recentErrors": [],
         "latestRuns": [],
+        "lastCollection": None,
     }
     if not DB_PATH.exists():
         return payload
@@ -515,6 +516,18 @@ def guide_collection_status():
                 """
             )
         ]
+        last_collection = con.execute(
+            """
+            select id, status, started_at, finished_at, target_count, websites_checked,
+                   wine_lists_found, wine_lines_found, watch_hits, errors, notes
+            from guide_collection_runs
+            where status = 'completed' and finished_at is not null
+            order by finished_at desc, id desc
+            limit 1
+            """
+        ).fetchone()
+        if last_collection:
+            payload["lastCollection"] = row_to_dict(last_collection)
     payload["progress"]["dbCounts"] = {
         "targets": int(payload["counts"].get("targets") or 0),
         "withWebsite": int(payload["counts"].get("withWebsite") or 0),

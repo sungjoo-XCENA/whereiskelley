@@ -340,3 +340,21 @@ The deploy script refuses to run while collection is active. It backs up
 `origin/main`, restores the runtime data, restarts `whereiskelley.service`, and
 checks the local health endpoint. Backups are stored under
 `/home/opc/whereiskelley-backups`.
+
+### Weekly Oracle collection
+
+Install the server timer once after deployment:
+
+```bash
+cd /home/opc/whereiskelley
+bash scripts/install-weekly-oracle-timer.sh
+```
+
+The timer starts a full saved-website recollection every Monday at 03:00 KST.
+It does not use Google Places, and it skips the scheduled run when a manual or
+Dashboard collection is already active. Check the schedule and recent logs with:
+
+```bash
+systemctl list-timers whereiskelley-weekly.timer
+journalctl -u whereiskelley-weekly.service -n 100 --no-pager
+```
