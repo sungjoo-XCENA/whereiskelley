@@ -215,6 +215,12 @@ CURRENCY_ALIASES = {
 }
 
 
+def configure_pdf_extraction_slots(slots):
+    global PDF_EXTRACTION_SLOTS, PDF_EXTRACTION_SEMAPHORE
+    PDF_EXTRACTION_SLOTS = max(1, int(slots or 1))
+    PDF_EXTRACTION_SEMAPHORE = threading.BoundedSemaphore(PDF_EXTRACTION_SLOTS)
+
+
 def fold_text(value):
     normalized = unicodedata.normalize("NFKD", str(value or ""))
     return normalized.encode("ascii", "ignore").decode("ascii").lower()

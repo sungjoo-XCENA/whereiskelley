@@ -86,6 +86,12 @@ def main():
     parser.add_argument("--max-targets", type=int, default=0)
     parser.add_argument("--sleep", default="0.08")
     parser.add_argument("--workers", type=int, default=24)
+    parser.add_argument("--source-workers", type=int, default=12)
+    parser.add_argument(
+        "--pdf-workers",
+        type=int,
+        default=max(1, round((os.cpu_count() or 2) * 0.8)),
+    )
     args = parser.parse_args()
 
     live_path = live_db_path().resolve()
@@ -117,6 +123,10 @@ def main():
         str(args.sleep),
         "--workers",
         str(max(1, args.workers)),
+        "--source-workers",
+        str(max(1, args.source_workers)),
+        "--pdf-workers",
+        str(max(1, args.pdf_workers)),
     ]
     if args.max_targets > 0:
         command.extend(["--max-targets", str(args.max_targets)])

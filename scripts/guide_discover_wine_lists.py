@@ -274,36 +274,68 @@ def discover_target(con, target, watches, max_links):
     return sources, lines, last_error or ""
 
 
-def collect_saved_target(target, watches, max_links, replace_existing):
-    with guide.connect() as con:
-        try:
-            if replace_existing:
-                con.execute("delete from guide_wine_entries where target_id=?", (target["id"],))
-                con.execute("delete from wine_list_sources where target_id=?", (target["id"],))
-                con.commit()
-            sources, lines, error = discover_target(con, target, watches, max_links)
-            con.commit()
-            return {
-                "target": target,
-                "sources": sources,
-                "lines": lines,
-                "error": error,
-                "failed": False,
-            }
-        except Exception as exc:
-            con.rollback()
-            con.execute(
-                "update restaurant_targets set status='error', last_error=?, last_checked_at=current_timestamp where id=?",
-                (str(exc), target["id"]),
+def discover_saved_target(target, max_links):
+    """Crawl one website without downloading or parsing candidate sources."""
+    try:
+        content, _content_type = guide.fetch_text(target["website_url"], timeout=6)
+        if not isinstance(content, str):
+            raise RuntimeError("Official website returned binary content.")
+        links, crawl_stats = guide.discover_candidate_wine_links(
+            target["website_url"],
+            content,
+            max_pages=guide.MAX_DISCOVERY_FETCHES,
+            max_depth=guide.MAX_DISCOVERY_DEPTH,
+            return_stats=True,
+        )
+        candidates = []
+        seen = set()
+        for link in links:
+            parsed = urlparse(link["url"])
+            if parsed.scheme not in {"http", "https"}:
+                continue
+            url = link["url"].split("#", 1)[0]
+            if url in seen:
+                continue
+            seen.add(url)
+            candidates.append(
+                {"url": url, "text": link.get("text", ""), "score": link.get("score", 0)}
             )
-            con.commit()
-            return {
-                "target": target,
-                "sources": 0,
-                "lines": 0,
-                "error": str(exc),
-                "failed": True,
-            }
+        return {
+            "target": target,
+            "candidates": candidates[:max_links],
+            "crawl_limit_reached": bool(crawl_stats.get("fetchLimitReached")),
+            "error": "",
+            "failed": False,
+        }
+    except Exception as exc:
+        return {
+            "target": target,
+            "candidates": [],
+            "crawl_limit_reached": False,
+            "error": str(exc),
+            "failed": True,
+        }
+
+
+def scan_saved_source(target, link, watches):
+    """Download and validate one candidate in a short-lived DB transaction."""
+    with guide.connect() as con:
+        found, count, error, needs_review = guide.scan_wine_source(
+            con, target, link["url"], watches, link.get("score", 0)
+        )
+        con.commit()
+    return {
+        "target": target,
+        "link": link,
+        "sources": found,
+        "lines": count,
+        "error": error,
+        "needs_review": needs_review,
+    }
+
+
+def candidate_is_pdf(link):
+    return urlparse(link.get("url") or "").path.lower().endswith(".pdf")
 
 
 def collect_saved_targets_parallel(
@@ -313,6 +345,8 @@ def collect_saved_targets_parallel(
     max_links,
     replace_existing,
     workers,
+    source_workers,
+    pdf_workers,
     run_id,
     started_at,
     targets_total,
@@ -323,38 +357,161 @@ def collect_saved_targets_parallel(
     errors = 0
     total = len(rows)
     targets = [dict(row) for row in rows]
+
+    if replace_existing:
+        target_ids = [(target["id"],) for target in targets]
+        con.executemany("delete from guide_wine_entries where target_id=?", target_ids)
+        con.executemany("delete from wine_list_sources where target_id=?", target_ids)
+        con.commit()
+
+    states = {}
+    html_jobs = []
+    pdf_jobs = []
+    finalized = 0
+    error_targets = set()
+
+    # Phase 1: use the large network pool only for crawling restaurant sites.
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="wine-site") as executor:
         futures = {
-            executor.submit(collect_saved_target, target, watches, max_links, replace_existing): target
+            executor.submit(discover_saved_target, target, max_links): target
             for target in targets
         }
         for completed, future in enumerate(as_completed(futures), start=1):
             result = future.result()
             target = result["target"]
             websites_checked += 1
-            wine_lists_found += result["sources"]
-            wine_lines_found += result["lines"]
-            if result["failed"] or result["error"]:
-                errors += 1
+            state = {
+                "target": target,
+                "sources": 0,
+                "lines": 0,
+                "remaining": len(result["candidates"]),
+                "needs_review": result["crawl_limit_reached"],
+                "review_reasons": [],
+            }
+            states[target["id"]] = state
+            if result["failed"]:
+                state["needs_review"] = True
+                state["review_reasons"].append(result["error"])
+                error_targets.add(target["id"])
+            for link in result["candidates"]:
+                job = (target, link)
+                (pdf_jobs if candidate_is_pdf(link) else html_jobs).append(job)
+            if not result["candidates"]:
+                status = "error" if result["failed"] else (
+                    "review" if state["needs_review"] else "no_wine_list"
+                )
+                con.execute(
+                    "update restaurant_targets set status=?, last_error=?, last_checked_at=current_timestamp where id=?",
+                    (status, result["error"] or None, target["id"]),
+                )
+                finalized += 1
+                con.commit()
+            timing = timing_payload(started_at, completed, max(1, total * 2))
             write_live_progress(
                 con,
                 runId=run_id,
-                phase="checking_saved_websites",
+                phase="discovering_wine_sources",
                 currentTarget=target.get("name", ""),
                 currentUrl=target.get("website_url") or "",
                 targetsCollected=targets_total,
-                processedTargets=completed,
+                processedTargets=finalized,
                 websitesChecked=websites_checked,
                 totalWebsites=total,
                 wineListsFound=wine_lists_found,
                 wineLinesFound=wine_lines_found,
-                errors=errors,
+                errors=len(error_targets),
+                discoveryProcessed=completed,
+                discoveryTotal=total,
+                sourceCandidatesProcessed=0,
+                sourceCandidatesTotal=0,
                 message=(
-                    f"Checking saved restaurant websites with {workers} parallel workers."
+                    f"Discovering wine-list links with {workers} parallel workers. "
+                    "PDF extraction is deferred."
                 ),
-                **timing_payload(started_at, completed, total),
+                **timing,
             )
-    return websites_checked, wine_lists_found, wine_lines_found, errors
+
+    source_total = len(html_jobs) + len(pdf_jobs)
+    source_completed = 0
+
+    def finalize_target(state):
+        nonlocal finalized
+        status = "found" if state["sources"] else (
+            "review" if state["needs_review"] else "no_wine_list"
+        )
+        last_error = None
+        if status == "review":
+            last_error = "; ".join(dict.fromkeys(state["review_reasons"][:3])) or None
+        con.execute(
+            "update restaurant_targets set status=?, last_error=?, last_checked_at=current_timestamp where id=?",
+            (status, last_error, state["target"]["id"]),
+        )
+        finalized += 1
+
+    def run_source_phase(jobs, phase_workers, phase, label):
+        nonlocal source_completed, wine_lists_found, wine_lines_found
+        if not jobs:
+            return
+        with ThreadPoolExecutor(max_workers=phase_workers, thread_name_prefix=phase) as executor:
+            futures = {
+                executor.submit(scan_saved_source, target, link, watches): (target, link)
+                for target, link in jobs
+            }
+            for future in as_completed(futures):
+                target, link = futures[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    result = {
+                        "target": target,
+                        "link": link,
+                        "sources": 0,
+                        "lines": 0,
+                        "error": str(exc),
+                        "needs_review": True,
+                    }
+                state = states[target["id"]]
+                state["sources"] += result["sources"]
+                state["lines"] += result["lines"]
+                state["remaining"] -= 1
+                state["needs_review"] = state["needs_review"] or result["needs_review"]
+                if result["error"] and result["needs_review"]:
+                    state["review_reasons"].append(result["error"])
+                    error_targets.add(target["id"])
+                wine_lists_found += result["sources"]
+                wine_lines_found += result["lines"]
+                source_completed += 1
+                if state["remaining"] == 0:
+                    finalize_target(state)
+                con.commit()
+                pipeline_total = total + source_total
+                timing = timing_payload(started_at, total + source_completed, pipeline_total)
+                write_live_progress(
+                    con,
+                    runId=run_id,
+                    phase=phase,
+                    currentTarget=target.get("name", ""),
+                    currentUrl=link.get("url") or "",
+                    targetsCollected=targets_total,
+                    processedTargets=finalized,
+                    websitesChecked=websites_checked,
+                    totalWebsites=total,
+                    wineListsFound=wine_lists_found,
+                    wineLinesFound=wine_lines_found,
+                    errors=len(error_targets),
+                    discoveryProcessed=total,
+                    discoveryTotal=total,
+                    sourceCandidatesProcessed=source_completed,
+                    sourceCandidatesTotal=source_total,
+                    message=f"{label} with {phase_workers} parallel workers.",
+                    **timing,
+                )
+
+    # Phase 2 handles ordinary HTML candidates. Phase 3 performs the expensive
+    # PDF downloads and text extraction only after website discovery is done.
+    run_source_phase(html_jobs, source_workers, "validating_html_sources", "Validating HTML wine-list candidates")
+    run_source_phase(pdf_jobs, pdf_workers, "extracting_pdf_sources", "Extracting PDF wine-list candidates")
+    return websites_checked, wine_lists_found, wine_lines_found, len(error_targets)
 
 
 def write_watch_hits(con):
@@ -588,6 +745,7 @@ def export_status(con, run_id, watch_hits=0):
 
 
 def main():
+    default_pdf_workers = max(1, round((os.cpu_count() or 2) * 0.8))
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-targets", type=int, default=0, help="0 means all restaurant targets.")
     parser.add_argument(
@@ -613,9 +771,22 @@ def main():
         "--workers",
         type=int,
         default=max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "24"))),
-        help="Restaurant websites checked concurrently when Google Places is disabled.",
+        help="Restaurant websites crawled concurrently when Google Places is disabled.",
+    )
+    parser.add_argument(
+        "--source-workers",
+        type=int,
+        default=max(1, int(os.environ.get("WHEREISKELLEY_SOURCE_WORKERS", "12"))),
+        help="HTML wine-list candidates validated concurrently after discovery.",
+    )
+    parser.add_argument(
+        "--pdf-workers",
+        type=int,
+        default=max(1, int(os.environ.get("WHEREISKELLEY_PDF_WORKERS", str(default_pdf_workers)))),
+        help="PDF candidates extracted concurrently after HTML validation.",
     )
     args = parser.parse_args()
+    guide.configure_pdf_extraction_slots(args.pdf_workers)
 
     guide.init_db()
     google_enabled = (
@@ -700,6 +871,8 @@ def main():
                 args.max_links,
                 args.replace_existing,
                 args.workers,
+                args.source_workers,
+                args.pdf_workers,
                 run_id,
                 started_at,
                 targets_total,
