@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from publish_guide_snapshot import publish_guide_snapshot
+from resource_monitor import monitor_process
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -142,14 +143,15 @@ def main():
     if args.max_targets > 0:
         command.extend(["--max-targets", str(args.max_targets)])
 
-    completed = subprocess.run(command, cwd=ROOT, env=env, check=False)
-    if completed.returncode != 0:
+    process = subprocess.Popen(command, cwd=ROOT, env=env)
+    return_code = monitor_process(process)
+    if return_code != 0:
         update_progress(
             status="failed",
             phase="collection_failed",
-            message=collection_failure_message(completed.returncode),
+            message=collection_failure_message(return_code),
         )
-        return completed.returncode
+        return return_code
 
     if args.max_targets > 0:
         remove_sqlite_files(staging_path)
