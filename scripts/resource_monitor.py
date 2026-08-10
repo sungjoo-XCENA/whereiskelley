@@ -65,13 +65,44 @@ def process_usage(pid):
     if not pid:
         return None, 0
     try:
-        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split()
-        ticks = int(stat[13]) + int(stat[14])
+        stat_text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+        stat = stat_text[stat_text.rfind(")") + 2 :].split()
+        # Include CPU from children that this process has already reaped.
+        ticks = sum(int(stat[index]) for index in (11, 12, 13, 14))
         status = Path(f"/proc/{pid}/status").read_text(encoding="utf-8").splitlines()
         rss_kb = next(int(line.split()[1]) for line in status if line.startswith("VmRSS:"))
         return ticks, rss_kb * 1024
     except (OSError, ValueError, StopIteration, IndexError):
         return None, 0
+
+
+def process_children(pid):
+    try:
+        value = Path(f"/proc/{pid}/task/{pid}/children").read_text(encoding="utf-8").strip()
+        return [int(child) for child in value.split()] if value else []
+    except (OSError, ValueError):
+        return []
+
+
+def process_tree_usage(pid):
+    """Return cumulative CPU ticks and RSS for a process and its live descendants."""
+    pending = [pid] if pid else []
+    visited = set()
+    total_ticks = 0
+    total_rss = 0
+    found = False
+    while pending:
+        current = pending.pop()
+        if current in visited:
+            continue
+        visited.add(current)
+        ticks, rss = process_usage(current)
+        if ticks is not None:
+            total_ticks += ticks
+            total_rss += rss
+            found = True
+        pending.extend(process_children(current))
+    return (total_ticks if found else None), total_rss
 
 
 def process_cpu_percent(previous, current, elapsed_seconds, cores):
@@ -112,14 +143,14 @@ def monitor_process(process, history_path=HISTORY_PATH, progress_path=PROGRESS_P
     pid = process.pid
     cores = max(1, os.cpu_count() or 1)
     previous_cpu = read_cpu_totals()
-    previous_process_ticks, _rss = process_usage(pid)
+    previous_process_ticks, _rss = process_tree_usage(pid)
     previous_at = time.monotonic()
 
     while True:
         return_code = process.poll()
         now_monotonic = time.monotonic()
         current_cpu = read_cpu_totals()
-        current_process_ticks, process_rss = process_usage(pid)
+        current_process_ticks, process_rss = process_tree_usage(pid)
         memory_total, memory_used = memory_usage()
         disk_total, disk_used, disk_free = shutil.disk_usage(ROOT)
         elapsed = max(0.001, now_monotonic - previous_at)
@@ -131,6 +162,12 @@ def monitor_process(process, history_path=HISTORY_PATH, progress_path=PROGRESS_P
         sample = {
             "at": utc_now(),
             "phase": progress.get("phase") or "",
+            "phaseProcessed": progress.get("phaseProcessed"),
+            "phaseTotal": progress.get("phaseTotal"),
+            "sourceCandidatesProcessed": progress.get("sourceCandidatesProcessed"),
+            "sourceCandidatesTotal": progress.get("sourceCandidatesTotal"),
+            "restaurantsFinalized": progress.get("processedTargets"),
+            "restaurantsTotal": progress.get("totalWebsites"),
             "cpuPercent": cpu_percent(previous_cpu, current_cpu),
             "collectorCpuPercent": process_cpu_percent(
                 previous_process_ticks, current_process_ticks, elapsed, cores

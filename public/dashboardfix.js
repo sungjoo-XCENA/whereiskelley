@@ -478,6 +478,40 @@
     return samples.length ? samples[samples.length - 1] : {};
   }
 
+  function recentPhaseEta(payload, progress) {
+    const allSamples = Array.isArray(payload?.resourceHistory?.samples)
+      ? payload.resourceHistory.samples
+      : [];
+    const phase = progress.phase || "";
+    const samples = allSamples
+      .filter((sample) => !phase || sample.phase === phase)
+      .slice(-30)
+      .map((sample) => {
+        const phaseTotal = number(sample.phaseTotal);
+        return {
+          at: new Date(String(sample.at || "").replace("+00:00", "Z")).getTime(),
+          processed: phaseTotal > 0 ? number(sample.phaseProcessed) : number(sample.sourceCandidatesProcessed),
+          total: phaseTotal > 0 ? phaseTotal : number(sample.sourceCandidatesTotal)
+        };
+      })
+      .filter((sample) => Number.isFinite(sample.at) && sample.total > 0);
+    if (samples.length < 2) return null;
+
+    const latest = samples[samples.length - 1];
+    const earliest = samples.find((sample) => sample.processed < latest.processed);
+    if (!earliest) return null;
+    const elapsedSeconds = (latest.at - earliest.at) / 1000;
+    const completed = latest.processed - earliest.processed;
+    if (elapsedSeconds <= 0 || completed <= 0) return null;
+
+    const seconds = Math.round((latest.total - latest.processed) / (completed / elapsedSeconds));
+    if (!Number.isFinite(seconds) || seconds < 0) return null;
+    return {
+      seconds,
+      finishAt: new Date(Date.now() + (seconds * 1000)).toISOString()
+    };
+  }
+
   function seriesPoints(samples, key, width = 600, height = 126) {
     if (!samples.length) return "";
     const left = 34;
@@ -543,7 +577,7 @@
             { key: "cpuPercent", color: "#b0123f" },
             { key: "collectorCpuPercent", color: "#2563eb" }
           ])}
-          <div class="resource-legend"><span><i style="--series:#b0123f"></i>Server</span><span><i style="--series:#2563eb"></i>Collector</span></div>
+          <div class="resource-legend"><span><i style="--series:#b0123f"></i>Server</span><span><i style="--series:#2563eb"></i>Collector + PDF workers</span></div>
         </article>
         <article class="resource-card">
           <div class="resource-card-head"><div><span>Memory</span><b>${html(memory)}</b></div><small>${html(formatBytes(latest.memoryUsedBytes))} / ${html(formatBytes(latest.memoryTotalBytes))}<br>Collector ${html(formatBytes(latest.collectorMemoryBytes))}</small></div>
@@ -698,12 +732,23 @@
     const completed = !running && (progress.status === "completed" || latestRun.status === "completed");
     const summaryTotal = number(summary.totalTargets || counts.targets || latestRun.target_count);
     const summaryChecked = number(summary.checkedTargets || latestRun.websites_checked);
-    const rawProcessed = number(progress.processedTargets ?? progress.websitesChecked ?? latestRun.websites_checked);
-    const rawTotal = number(progress.totalWebsites || summary.totalTargets || counts.targets || latestRun.target_count);
+    const restaurantFinalized = number(progress.processedTargets ?? progress.websitesChecked ?? latestRun.websites_checked);
+    const restaurantTotal = number(progress.totalWebsites || summary.totalTargets || counts.targets || latestRun.target_count);
+    const phaseProcessed = number(progress.phaseProcessed);
+    const phaseTotal = number(progress.phaseTotal);
+    const pipelineProcessed = number(progress.sourceCandidatesProcessed);
+    const pipelineTotal = number(progress.sourceCandidatesTotal);
+    const hasPhaseWork = running && phaseTotal > 0;
+    const hasPipelineWork = running && !hasPhaseWork && pipelineTotal > 0;
+    const rawProcessed = hasPhaseWork ? phaseProcessed : hasPipelineWork ? pipelineProcessed : restaurantFinalized;
+    const rawTotal = hasPhaseWork ? phaseTotal : hasPipelineWork ? pipelineTotal : restaurantTotal;
     const useSummaryProgress = !running && completed && summaryTotal && summaryChecked && (!rawTotal || rawTotal < summaryTotal);
     const processed = useSummaryProgress ? summaryChecked : rawProcessed;
     const total = useSummaryProgress ? summaryTotal : rawTotal;
-    const percent = total ? Math.min(100, Math.max(0, useSummaryProgress ? ((processed / total) * 100) : number(progress.progressPercent || ((processed / total) * 100)))) : 0;
+    const reportedPercent = hasPhaseWork
+      ? number(progress.phaseProgressPercent)
+      : number(progress.progressPercent);
+    const percent = total ? Math.min(100, Math.max(0, useSummaryProgress ? ((processed / total) * 100) : (reportedPercent || ((processed / total) * 100)))) : 0;
     return {
       progress,
       counts,
@@ -714,6 +759,9 @@
       processed,
       total,
       remaining: total ? Math.max(0, total - processed) : 0,
+      restaurantFinalized,
+      restaurantTotal,
+      workLabel: hasPhaseWork ? "Current phase" : hasPipelineWork ? "Pipeline items" : "Restaurants",
       percent,
       elapsed: progress.elapsedSeconds ?? secondsBetween(progress.startedAt || latestRun.started_at, progress.finishedAt || latestRun.finished_at),
       duration: progress.durationSeconds ?? secondsBetween(progress.startedAt || latestRun.started_at, progress.finishedAt || latestRun.finished_at),
@@ -1046,8 +1094,22 @@
     const errorCount = number(summary.errors || values.progress.errors);
     const lastCollectionAt = payload.lastCollection?.finished_at || "";
     const lastCollectionText = lastCollectionAt ? formatTime(lastCollectionAt) : "No completed collection yet";
+    const hasPhaseEta = progress.phaseEstimatedRemainingSeconds !== undefined
+      && progress.phaseEstimatedRemainingSeconds !== null;
+    const recentEta = hasPhaseEta ? null : recentPhaseEta(payload, progress);
+    const etaSeconds = hasPhaseEta
+      ? progress.phaseEstimatedRemainingSeconds
+      : recentEta?.seconds ?? progress.estimatedRemainingSeconds;
+    const etaFinishAt = hasPhaseEta
+      ? progress.phaseEstimatedFinishAt
+      : recentEta?.finishAt || progress.estimatedFinishAt;
+    const etaLabel = hasPhaseEta
+      ? "Current phase ETA"
+      : recentEta
+        ? "Recent-rate ETA"
+        : "Rough pipeline ETA";
     const etaText = values.running
-      ? `${formatDuration(progress.estimatedRemainingSeconds)}${progress.estimatedFinishAt ? ` / ${formatTime(progress.estimatedFinishAt)}` : ""}`
+      ? `${formatDuration(etaSeconds)}${etaFinishAt ? ` / ${formatTime(etaFinishAt)}` : ""}`
       : formatDuration(values.duration);
     const collectionText = values.running
       ? "The local PC collector is running now."
@@ -1055,7 +1117,7 @@
         ? "The local PC collector stopped reporting progress."
         : "No background collection is running right now.";
     const progressTitle = values.running
-      ? "Collecting restaurant wine lists"
+      ? phaseLabel(progress.phase)
       : values.stopped
         ? "Collection stopped"
         : "Collection status";
@@ -1076,10 +1138,21 @@
       errorCount,
       lastCollectionText,
       etaText,
+      etaLabel,
       collectionText,
       progressTitle,
       progressPillClass
     };
+  }
+
+  function phaseLabel(value) {
+    const labels = {
+      discovering_wine_sources: "Discovering wine-list links",
+      validating_html_sources: "Validating HTML wine-list sources",
+      extracting_pdf_sources: "Extracting PDF wine-list sources",
+      publishing: "Publishing completed database"
+    };
+    return labels[value] || "Collecting restaurant wine lists";
   }
 
   function renderDatabase() {
@@ -1134,6 +1207,7 @@
       errorCount,
       lastCollectionText,
       etaText,
+      etaLabel,
       collectionText,
       progressTitle,
       progressPillClass
@@ -1141,7 +1215,7 @@
 
     const cardsHtml = `<div class="dashboard-grid" data-dashboard-section="cards">
       <div class="dashboard-card"><span>Collection</span><b>${html(values.status)}</b><small>${html(collectionText)}<br>DB updated ${html(lastCollectionText)}<br>Every other Monday 03:00 KST</small></div>
-      <div class="dashboard-card"><span>Progress</span><b>${html(values.percent.toFixed(1))}%</b><small>${html(fmtInt(values.processed))} checked / ${html(fmtInt(values.remaining))} left / ${html(fmtInt(values.total))} total</small></div>
+      <div class="dashboard-card"><span>${html(values.running ? values.workLabel : "Progress")}</span><b>${html(values.percent.toFixed(1))}%</b><small>${html(values.workLabel)}: ${html(fmtInt(values.processed))} / ${html(fmtInt(values.total))}<br>${html(fmtInt(values.restaurantFinalized))} / ${html(fmtInt(values.restaurantTotal))} restaurants finalized</small></div>
       <div class="dashboard-card"><span>Verified wine lists</span><b>${html(fmtInt(found))}</b><small>${html(fmtInt(parsedSources))} exact list sources, ${html(fmtInt(savedLines))} saved wine lines.</small></div>
       <div class="dashboard-card"><span>Needs review</span><b>${html(fmtInt(number(summary.needsReview)))}</b><small>${html(fmtInt(reviewSources))} inconclusive sources / ${html(fmtInt(errorCount))} restaurant errors.</small></div>
     </div>`;
@@ -1162,10 +1236,10 @@
       </div>
       <div class="dash-progress" style="--dash-progress:${html(values.percent)}%"><i></i></div>
       <div class="collection-metrics">
-        <div class="metric-box"><span>Checked</span><b>${html(fmtInt(values.processed))} / ${html(fmtInt(values.total))}</b></div>
-        <div class="metric-box"><span>Remaining</span><b>${html(fmtInt(values.remaining))}</b></div>
+        <div class="metric-box"><span>${html(values.workLabel)}</span><b>${html(fmtInt(values.processed))} / ${html(fmtInt(values.total))}</b></div>
+        <div class="metric-box"><span>Restaurants finalized</span><b>${html(fmtInt(values.restaurantFinalized))} / ${html(fmtInt(values.restaurantTotal))}</b></div>
         <div class="metric-box"><span>Elapsed</span><b>${html(formatDuration(values.elapsed))}</b></div>
-        <div class="metric-box"><span>${values.running ? "ETA" : "Total time"}</span><b>${html(etaText)}</b></div>
+        <div class="metric-box"><span>${values.running ? etaLabel : "Total time"}</span><b>${html(etaText)}</b></div>
         <div class="metric-box"><span>Current restaurant</span><b>${html(progress.currentTarget || "-")}</b></div>
         <div class="metric-box"><span>Errors</span><b>${html(fmtInt(errorCount))}</b></div>
       </div>

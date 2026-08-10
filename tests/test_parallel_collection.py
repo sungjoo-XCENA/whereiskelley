@@ -68,6 +68,20 @@ class ParallelCollectionTests(unittest.TestCase):
         self.assertLessEqual(state["peak"], 12)
         self.assertTrue(state["pdf_started_after_html"])
 
+    def test_phase_eta_uses_recent_phase_throughput(self):
+        with mock.patch.object(discover.time, "time", return_value=200.0):
+            payload = discover.phase_timing_payload(
+                100.0,
+                completed=50,
+                total=100,
+                samples=[(180.0, 30), (200.0, 50)],
+            )
+
+        self.assertEqual(payload["phaseProcessed"], 50)
+        self.assertEqual(payload["phaseTotal"], 100)
+        self.assertEqual(payload["phaseEstimatedRemainingSeconds"], 50)
+        self.assertEqual(payload["phaseThroughputPerMinute"], 60.0)
+
 
 if __name__ == "__main__":
     unittest.main()

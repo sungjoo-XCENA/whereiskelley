@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -406,7 +407,14 @@ def collect_saved_targets_parallel(
                 )
                 finalized += 1
                 con.commit()
-            timing = timing_payload(started_at, completed, max(1, total * 2))
+            timing = timing_payload(started_at, completed, total)
+            timing.update(
+                phase_timing_payload(
+                    time.time() - max(0, timing["elapsedSeconds"]),
+                    completed,
+                    total,
+                )
+            )
             write_live_progress(
                 con,
                 runId=run_id,
@@ -452,6 +460,9 @@ def collect_saved_targets_parallel(
         nonlocal source_completed, wine_lists_found, wine_lines_found
         if not jobs:
             return
+        phase_started_epoch = time.time()
+        phase_completed = 0
+        phase_samples = deque(maxlen=500)
         with ThreadPoolExecutor(max_workers=phase_workers, thread_name_prefix=phase) as executor:
             futures = {
                 executor.submit(scan_saved_source, target, link, watches): (target, link)
@@ -481,11 +492,21 @@ def collect_saved_targets_parallel(
                 wine_lists_found += result["sources"]
                 wine_lines_found += result["lines"]
                 source_completed += 1
+                phase_completed += 1
+                phase_samples.append((time.time(), phase_completed))
                 if state["remaining"] == 0:
                     finalize_target(state)
                 con.commit()
                 pipeline_total = total + source_total
                 timing = timing_payload(started_at, total + source_completed, pipeline_total)
+                timing.update(
+                    phase_timing_payload(
+                        phase_started_epoch,
+                        phase_completed,
+                        len(jobs),
+                        phase_samples,
+                    )
+                )
                 write_live_progress(
                     con,
                     runId=run_id,
@@ -724,6 +745,49 @@ def timing_payload(started_at, checked=0, total=0, completed=False):
     else:
         payload["estimatedRemainingSeconds"] = None
         payload["estimatedFinishAt"] = ""
+    return payload
+
+
+def phase_timing_payload(started_epoch, completed=0, total=0, samples=None):
+    """Report ETA for the active phase using its recent completion rate."""
+    now_epoch = time.time()
+    elapsed = max(0, int(now_epoch - started_epoch))
+    completed = int(completed or 0)
+    total = int(total or 0)
+    payload = {
+        "phaseProcessed": completed,
+        "phaseTotal": total,
+        "phaseElapsedSeconds": elapsed,
+        "phaseProgressPercent": round((completed / total) * 100, 1) if total else 0,
+        "phaseEstimatedRemainingSeconds": None,
+        "phaseEstimatedFinishAt": "",
+        "phaseThroughputPerMinute": None,
+    }
+    if not total or completed >= total:
+        if total:
+            payload["phaseEstimatedRemainingSeconds"] = 0
+        return payload
+
+    rate = 0.0
+    history = list(samples or [])
+    if len(history) >= 2:
+        first_at, first_count = history[0]
+        last_at, last_count = history[-1]
+        window_elapsed = max(0.001, last_at - first_at)
+        window_completed = max(0, last_count - first_count)
+        if window_completed:
+            rate = window_completed / window_elapsed
+    if rate <= 0 and completed > 0 and elapsed > 0:
+        rate = completed / elapsed
+    if rate <= 0:
+        return payload
+
+    remaining = int((total - completed) / rate)
+    payload["phaseEstimatedRemainingSeconds"] = remaining
+    payload["phaseEstimatedFinishAt"] = time.strftime(
+        "%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(now_epoch + remaining)
+    )
+    payload["phaseThroughputPerMinute"] = round(rate * 60, 1)
     return payload
 
 
