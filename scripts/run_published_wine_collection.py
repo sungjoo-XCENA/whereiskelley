@@ -80,6 +80,21 @@ def update_progress(**changes):
     temp_path.replace(PROGRESS_PATH)
 
 
+def collection_failure_message(returncode):
+    guard_path = ROOT / "public" / "data" / "server-guard.json"
+    try:
+        guard = json.loads(guard_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        guard = {}
+    if guard.get("status") == "collection_paused":
+        used_pct = (guard.get("disk") or {}).get("usedPct")
+        suffix = f" ({used_pct}% used)" if used_pct is not None else ""
+        return f"Collection paused by the server disk guard{suffix}. The published database is unchanged."
+    if returncode < 0:
+        return f"Collection stopped by signal {-returncode}. The published database is unchanged."
+    return f"Collection failed with exit code {returncode}. The published database is unchanged."
+
+
 def main():
     parser = argparse.ArgumentParser(description="Collect into staging and publish only after success.")
     parser.add_argument("--max-links", type=int, default=60)
@@ -132,7 +147,7 @@ def main():
         update_progress(
             status="failed",
             phase="collection_failed",
-            message="Collection failed. The previously completed database is still active.",
+            message=collection_failure_message(completed.returncode),
         )
         return completed.returncode
 

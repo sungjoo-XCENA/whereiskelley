@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -6,7 +7,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-with sqlite3.connect(ROOT / "db" / "starwine.sqlite") as con:
+DB_PATH = Path(os.environ.get("WHEREISKELLEY_DB_PATH", "").strip() or ROOT / "db" / "starwine.sqlite")
+
+
+with sqlite3.connect(DB_PATH) as con:
     cur = con.cursor()
     payload = {
         "target_status": cur.execute(

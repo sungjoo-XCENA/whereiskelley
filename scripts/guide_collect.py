@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = ROOT / "db" / "schema.sql"
 DATA_DIR = ROOT / "data" / "guide"
 PUBLIC_DATA_DIR = ROOT / "public" / "data"
+PERSIST_SOURCE_FILES = os.environ.get("WHEREISKELLEY_PERSIST_GUIDE_SOURCE_FILES", "").strip() == "1"
 
 
 def resolve_db_path():
@@ -1116,16 +1117,20 @@ def html_to_lines(html):
 def save_wine_source(con, target, url, source_type, content, text, status="review", parser_status="review", line_count=0, error=""):
     target_id = target["id"]
     digest = hashlib.sha256(content if isinstance(content, bytes) else content.encode("utf-8", errors="ignore")).hexdigest()
-    stem = f"{target_id}-{digest[:12]}"
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    content_path = DATA_DIR / f"{stem}.{'pdf' if source_type == 'pdf' else 'html'}"
-    text_path = DATA_DIR / f"{stem}.txt"
-    mode = "wb" if isinstance(content, bytes) else "w"
-    if mode == "wb":
-        content_path.write_bytes(content)
-    else:
-        content_path.write_text(content, encoding="utf-8")
-    text_path.write_text(text or "", encoding="utf-8")
+    content_path_value = ""
+    text_path_value = ""
+    if PERSIST_SOURCE_FILES:
+        stem = f"{target_id}-{digest[:12]}"
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        content_path = DATA_DIR / f"{stem}.{'pdf' if source_type == 'pdf' else 'html'}"
+        text_path = DATA_DIR / f"{stem}.txt"
+        if isinstance(content, bytes):
+            content_path.write_bytes(content)
+        else:
+            content_path.write_text(content, encoding="utf-8")
+        text_path.write_text(text or "", encoding="utf-8")
+        content_path_value = str(content_path.relative_to(ROOT))
+        text_path_value = str(text_path.relative_to(ROOT))
     con.execute(
         """
         insert into wine_list_sources(
@@ -1149,8 +1154,8 @@ def save_wine_source(con, target, url, source_type, content, text, status="revie
             url,
             source_type,
             status,
-            str(content_path.relative_to(ROOT)),
-            str(text_path.relative_to(ROOT)),
+            content_path_value,
+            text_path_value,
             digest,
             parser_status,
             line_count,
@@ -1196,12 +1201,9 @@ def scan_wine_source(con, target, url, watches, link_score=0):
         content, content_type = fetch_text(url, timeout=6)
         source_type = "pdf" if isinstance(content, bytes) and content.lstrip().startswith(b"%PDF") else "html"
         if source_type == "pdf":
-            DATA_DIR.mkdir(parents=True, exist_ok=True)
             temp_path = None
             try:
-                with tempfile.NamedTemporaryFile(
-                    prefix="wine-source-", suffix=".pdf", dir=DATA_DIR, delete=False
-                ) as temp:
+                with tempfile.NamedTemporaryFile(prefix="wine-source-", suffix=".pdf", delete=False) as temp:
                     temp.write(content)
                     temp_path = Path(temp.name)
                 with PDF_EXTRACTION_SEMAPHORE:

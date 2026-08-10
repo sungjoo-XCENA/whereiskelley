@@ -1,4 +1,6 @@
 import sys
+import sqlite3
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -98,6 +100,49 @@ class WineDiscoveryTests(unittest.TestCase):
         self.assertEqual(result[0], 0)
         self.assertFalse(result[3])
         save_source.assert_not_called()
+
+    def test_source_metadata_is_saved_without_persistent_cache_files(self):
+        con = sqlite3.connect(":memory:")
+        con.row_factory = sqlite3.Row
+        con.execute(
+            """
+            create table wine_list_sources(
+              id integer primary key,
+              target_id integer,
+              url text,
+              source_type text,
+              status text,
+              content_path text,
+              text_path text,
+              checksum text,
+              discovered_at text default current_timestamp,
+              last_checked_at text,
+              parser_status text,
+              line_count integer,
+              last_error text,
+              unique(target_id, url)
+            )
+            """
+        )
+        with tempfile.TemporaryDirectory() as temp_dir, mock.patch.object(
+            guide, "DATA_DIR", Path(temp_dir)
+        ), mock.patch.object(guide, "PERSIST_SOURCE_FILES", False):
+            source_id = guide.save_wine_source(
+                con,
+                {"id": 9},
+                "https://example.com/wine-list.pdf",
+                "pdf",
+                b"%PDF test",
+                "2018 Domaine de la Romanee-Conti EUR 6500",
+                status="found",
+                parser_status="parsed",
+                line_count=1,
+            )
+            row = con.execute(
+                "select content_path, text_path from wine_list_sources where id=?", (source_id,)
+            ).fetchone()
+            self.assertEqual(dict(row), {"content_path": "", "text_path": ""})
+            self.assertEqual(list(Path(temp_dir).iterdir()), [])
 
 
 if __name__ == "__main__":
