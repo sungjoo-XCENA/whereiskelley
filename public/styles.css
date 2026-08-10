@@ -184,9 +184,39 @@ button:hover {
   background: var(--accent-dark);
 }
 
-.source-badge.collected {
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  margin-right: 6px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.source-badge.collected,
+.source-badge.db {
   background: #e8f6f3;
   color: #176f66;
+}
+
+.source-badge.live {
+  background: #fce7f3;
+  color: #9d174d;
+}
+
+.source-badge.both {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.integrated-search-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .primary-link {

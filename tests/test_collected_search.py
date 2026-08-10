@@ -51,6 +51,32 @@ def insert_guide_row(con, url, status="found", raw_text="2021 Romanee Conti Gran
     con.commit()
 
 
+def insert_star_wine_row(con, raw_text="2020 Romanee Conti Grand Cru 1200"):
+    con.execute("insert into countries(id, slug, name) values (1, 'france', 'France')")
+    con.execute(
+        """
+        insert into venues(id, slug, name, type, country_id, city, venue_url)
+        values (1, 'star-restaurant', 'Star Restaurant', 'Restaurant', 1, 'Paris',
+                'https://starwinelist.com/wine-place/star-restaurant')
+        """
+    )
+    con.execute(
+        """
+        insert into wine_lists(id, venue_id, starwine_list_id, label, download_url)
+        values (1, 1, 'star-list-1', 'Wine list', 'https://starwinelist.com/list.pdf')
+        """
+    )
+    con.execute(
+        """
+        insert into wine_entries(
+          id, wine_list_id, venue_id, raw_text, vintage, price_text, price_value, currency
+        ) values (1, 1, 1, ?, '2020', '1200', 1200, 'EUR')
+        """,
+        (raw_text,),
+    )
+    con.commit()
+
+
 class CollectedSearchTests(unittest.TestCase):
     def test_collected_result_is_availability_only_and_uses_exact_list_url(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -68,7 +94,7 @@ class CollectedSearchTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertTrue(results[0]["availabilityOnly"])
         self.assertIsNone(results[0]["priceValue"])
-        self.assertEqual(results[0]["source"], "Collected DB")
+        self.assertEqual(results[0]["source"], "Database")
         self.assertEqual(results[0]["wineList"]["downloadUrl"], "https://restaurant.example/wine-list")
 
     def test_review_source_is_not_returned_as_collected_match(self):
@@ -84,6 +110,26 @@ class CollectedSearchTests(unittest.TestCase):
             finally:
                 app.DB_PATH = previous_path
         self.assertEqual(results, [])
+
+    def test_search_combines_star_wine_and_database_results(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "search.sqlite"
+            con = create_db(db_path)
+            insert_star_wine_row(con)
+            insert_guide_row(con, "https://restaurant.example/wine-list")
+            con.close()
+            previous_path = app.DB_PATH
+            app.DB_PATH = db_path
+            try:
+                payload = app.search({"q": ["Romanee Conti"], "limit": ["100"]})
+            finally:
+                app.DB_PATH = previous_path
+
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual({result["source"] for result in payload["results"]}, {"Star Wine", "Database"})
+        database_result = next(result for result in payload["results"] if result["source"] == "Database")
+        self.assertTrue(database_result["availabilityOnly"])
+        self.assertIsNone(database_result["priceValue"])
 
 
 class PublishSnapshotTests(unittest.TestCase):

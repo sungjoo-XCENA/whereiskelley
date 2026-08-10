@@ -651,8 +651,8 @@
       document.querySelector(".app-header")?.insertAdjacentElement("afterend", nav);
     }
     nav.innerHTML = [
-      ["search", "Star Wine Search"],
-      ["database", "Database"],
+      ["search", "Wine Search"],
+      ["database", "Database Map"],
       ["collection", "Collection"]
     ].map(([key, label]) => `<button class="view-tab" type="button" data-view="${key}">${label}</button>`).join("");
     document.querySelector("#watchlistView")?.remove();
@@ -1085,43 +1085,13 @@
   function renderDatabase() {
     const root = ensureDataViews().databaseView;
     const metrics = guideMetrics(state.guidePayload || {});
-    const {
-      payload,
-      values,
-      summary,
-      mappedWithWebsite,
-      savedLines,
-      reviewSources,
-      found,
-      none,
-      pending,
-      lastCollectionText
-    } = metrics;
-
-    const summaryHtml = `<section class="dash-panel database-summary" data-dashboard-section="summary">
-      <div class="collection-head">
-        <div>
-          <p class="dash-kicker">Built database</p>
-          <h2>Wine-list database</h2>
-          <p class="database-summary-copy">${html(fmtInt(savedLines))} wine lines saved. Last collection ${html(lastCollectionText)}.</p>
-        </div>
-        <span class="dash-pill">${html(fmtInt(found))} verified</span>
-      </div>
-      <div class="db-health-grid">
-        <div class="metric-box"><span>Restaurants saved</span><b>${html(fmtInt(summary.totalTargets || values.total))}</b></div>
-        <div class="metric-box"><span>Verified wine lists</span><b>${html(fmtInt(found))}</b></div>
-        <div class="metric-box"><span>No wine list</span><b>${html(fmtInt(none))}</b></div>
-        <div class="metric-box"><span>Needs review</span><b>${html(fmtInt(reviewSources))}</b></div>
-        <div class="metric-box"><span>Pending / no website</span><b>${html(fmtInt(pending))}</b></div>
-        <div class="metric-box"><span>Mapped DB URLs</span><b>${html(fmtInt(mappedWithWebsite))}</b></div>
-      </div>
-    </section>`;
+    const { payload } = metrics;
 
     const mapHtml = `<section class="dash-panel" data-dashboard-section="map">
       <div class="collection-head">
         <div>
-          <p class="dash-kicker">Restaurant map</p>
-          <h2>Wine-list coverage</h2>
+          <p class="dash-kicker">Built database</p>
+          <h2>Database map</h2>
         </div>
         <div class="map-legend">
           <span class="legend-dot" style="--dot:#16a34a">Found</span>
@@ -1141,12 +1111,10 @@
 
     const mapAlreadyMounted = Boolean(root.querySelector("#dashboardDbMap"));
     if (!mapAlreadyMounted) {
-      root.innerHTML = `${summaryHtml}${mapHtml}${selectedHtml}`;
+      root.innerHTML = `${mapHtml}${selectedHtml}`;
       renderDashboardMap(payload, { fit: true });
       return;
     }
-    const summarySection = root.querySelector('[data-dashboard-section="summary"]');
-    if (summarySection) summarySection.outerHTML = summaryHtml;
     renderSelectedTarget(payload);
     renderDashboardMap(payload, { fit: false });
   }

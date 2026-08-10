@@ -12,8 +12,8 @@ class DashboardViewTests(unittest.TestCase):
         cls.script = DASHBOARD_SCRIPT.read_text(encoding="utf-8")
 
     def test_navigation_has_three_clear_views(self):
-        self.assertIn('["search", "Star Wine Search"]', self.script)
-        self.assertIn('["database", "Database"]', self.script)
+        self.assertIn('["search", "Wine Search"]', self.script)
+        self.assertIn('["database", "Database Map"]', self.script)
         self.assertIn('["collection", "Collection"]', self.script)
         self.assertNotIn('["dashboard", "Dashboard"]', self.script)
 
@@ -26,6 +26,8 @@ class DashboardViewTests(unittest.TestCase):
         )[0]
 
         self.assertIn('id="dashboardDbMap"', database)
+        self.assertNotIn("database-summary", database)
+        self.assertNotIn("db-health-grid", database)
         self.assertNotIn("resourcePanelMarkup", database)
         self.assertIn("resourcePanelMarkup", collection)
         self.assertNotIn('id="dashboardDbMap"', collection)

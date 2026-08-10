@@ -785,8 +785,11 @@ def search(params):
     """
     args.append(limit)
 
-    with connect() as con:
+    con = connect()
+    try:
         rows = con.execute(sql, args).fetchall()
+    finally:
+        con.close()
     results = []
     for row in rows:
         item = row_to_dict(row)
@@ -818,6 +821,7 @@ def search(params):
             "updatedDate": item.pop("updatedDate"),
         }
         item["wineList"]["localFileUrl"] = f"/files/{item['wineList']['localFilePath']}" if item["wineList"]["localFilePath"] else ""
+        item["source"] = "Star Wine"
         results.append(item)
     results.extend(search_collected_guides(q, country, city, vintage, limit))
     return {"query": q, "count": len(results), "results": results, "liveRefresh": live_refresh}
@@ -906,7 +910,7 @@ def search_collected_guides(query, country="", city="", vintage="", limit=5000):
                 "priceValue": None,
                 "currency": "",
                 "prices": [],
-                "source": "Collected DB",
+                "source": "Database",
                 "availabilityOnly": True,
                 "venue": {
                     "id": f"guide-target-{row['target_id']}",

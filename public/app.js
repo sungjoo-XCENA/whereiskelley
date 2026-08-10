@@ -220,26 +220,16 @@ function uniqueResults(results = []) {
 }
 
 function resultSource(result = {}) {
-  return result.source || result.sourceLabel || "Live";
+  return result.source || result.sourceLabel || "Star Wine";
 }
 
 function sourceBadge(source) {
-  const value = String(source || "Live");
+  const value = String(source || "Star Wine");
   const normalized = value.toLowerCase();
-  const key = normalized.includes("collected")
-    ? "collected"
-    : normalized.includes("db") && normalized.includes("live")
-    ? "both"
-    : normalized.includes("db")
-      ? "db"
-      : "live";
-  const label = key === "collected"
-    ? "Collected DB"
-    : key === "both"
-      ? "Saved DB + Live API"
-      : key === "db"
-        ? "Saved DB"
-        : "Live API";
+  const hasDatabase = normalized.includes("database") || normalized.includes("collected") || normalized.includes("db");
+  const hasStarWine = normalized.includes("star wine") || normalized.includes("live");
+  const key = hasDatabase && hasStarWine ? "both" : hasDatabase ? "db" : "live";
+  const label = key === "both" ? "Star Wine + Database" : key === "db" ? "Database" : "Star Wine";
   return `<span class="source-badge ${key}">${escapeHtml(label)}</span>`;
 }
 
@@ -260,8 +250,11 @@ function mergeResultSources(results = []) {
         .map((item) => item.trim())
         .filter(Boolean)
     );
-    if (sources.has("DB") && sources.has("Live")) {
-      existing.source = "DB + Live";
+    const normalizedSources = [...sources].map((source) => source.toLowerCase());
+    const hasDatabase = normalizedSources.some((source) => source.includes("database") || source.includes("collected") || source === "db");
+    const hasStarWine = normalizedSources.some((source) => source.includes("star wine") || source.includes("live"));
+    if (hasDatabase && hasStarWine) {
+      existing.source = "Star Wine + Database";
     }
   }
   return [...byKey.values()];
@@ -652,6 +645,9 @@ function sortHeader(label, key) {
 
 function liveRefreshLine(liveRefresh) {
   if (!liveRefresh) return "";
+  if (liveRefresh.sourceSummary && "databaseMatches" in liveRefresh) {
+    return `<div class="sync-note integrated-search-note"><b>${escapeHtml(liveRefresh.sourceSummary)}</b><span>${escapeHtml(String(liveRefresh.starWineMatches || 0))} Star Wine matches</span><span>${escapeHtml(String(liveRefresh.databaseMatches || 0))} Database matches</span></div>`;
+  }
   if (liveRefresh.sourceSummary) {
     return `<div class="sync-note">${escapeHtml(liveRefresh.sourceSummary)}: ${escapeHtml(String(liveRefresh.snapshotMatches || 0))} DB matches from ${escapeHtml(String(liveRefresh.snapshotLines || 0))} saved lines, ${escapeHtml(String(liveRefresh.liveMatches || 0))} live matches</div>`;
   }
@@ -796,8 +792,8 @@ function placeLineLabel(group) {
   const ordinaryGroup = { ...group, results: group.results.filter((result) => !result.availabilityOnly) };
   const indexedLines = fallbackWineLines(ordinaryGroup.results);
   const verified = reconciledGroupLines(ordinaryGroup).filter((line) => line.pdfVerified).length;
-  if (collected.length && !ordinaryGroup.results.length) return `${collected.length} collected match${collected.length === 1 ? "" : "es"}`;
-  if (collected.length) return `${indexedLines.length} live / ${collected.length} collected`;
+  if (collected.length && !ordinaryGroup.results.length) return `${collected.length} database match${collected.length === 1 ? "" : "es"}`;
+  if (collected.length) return `${indexedLines.length} Star Wine / ${collected.length} Database`;
   if (indexedLines.length && verified) return `${indexedLines.length} indexed / ${verified} verified`;
   if (indexedLines.length) return `${indexedLines.length} indexed lines`;
   const pdfLines = groupPdfLines(group);
@@ -842,7 +838,7 @@ function renderExpandedPlace(group) {
     .join("");
   const collectedMarkup = collectedResults.length
     ? `<div class="collected-list-results">
-        <div class="collected-list-head"><b>Collected wine-list matches</b><span>Prices are not parsed for this source.</span></div>
+        <div class="collected-list-head"><b>Database wine-list matches</b><span>Matched text only. Database prices are not estimated.</span></div>
         ${collectedResults.map((result) => {
           const listUrl = pdfUrl(result.wineList || {});
           return `<div class="collected-list-row">
@@ -1094,27 +1090,14 @@ async function runSearch() {
   }
   params.set("limit", "5000");
   try {
-    const collectedParams = new URLSearchParams(params);
-    collectedParams.delete("live");
-    collectedParams.delete("livePages");
-    collectedParams.delete("livePageCap");
-    collectedParams.delete("liveMaxPdfs");
-    const [snapshotResult, liveResult, collectedResult] = await Promise.allSettled([
-      searchSnapshot(params),
-      getJson(`/api/search_v2?${params.toString()}`),
-      getJson(`/api/search?${collectedParams.toString()}`)
-    ]);
-    const snapshotPayload = snapshotResult.status === "fulfilled" ? snapshotResult.value : { results: [], liveRefresh: null };
-    const livePayload = liveResult.status === "fulfilled" ? liveResult.value : { results: [], liveRefresh: null };
-    const collectedPayload = collectedResult.status === "fulfilled" ? collectedResult.value : { results: [] };
-    const dbResults = (snapshotPayload.results || []).map((result) => ({ ...result, source: result.source || "DB" }));
-    const liveResults = (livePayload.results || []).map((result) => ({ ...result, source: result.source || "Live" }));
-    const collectedResults = (collectedPayload.results || []).filter((result) => result.source === "Collected DB");
-    renderResults([...dbResults, ...liveResults, ...collectedResults], {
-      sourceSummary: "Saved DB + live API + collected lists",
-      snapshotLines: snapshotPayload.liveRefresh?.snapshotLines || 0,
-      snapshotMatches: dbResults.length,
-      liveMatches: liveResults.length + collectedResults.length
+    const payload = await getJson(`/api/search_v2?${params.toString()}`);
+    const results = Array.isArray(payload.results) ? payload.results : [];
+    const databaseMatches = results.filter((result) => result.source === "Database" || result.source === "Collected DB").length;
+    const starWineMatches = results.length - databaseMatches;
+    renderResults(results, {
+      sourceSummary: "Integrated search complete",
+      databaseMatches,
+      starWineMatches
     });
   } finally {
     submitButton.disabled = false;
