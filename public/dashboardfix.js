@@ -534,7 +534,7 @@
           <p class="dash-kicker">Server resources</p>
           <h2>Collection resource usage</h2>
         </div>
-        <span class="dash-pill">${html(fmtInt(samples.length))} samples 쨌 every ${html(fmtInt(interval))}s</span>
+        <span class="dash-pill">${html(fmtInt(samples.length))} samples · every ${html(fmtInt(interval))}s</span>
       </div>
       <div class="resource-grid">
         <article class="resource-card">
@@ -638,7 +638,195 @@
       collectionView.id = "collectionView";
       collectionView.className = "app-view";
       collectionView.dataset.viewPanel = "collection";
-      commandBar?.insertAdjacentElement("beforebegin", collectionVi…2034 tokens truncated… cx="15" cy="14.5" r="6" fill="rgba(255,255,255,0.95)"/>
+      commandBar?.insertAdjacentElement("beforebegin", collectionView);
+    }
+    return { databaseView, collectionView };
+  }
+
+  function cleanTabs() {
+    let nav = document.querySelector(".view-tabs");
+    if (!nav) {
+      nav = document.createElement("nav");
+      nav.className = "view-tabs";
+      document.querySelector(".app-header")?.insertAdjacentElement("afterend", nav);
+    }
+    nav.innerHTML = [
+      ["search", "Star Wine Search"],
+      ["database", "Database"],
+      ["collection", "Collection"]
+    ].map(([key, label]) => `<button class="view-tab" type="button" data-view="${key}">${label}</button>`).join("");
+    document.querySelector("#watchlistView")?.remove();
+    document.querySelectorAll(".source-strip").forEach((node) => node.remove());
+    return nav;
+  }
+
+  function activate(view) {
+    state.activeView = view;
+    ensureDataViews();
+    document.querySelectorAll(".view-tab").forEach((tab) => {
+      tab.classList.toggle("active", tab.dataset.view === view);
+    });
+    document.querySelectorAll(".app-view").forEach((panel) => {
+      panel.classList.toggle("active", panel.dataset.viewPanel === view);
+    });
+    const showSearch = view === "search";
+    document.querySelector(".command-bar")?.classList.toggle("hidden", !showSearch);
+    document.querySelector(".workspace")?.classList.toggle("hidden", !showSearch);
+    document.querySelector(".map-panel")?.classList.toggle("hidden", !showSearch);
+    if (view === "database") {
+      renderDatabase();
+      if (!state.guideLoadedOnce) loadGuideStats({ force: true });
+    }
+    if (view === "collection") {
+      renderCollection();
+      if (!state.guideLoadedOnce) loadGuideStats({ force: true });
+    }
+    if (showSearch) {
+      try {
+        if (typeof renderMap === "function") renderMap(typeof latestResults === "undefined" ? [] : latestResults);
+      } catch (_error) {}
+    }
+  }
+
+  function progressValues(payload) {
+    const progress = payload?.progress || {};
+    const counts = payload?.counts || {};
+    const latestRun = payload?.latestRuns?.[0] || {};
+    const summary = payload?.collectionSummary || {};
+    const running = progress.status === "running" && !progress.stale;
+    const stopped = progress.status === "stalled" || Boolean(progress.stale);
+    const completed = !running && (progress.status === "completed" || latestRun.status === "completed");
+    const summaryTotal = number(summary.totalTargets || counts.targets || latestRun.target_count);
+    const summaryChecked = number(summary.checkedTargets || latestRun.websites_checked);
+    const rawProcessed = number(progress.processedTargets ?? progress.websitesChecked ?? latestRun.websites_checked);
+    const rawTotal = number(progress.totalWebsites || summary.totalTargets || counts.targets || latestRun.target_count);
+    const useSummaryProgress = !running && completed && summaryTotal && summaryChecked && (!rawTotal || rawTotal < summaryTotal);
+    const processed = useSummaryProgress ? summaryChecked : rawProcessed;
+    const total = useSummaryProgress ? summaryTotal : rawTotal;
+    const percent = total ? Math.min(100, Math.max(0, useSummaryProgress ? ((processed / total) * 100) : number(progress.progressPercent || ((processed / total) * 100)))) : 0;
+    return {
+      progress,
+      counts,
+      latestRun,
+      summary,
+      running,
+      stopped,
+      processed,
+      total,
+      remaining: total ? Math.max(0, total - processed) : 0,
+      percent,
+      elapsed: progress.elapsedSeconds ?? secondsBetween(progress.startedAt || latestRun.started_at, progress.finishedAt || latestRun.finished_at),
+      duration: progress.durationSeconds ?? secondsBetween(progress.startedAt || latestRun.started_at, progress.finishedAt || latestRun.finished_at),
+      status: running ? "Collecting" : stopped ? "Stopped" : latestRun.status === "completed" ? "Done" : "Ready"
+    };
+  }
+
+  function statusLabel(status) {
+    const labels = {
+      found: "Verified wine list",
+      no_wine_list: "No wine list",
+      not_checked: "Not checked yet",
+      missing_website: "Website missing",
+      review: "Needs review",
+      error: "Error"
+    };
+    return labels[status] || status || "Unknown";
+  }
+
+  function targetKind(target) {
+    const status = target?.status || "";
+    if (number(target.verifiedWineListCount) > 0 || (
+      target.wineListStatus === "found" &&
+      target.wineListParserStatus === "parsed" &&
+      number(target.chosenWineLineCount) > 0 &&
+      !String(target.wineListLastError || "").trim()
+    )) return "found";
+    if (status === "no_wine_list") return "none";
+    return "pending";
+  }
+
+  function targetPill(target) {
+    const kind = targetKind(target);
+    const cls = kind === "found" ? "good" : kind === "none" ? "bad" : "warn";
+    const label = kind === "found" ? "Verified wine list" : kind === "none" ? "No wine list" : "Needs review";
+    return `<span class="dash-pill ${cls}">${html(label)}</span>`;
+  }
+
+  function visibleMapTargets(payload) {
+    return (payload?.mapTargets || [])
+      .filter((target) => target.lat !== null && target.lng !== null && target.lat !== "" && target.lng !== "")
+      .filter((target) => String(target.websiteUrl || "").trim() !== "")
+      .map((target) => ({ ...target, lat: Number(target.lat), lng: Number(target.lng) }))
+      .filter((target) => Number.isFinite(target.lat) && Number.isFinite(target.lng));
+  }
+
+  function markerColor(kind) {
+    if (kind === "found") return "#16a34a";
+    if (kind === "none") return "#dc2626";
+    return "#f59e0b";
+  }
+
+  function markerLabel(kind) {
+    if (kind === "found") return "F";
+    if (kind === "none") return "N";
+    return "R";
+  }
+
+  function markerZIndex(kind) {
+    if (kind === "found") return 300;
+    if (kind === "none") return 200;
+    return 100;
+  }
+
+  function getGoogleMapsKey() {
+    return window.STARWINE_CONFIG?.googleMapsApiKey || localStorage.getItem("googleMapsApiKey") || "";
+  }
+
+  function loadDashboardGoogleMaps() {
+    if (window.google?.maps) return Promise.resolve(window.google.maps);
+    const key = getGoogleMapsKey();
+    if (!key) return Promise.resolve(null);
+    if (state.dashboardMapPromise) return state.dashboardMapPromise;
+    state.dashboardMapPromise = new Promise((resolve, reject) => {
+      const callbackName = `initDashboardMap${Date.now()}`;
+      const previousAuthFailure = window.gm_authFailure;
+      let settled = false;
+      window.gm_authFailure = () => {
+        window.gm_authFailure = previousAuthFailure;
+        if (typeof previousAuthFailure === "function") previousAuthFailure();
+        if (!settled) {
+          settled = true;
+          reject(new Error(`Google Maps rejected ${window.location.origin}. Add ${window.location.origin}/* to this API key's Website restrictions and make sure Maps JavaScript API and billing are enabled.`));
+        }
+      };
+      window[callbackName] = () => {
+        delete window[callbackName];
+        window.gm_authFailure = previousAuthFailure;
+        if (!settled) {
+          settled = true;
+          resolve(window.google.maps);
+        }
+      };
+      const script = document.createElement("script");
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=${callbackName}&v=weekly&loading=async`;
+      script.async = true;
+      script.defer = true;
+      script.onerror = () => {
+        window.gm_authFailure = previousAuthFailure;
+        if (!settled) {
+          settled = true;
+          reject(new Error("Google Maps failed to load. Check the API key, billing, and allowed Website restrictions."));
+        }
+      };
+      document.head.appendChild(script);
+    });
+    return state.dashboardMapPromise;
+  }
+
+  function markerIcon(maps, color, label = "") {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="38" viewBox="0 0 30 38">
+      <path fill="${color}" stroke="#ffffff" stroke-width="2.2" d="M15 2C8.1 2 2.5 7.6 2.5 14.5 2.5 24 15 36 15 36s12.5-12 12.5-21.5C27.5 7.6 21.9 2 15 2Z"/>
+      <circle cx="15" cy="14.5" r="6" fill="rgba(255,255,255,0.95)"/>
       <text x="15" y="18.2" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" font-weight="800" fill="${color}">${label}</text>
     </svg>`;
     return {
@@ -1085,4 +1273,3 @@
     boot();
   }
 })();
-
