@@ -535,4 +535,662 @@
           <div class="resource-card-head"><div><span>CPU</span><b>${html(cpu)}</b></div><small>${html(collectorCpu)}<br>${html(fmtInt(latest.cores || 0))} cores</small></div>
           ${resourceChart(samples, [
             { key: "cpuPercent", color: "#b0123f" },
-            { key: "collectorCpyÛm­¢G§²ÚîÆ­yÖFRæF6†&ö&DFFÆ–W"ç6WE7G–ÆR‚†fVGW&R’Óâ‡°¢–6öã¢Ö&¶W$–6öâ†Ö2ÂÖ&¶W$6öÆ÷"†fVGW&RævWE&÷W'G’‚&¶–æB"’’ÂÖ&¶W$Æ&VÂ†fVGW&RævWE&÷W'G’‚&¶–æB"’’’À¢¤–æFWƒ¢Ö&¶W%¤–æFW‚†fVGW&RævWE&÷W'G’‚&¶–æB"’’À¢F—FÆS¢fVGW&RævWE&÷W'G’‚&æÖR"’ÇÂ%&W7FW&çB ¢Ò’“°¢Ğ¢–b‚7FFRæF6†&ö&DFF6Æ–6´&÷VæB’°¢7FFRæF6†&ö&DFFÆ–W"æFDÆ—7FVæW"‚&6Æ–6²"Â†WfVçB’Óâ°¢6VÆV7DF6†&ö&EF&vWB†WfVçBæfVGW&RævWE&÷W'G’‚&–B"’ÂG'VRÂWfVçBæÆDÆær“°¢Ò“°¢7FFRæF6†&ö&DFF6Æ–6´&÷VæBÒG'VS°¢Ğ¢–b‡6–væGW&RÓÒ7FFRæF6†&ö&DÖ6–væGW&R’°¢7FFRæF6†&ö&DFFÆ–W"æf÷$V6‚‚†fVGW&R’Óâ7FFRæF6†&ö&DFFÆ–W"ç&VÖ÷fR†fVGW&R’“°¢7FFRæF6†&ö&DFFÆ–W"æFDvVô§6öâ‡°¢G—S¢$fVGW&T6öÆÆV7F–öâ"À¢fVGW&W3¢F&vWG2æÖ‡F&vWDfVGW&R¢Ò“°¢7FFRæF6†&ö&DÖ6–væGW&RÒ6–væGW&S°¢Ğ¢–b‚7FFRæF6†&ö&DÖ†4f—BÇÂ÷F–öç2æf—B’°¢7FFRæF6†&ö&DÖæf—D&÷VæG2†&÷VæG2ÂSb“°¢–b‡F&vWG2æÆVæwF‚ÓÓÒ’7FFRæF6†&ö&DÖç6WE¦ööÒƒ"“°¢7FFRæF6†&ö&DÖ†4f—BÒG'VS°¢Ğ¢–b‡7FFRæ7F—fUF&vWD–B’6VÆV7DF6†&ö&EF&vWB‡7FFRæ7F—fUF&vWD–BÂfÇ6R“°¢Ò6F6‚†W'&÷"’°¢fÆÆ&6´VÂæ6Æ74Æ—7Bç&VÖ÷fR‚&†–FFVâ"“°¢fÆÆ&6´VÂæ–ææW$…DÔÂÒÆ#äÖVæf–Æ&ÆSÂö#ãÇ7ãâG¶‡FÖÂ†W'&÷"æÖW76vR—ÓÂ÷7ãæ°¢Ğ¢Ğ ¢gVæ7F–öâ6VÆV7DF6†&ö&EF&vWB†–BÂ6†÷VÆE67&öÆÂÒG'VRÂ6Æ–6¶VDÆDÆærÒçVÆÂ’°¢7FFRæ7F—fUF&vWD–BÒ7G&–ær†–BÇÂ""“°¢6öç7B–ÆöBÒ7FFRæwV–FU–ÆöBÇÂ·Ó°¢6öç7BF&vWBÒ‡–ÆöBæÖF&vWG2ÇÂµÒ’æf–æB‚†—FVÒ’Óâ7G&–ær†—FVÒæ–B’ÓÓÒ7FFRæ7F—fUF&vWD–B“°¢–b‚F&vWB’&WGW&ã°¢6öç7BÖ&¶W"Ò7FFRæF6†&ö&DÖ&¶W'2ævWB…7G&–ær‡F&vWBæ–B’“°¢6öç7B÷6—F–öâÒ6Æ–6¶VDÆDÆærÇÂ„çVÖ&W"æ—4f–æ—FR„çVÖ&W"‡F&vWBæÆB’’bbçVÖ&W"æ—4f–æ—FR„çVÖ&W"‡F&vWBæÆær’¢òæWrvöövÆRæÖ2äÆDÆær„çVÖ&W"‡F&vWBæÆB’ÂçVÖ&W"‡F&vWBæÆær’¢¢çVÆÂ“°¢–b‡7FFRæF6†&ö&DÖbb÷6—F–öâ’°¢7FFRæF6†&ö&DÖçåFò‡÷6—F–öâ“°¢–b‡7FFRæF6†&ö&DÖævWE¦ööÒ‚’Â‚’7FFRæF6†&ö&DÖç6WE¦ööÒƒ‚“°¢7FFRæF6†&ö&D–æfõv–æF÷sòç6WD6öçFVçB†–æfô‡FÖÂ‡F&vWB’“°¢7FFRæF6†&ö&D–æfõv–æF÷sòç6WE÷6—F–öâ‡÷6—F–öâ“°¢7FFRæF6†&ö&D–æfõv–æF÷sòæ÷Vâ‡²Ö¢7FFRæF6†&ö&DÖÒ“°¢Ğ¢&VæFW%6VÆV7FVEF&vWB‡–ÆöB“°¢–b‡6†÷VÆE67&öÆÂ’°¢Fö7VÖVçBçVW'•6VÆV7F÷"‚"76VÆV7FVE&W7FW&çB"“òç67&öÆÄ–çFõf–Wr‡²&V†f–÷#¢'6Öö÷F‚"Â&Æö6³¢'7F'B"Ò“°¢Ğ¢Ğ ¢gVæ7F–öâ6ÆV$F6†&ö&E6VÆV7F–öâ‚’°¢7FFRæ7F—fUF&vWD–BÒçVÆÃ°¢7FFRæF6†&ö&D–æfõv–æF÷sòæ6Æ÷6R‚“°¢&VæFW%6VÆV7FVEF&vWB‡7FFRæwV–FU–ÆöBÇÂ·Ò“°¢&VæFW$F6†&ö&DÖ‡7FFRæwV–FU–ÆöBÇÂ·ÒÂ²f—C¢G'VRÒ“°¢Fö7VÖVçBçVW'•6VÆV7F÷"‚u¶FFÖF6†&ö&B×6V7F–öãÒ&Ö%Òr“òç67&öÆÄ–çFõf–Wr‡²&V†f–÷#¢'6Öö÷F‚"Â&Æö6³¢'7F'B"Ò“°¢Ğ ¢gVæ7F–öâ6VÆV7FVEF&vWDÖ&·W‡–ÆöB’°¢6öç7BF&vWBÒ‡–ÆöCòæÖF&vWG2ÇÂµÒ’æf–æB‚†—FVÒ’Óâ7G&–ær†—FVÒæ–B’ÓÓÒ7G&–ær‡7FFRæ7F—fUF&vWD–BÇÂ""’“°¢–b‚F&vWB’°¢&WGW&âÆF—b6Æ73Ò'6VÆV7FVB×F&vWBV×G’#à¢Æƒ3äæò&W7FW&çB6VÆV7FVCÂöƒ3à¢Çä6Æ–6²Ö&¶W"öâF†RÖFò–ç7V7BöæR&W7FW&çBãÂ÷à¢ÂöF—cæ°¢Ğ¢6öç7BÆö6F–öâÒ·F&vWBæ6—G’ÂF&vWBæ6÷VçG'•Òæf–ÇFW"„&ööÆVâ’æ¦ö–â‚"Â"“°¢6öç7BvöövÆTÖW&ÂÒ‡GG3¢ò÷wwrævöövÆRæ6öÒöÖ2÷6V&6‚óö“ÓgVW'“ÒG¶Væ6öFUU$”6ö×öæVçB…·F&vWBææÖRÂF&vWBæ6—G’ÂF&vWBæ6÷VçG'•Òæf–ÇFW"„&ööÆVâ’æ¦ö–â‚""’—Ö°¢6öç7B¶–æBÒF&vWD¶–æB‡F&vWB“°¢6öç7Bv–æTÆ—7DÆ&VÂÒ¶–æBÓÒ&f÷VæB ¢ò%&Wf–Wr6÷W&6R ¢¢÷FgÆf–ÆRö’çFW7B…7G&–ær‡F&vWBçv–æTÆ—7EG—RÇÂF&vWBçv–æTÆ—7EW&ÂÇÂ""’¢ò%v–æRÆ—7Bf–ÆR ¢¢%v–æRÆ—7B#°¢&WGW&âÆF—b6Æ73Ò'6VÆV7FVB×F&vWB#à¢ÆF—cà¢Ç6Æ73Ò&F6‚Ö¶–6¶W"#å6VÆV7FVB&W7FW&çCÂ÷à¢Æƒ3âG¶‡FÖÂ‡F&vWBææÖRÇÂ%Væ¶æ÷vâ"—ÓÂöƒ3à¢ÇâG¶‡FÖÂ†Æö6F–öâÇÂ%Væ¶æ÷vâÆö6F–öâ"—ÓÂ÷à¢ÂöF—cà¢ÆF—b6Æ73Ò'6VÆV7FVB×F&vWBÖw&–B#à¢ÆF—b6Æ73Ò&ÖWG&–2Ö&÷‚#ãÇ7ãå7FGW3Â÷7ããÆ#âG·F&vWE–ÆÂ‡F&vWB—ÓÂö#ãÂöF—cà¢ÆF—b6Æ73Ò&ÖWG&–2Ö&÷‚#ãÇ7ãäÆ7B6†V6¶VCÂ÷7ããÆ#âG¶‡FÖÂ‡F&vWBæÆ7D6†V6¶VDBÇÂ"Ò"—ÓÂö#ãÂöF—cà¢ÂöF—cà¢ÆF—b6Æ73Ò'6VÆV7FVB×F&vWBÖ7F–öç2#à¢G·F&vWBçv–æTÆ—7EW&ÂòÆ6Æ73Ò"G¶¶–æBÓÓÒ&f÷VæB"ò""¢'6V6öæF'’'Ò"‡&VcÒ"G¶‡FÖÂ‡F&vWBçv–æTÆ—7EW&Â—Ò"F&vWCÒ%ö&Ææ²"&VÃÒ&æ÷&VfW'&W"#âG¶‡FÖÂ‡v–æTÆ—7DÆ&VÂ—ÓÂöæ¢"'Ğ¢G·F&vWBçvV'6—FUW&ÂbbF&vWBçvV'6—FUW&ÂÓÒF&vWBçv–æTÆ—7EW&ÂòÆ6Æ73Ò'6V6öæF'’"‡&VcÒ"G¶‡FÖÂ‡F&vWBçvV'6—FUW&Â—Ò"F&vWCÒ%ö&Ææ²"&VÃÒ&æ÷&VfW'&W"#äöff–6–ÂvV'6—FSÂöæ¢"'Ğ¢Æ6Æ73Ò'6V6öæF'’"‡&VcÒ"G¶‡FÖÂ†vöövÆTÖW&Â—Ò"F&vWCÒ%ö&Ææ²"&VÃÒ&æ÷&VfW'&W"#ävöövÆRÖ3Âöà¢Æ'WGFöâ6Æ73Ò'6V6öæF'’"G—SÒ&'WGFöâ"FFÖ6ÆV"ÖF6†&ö&B×6VÆV7F–öãä6Æ÷6SÂö'WGFöãà¢ÂöF—cà¢ÂöF—cæ°¢Ğ ¢gVæ7F–öâ&VæFW%6VÆV7FVEF&vWB‡–ÆöB’°¢6öç7B6öçF–æW"ÒFö7VÖVçBçVW'•6VÆV7F÷"‚"76VÆV7FVE&W7FW&çB"“°¢–b†6öçF–æW"’6öçF–æW"æ–ææW$…DÔÂÒ6VÆV7FVEF&vWDÖ&·W‡–ÆöB“°¢Ğ ¢gVæ7F–öâ&VæFW$F6†&ö&B‚’°¢6öç7B&ö÷BÒVç7W&TF6†&ö&Ef–Wr‚“°¢6öç7B–ÆöBÒ7FFRæwV–FU–ÆöBÇÂ·Ó°¢6öç7BfÇVW2Ò&öw&W75fÇVW2‡–ÆöB“°¢6öç7B7VÖÖ'’ÒfÇVW2ç7VÖÖ'“°¢6öç7B&öw&W72ÒfÇVW2ç&öw&W73°¢6öç7BÖVBÒf—6–&ÆTÖF&vWG2‡–ÆöB’æÆVæwFƒ°¢6öç7BÖVEv—F…vV'6—FRÒçVÖ&W"‡7VÖÖ'’æÖVEv—F…vV'6—FR’ÇÂÖVC°¢6öç7B&öw&W746÷VçG2Ò&öw&W72æF$6÷VçG2ÇÂ·Ó°¢6öç7B6÷W&6T6÷VçBÒçVÖ&W"‡–ÆöBæ6÷VçG3òçv–æTÆ—7E6÷W&6W2¢ÇÂçVÖ&W"‡7VÖÖ'’çF÷FÅ6÷W&6W2¢ÇÂçVÖ&W"‡&öw&W746÷VçG2çv–æTÆ—7E6÷W&6W2¢ÇÂçVÖ&W"‡&öw&W72çv–æTÆ—7G4f÷VæB“°¢6öç7B6fVDÆ–æW2ÒçVÖ&W"‡–ÆöBæ6÷VçG3òçv–æTÆ–æW2¢ÇÂçVÖ&W"‡&öw&W746÷VçG2çv–æTÆ–æW2¢ÇÂçVÖ&W"‡&öw&W72çv–æTÆ–æW4f÷VæB“°¢6öç7B'6VE6÷W&6W2ÒçVÖ&W"‡7VÖÖ'’ç'6VE6÷W&6W2“°¢6öç7B&Wf–Wu6÷W&6W2ÒçVÖ&W"‡7VÖÖ'’ç'6U&Wf–Wu6÷W&6W2“°¢6öç7Bf÷VæBÒçVÖ&W"‡7VÖÖ'’æf÷VæEv–æTÆ—7B“°¢6öç7BæöæRÒçVÖ&W"‡7VÖÖ'’ææõv–æTÆ—7B“°¢6öç7BVæF–ærÒçVÖ&W"‡7VÖÖ'’çVæF–ær’²çVÖ&W"‡7VÖÖ'’æÖ—76–æuvV'6—FR“°¢6öç7BW'&÷$6÷VçBÒçVÖ&W"‡7VÖÖ'’æW'&÷'2ÇÂfÇVW2ç&öw&W72æW'&÷'2“°¢6öç7BÆ7D6öÆÆV7F–öäBÒ–ÆöBæÆ7D6öÆÆV7F–öãòæf–æ—6†VEöBÇÂ"#°¢6öç7BÆ7D6öÆÆV7F–öåFW‡BÒÆ7D6öÆÆV7F–öäBòf÷&ÖEF–ÖR†Æ7D6öÆÆV7F–öäB’¢$æò6ö×ÆWFVB6öÆÆV7F–öâ–WB#°¢6öç7BWFFW‡BÒfÇVW2ç'Vææ–æp¢òG¶f÷&ÖDGW&F–öâ‡&öw&W72æW7F–ÖFVE&VÖ–æ–æu6V6öæG2—ÒG·&öw&W72æW7F–ÖFVDf–æ—6„BòòG¶f÷&ÖEF–ÖR‡&öw&W72æW7F–ÖFVDf–æ—6„B—Ö¢"'Ö ¢¢f÷&ÖDGW&F–öâ‡fÇVW2æGW&F–öâ“°¢6öç7B6öÆÆV7F–öåFW‡BÒfÇVW2ç'Vææ–æp¢ò%F†RÆö6Â26öÆÆV7F÷"—2'Vææ–æræ÷râ ¢¢fÇVW2ç7F÷V@¢ò%F†RÆö6Â26öÆÆV7F÷"7F÷VB&W÷'F–ær&öw&W72â ¢¢$æò&6¶w&÷VæB6öÆÆV7F–öâ—2'Vææ–ær&–v‡Bæ÷râ#°¢6öç7B&öw&W75F—FÆRÒfÇVW2ç'Vææ–æp¢ò$6öÆÆV7F–ær&W7FW&çBv–æRÆ—7G2 ¢¢fÇVW2ç7F÷V@¢ò$6öÆÆV7F–öâ7F÷VB ¢¢$6öÆÆV7F–öâ7FGW2#°¢6öç7B&öw&W75–ÆÄ6Æ72ÒfÇVW2ç'Vææ–ærò&vööB"¢fÇVW2ç7F÷VBò'v&â"¢"#° ¢6öç7B6&G4‡FÖÂÒÆF—b6Æ73Ò&F6†&ö&BÖw&–B"FFÖF6†&ö&B×6V7F–öãÒ&6&G2#à¢ÆF—b6Æ73Ò&F6†&ö&BÖ6&B#ãÇ7ãä6öÆÆV7F–öãÂ÷7ããÆ#âG¶‡FÖÂ‡fÇVW2ç7FGW2—ÓÂö#ãÇ6ÖÆÃâG¶‡FÖÂ†6öÆÆV7F–öåFW‡B—ÓÆ'#äD"WFFVBG¶‡FÖÂ†Æ7D6öÆÆV7F–öåFW‡B—ÓÆ'#äWfW'’÷F†W"ÖöæF’3£µ5CÂ÷6ÖÆÃãÂöF—cà¢ÆF—b6Æ73Ò&F6†&ö&BÖ6&B#ãÇ7ãå&öw&W73Â÷7ããÆ#âG¶‡FÖÂ‡fÇVW2çW&6VçBçFôf—†VBƒ’—ÒSÂö#ãÇ6ÖÆÃâG¶‡FÖÂ†f×D–çB‡fÇVW2ç&ö6W76VB’—Ò6†V6¶VBòG¶‡FÖÂ†f×D–çB‡fÇVW2ç&VÖ–æ–ær’—ÒÆVgBòG¶‡FÖÂ†f×D–çB‡fÇVW2çF÷FÂ’—ÒF÷FÃÂ÷6ÖÆÃãÂöF—cà¢ÆF—b6Æ73Ò&F6†&ö&BÖ6&B#ãÇ7ãåfW&–f–VBv–æRÆ—7G3Â÷7ããÆ#âG¶‡FÖÂ†f×D–çB†f÷VæB’—ÓÂö#ãÇ6ÖÆÃâG¶‡FÖÂ†f×D–çB‡'6VE6÷W&6W2’—ÒW†7BÆ—7B6÷W&6W2ÂG¶‡FÖÂ†f×D–çB‡6fVDÆ–æW2’—Ò6fVBv–æRÆ–æW2ãÂ÷6ÖÆÃãÂöF—cà¢ÆF—b6Æ73Ò&F6†&ö&BÖ6&B#ãÇ7ãäæVVG2&Wf–WsÂ÷7ããÆ#âG¶‡FÖÂ†f×D–çB†çVÖ&W"‡7VÖÖ'’ææVVG5&Wf–Wr’’—ÓÂö#ãÇ6ÖÆÃâG¶‡FÖÂ†f×D–çB‡&Wf–Wu6÷W&6W2’—Ò–æ6öæ6ÇW6—fR6÷W&6W2òG¶‡FÖÂ†f×D–çB†W'&÷$6÷VçB’—Ò&W7FW&çBW'&÷'2ãÂ÷6ÖÆÃãÂöF—cà¢ÂöF—cæ° ¢6öç7B&öw&W74‡FÖÂÒÇ6V7F–öâ6Æ73Ò&F6‚×æVÂ"FFÖF6†&ö&B×6V7F–öãÒ'&öw&W72#à¢ÆF—b6Æ73Ò&6öÆÆV7F–öâÖ†VB#à¢ÆF—cà¢Ç6Æ73Ò&F6‚Ö¶–6¶W"#ä6öÆÆV7B&öw&W73Â÷à¢Æƒ#âG¶‡FÖÂ‡&öw&W75F—FÆR—ÓÂöƒ#à¢ÂöF—cà¢ÆF—b6Æ73Ò'6VÆV7FVB×F&vWBÖ7F–öç2F6†&ö&B×&öw&W72Ö7F–öç2#à¢Ç7â6Æ73Ò&F6‚×–ÆÂG·&öw&W75–ÆÄ6Æ77Ò#âG¶‡FÖÂ‡fÇVW2ç7FGW2—ÓÂ÷7ãà¢Æ'WGFöâ6Æ73Ò&F6†&ö&B×&Vg&W6‚"G—SÒ&'WGFöâ"FF×7F'BÖwV–FRÖ6öÆÆV7F–öâG·fÇVW2ç'Vææ–ærÇÂ7FFRæwV–FT7F–öä–äfÆ–v‡Bò&F—6&ÆVB"¢"'ÓâG¶‡FÖÂ‡7FFRæwV–FT7F–öä–äfÆ–v‡Bò%7F'F–ærâââ"¢%7F'B&V6öÆÆV7F–öâ"—ÓÂö'WGFöãà¢Æ'WGFöâ6Æ73Ò&F6†&ö&B×&Vg&W6‚"G—SÒ&'WGFöâ"FF×&Vg&W6‚ÖF6†&ö&BG·7FFRæwV–FTÆöD–äfÆ–v‡Bò&F—6&ÆVB"¢"'ÓâG¶‡FÖÂ‡7FFRæwV–FTÆöD–äfÆ–v‡Bò%&Vg&W6†–ærâââ"¢%&Vg&W6‚"—ÓÂö'WGFöãà¢G·7FFRæwV–FT7F–öäÖW76vRòÇ7â6Æ73Ò&F6†&ö&BÖ7F–öâÖæ÷FRG¶‡FÖÂ‡7FFRæwV–FT7F–öä¶–æB—Ò#âG¶‡FÖÂ‡7FFRæwV–FT7F–öäÖW76vR—ÓÂ÷7ãæ¢"'Ğ¢G·7FFRæÆ7E&Vg&W6„BòÇ7â6Æ73Ò&F6†&ö&BÖ7F–öâÖæ÷FR#äÆ7B&Vg&W6†VBG¶‡FÖÂ‡7FFRæÆ7E&Vg&W6„B—ÓÂ÷7ãæ¢"'Ğ¢ÂöF—cà¢ÂöF—cà¢ÆF—b6Æ73Ò&F6‚×&öw&W72"7G–ÆSÒ"ÒÖF6‚×&öw&W73¢G¶‡FÖÂ‡fÇVW2çW&6VçB—ÒR#ãÆ“ãÂö“ãÂöF—cà¢ÆF—b6Æ73Ò&6öÆÆV7F–öâÖÖWG&–72#à¢ÆF—b6Æ73Ò&ÖWG&–2Ö&÷‚#ãÇ7ãä6†V6¶VCÂ÷7ããÆ#âG¶‡FÖÂ†f×D–çB‡fÇVW2ç&ö6W76VB’—ÒòG¶‡FÖÂ†f×D–çB‡fÇVW2çF÷FÂ’—ÓÂö#ãÂöF—cà¢ÆF—b6Æ73Ò&ÖWG&–2Ö&÷‚#ãÇ7ãå&VÖ–æ–æsÂ÷7ããÆ#âG¶‡FÖÂ†f×D–çB‡fÇVW2ç&VÖ–æ–ær’—ÓÂö#ãÂöF—cà¢ÆF—b6Æ73Ò&ÖWG&–2Ö&÷‚#ãÇ7ãäVÆ6VCÂ÷7ããÆ#âG¶‡FÖÂ†f÷&ÖDGW&F–öâ‡fÇVW2æVÆ6VB’—ÓÂö#ãÂöF—cà¢ÆF—b6Æ73Ò&ÖWG&–2Ö&÷‚#ãÇ7ãâG·fÇVW2ç'Vææ–ærò$UD"¢%F÷FÂF–ÖR'ÓÂ÷7ããÆ#âG¶‡FÖÂ†WFFW‡B—ÓÂö#ãÂöF—cà¢ÆF—b6Æ73Ò&ÖWG&–2Ö&÷‚#ãÇ7ãä7W'&VçB&W7FW&çCÂ÷7ããÆ#âG¶‡FÖÂ‡&öw&W72æ7W'&VçEF&vWBÇÂ"Ò"—ÓÂö#ãÂöF—cà¢ÆF—b6Æ73Ò&ÖWG&–2Ö&÷‚#ãÇ7ãäW'&÷'3Â÷7ããÆ#âG¶‡FÖÂ†f×D–çB†W'&÷$6÷VçB’—ÓÂö#ãÂöF—cà¢ÂöF—cà¢Â÷6V7F–öãæ° ¢6öç7B&W6÷W&6W4‡FÖÂÒ&W6÷W&6UæVÄÖ&·W‡–ÆöB“° ¢6öç7B7VÖÖ'”‡FÖÂÒÇ6V7F–öâ6Æ73Ò&F6‚×æVÂ"FFÖF6†&ö&B×6V7F–öãÒ'7VÖÖ'’#à¢Ç6Æ73Ò&F6‚Ö¶–6¶W"#äD"7VÖÖ'“Â÷à¢Æƒ#åv†BF†R6öÆÆV7F÷"f÷VæCÂöƒ#à¢ÆF—b6Æ73Ò&F"Ö†VÇF‚Öw&–B#à¢ÆF—b6Æ73Ò&ÖWG&–2Ö&÷‚#ãÇ7ãå&W7FW&çG26fVCÂ÷7ããÆ#âG¶‡FÖÂ†f×D–çB‡7VÖÖ'’çF÷FÅF&vWG2ÇÂfÇVW2çF÷FÂ’—ÓÂö#ãÂöF—cà¢ÆF—b6Æ73Ò&ÖWG&–2Ö&÷‚#ãÇ7ãåfW&–f–VBv–æRÆ—7G3Â÷7ããÆ#âG¶‡FÖÂ†f×D–çB†f÷VæB’—ÓÂö#ãÂöF—cà¢ÆF—b6Æ73Ò&ÖWG&–2Ö&÷‚#ãÇ7ãäæòv–æRÆ—7CÂ÷7ããÆ#âG¶‡FÖÂ†f×D–çB†æöæR’—ÓÂö#ãÂöF—cà¢ÆF—b6Æ73Ò&ÖWG&–2Ö&÷‚#ãÇ7ãåVæF–æròæòvV'6—FSÂ÷7ããÆ#âG¶‡FÖÂ†f×D–çB‡VæF–ær’—ÓÂö#ãÂöF—cà¢ÆF—b6Æ73Ò&ÖWG&–2Ö&÷‚#ãÇ7ãå'6–ær&Wf–WsÂ÷7ããÆ#âG¶‡FÖÂ†f×D–çB‡&Wf–Wu6÷W&6W2’—ÓÂö#ãÂöF—cà¢ÆF—b6Æ73Ò&ÖWG&–2Ö&÷‚#ãÇ7ãäÖVBD"U$Ç3Â÷7ããÆ#âG¶‡FÖÂ†f×D–çB†ÖVEv—F…vV'6—FR’—ÓÂö#ãÂöF—cà¢ÂöF—cà¢Â÷6V7F–öãæ° ¢6öç7BÖ‡FÖÂÒÇ6V7F–öâ6Æ73Ò&F6‚×æVÂ"FFÖF6†&ö&B×6V7F–öãÒ&Ö#à¢ÆF—b6Æ73Ò&6öÆÆV7F–öâÖ†VB#à¢ÆF—cà¢Ç6Æ73Ò&F6‚Ö¶–6¶W"#å&W7FW&çBÖÂ÷à¢Æƒ#åv–æRÖÆ—7B6÷fW&vSÂöƒ#à¢ÂöF—cà¢ÆF—b6Æ73Ò&ÖÖÆVvVæB#à¢Ç7â6Æ73Ò&ÆVvVæBÖF÷B"7G–ÆSÒ"ÒÖF÷C¢3f3F#äf÷VæCÂ÷7ãà¢Ç7â6Æ73Ò&ÆVvVæBÖF÷B"7G–ÆSÒ"ÒÖF÷C¢6F3#c#b#äæòv–æRÆ—7CÂ÷7ãà¢Ç7â6Æ73Ò&ÆVvVæBÖF÷B"7G–ÆSÒ"ÒÖF÷C¢6cS–S"#åVæF–ærò&Wf–WsÂ÷7ãà¢ÂöF—cà¢ÂöF—cà¢ÆF—b6Æ73Ò&F6†&ö&BÖÖ×w&#à¢ÆF—b–CÒ&F6†&ö&DF$Ö#ãÂöF—cà¢ÆF—b–CÒ&F6†&ö&DÖfÆÆ&6²"6Æ73Ò&F6†&ö&BÖÖÖfÆÆ&6²#ãÆ#äÆöF–ærÖÂö#ãÇ7ãå&W7FW&çB6ö÷&F–æFW2&R&V–ær&W&VBãÂ÷7ããÂöF—cà¢ÂöF—cà¢Â÷6V7F–öãæ° ¢6öç7B6VÆV7FVD‡FÖÂÒÇ6V7F–öâ6Æ73Ò&F6‚×æVÂ"–CÒ'6VÆV7FVE&W7FW&çB#à¢G·6VÆV7FVEF&vWDÖ&·W‡–ÆöB—Ğ¢Â÷6V7F–öãæ° ¢6öç7BÖÇ&VG”Ö÷VçFVBÒ&ööÆVâ‡&ö÷BçVW'•6VÆV7F÷"‚"6F6†&ö&DF$Ö"’“°¢–b‚ÖÇ&VG”Ö÷VçFVB’°¢&ö÷Bæ–ææW$…DÔÂÒG¶6&G4‡FÖÇÒG·&öw&W74‡FÖÇÒG·&W6÷W&6W4‡FÖÇÒG·7VÖÖ'”‡FÖÇÒG¶Ö‡FÖÇÒG·6VÆV7FVD‡FÖÇÖ°¢&VæFW$F6†&ö&DÖ‡–ÆöBÂ²f—C¢G'VRÒ“°¢&WGW&ã°¢Ğ¢6öç7B6&G2Ò&ö÷BçVW'•6VÆV7F÷"‚u¶FFÖF6†&ö&B×6V7F–öãÒ&6&G2%Òr“°¢6öç7B&öw&W756V7F–öâÒ&ö÷BçVW'•6VÆV7F÷"‚u¶FFÖF6†&ö&B×6V7F–öãÒ'&öw&W72%Òr“°¢6öç7B&W6÷W&6W56V7F–öâÒ&ö÷BçVW'•6VÆV7F÷"‚u¶FFÖF6†&ö&B×6V7F–öãÒ'&W6÷W&6W2%Òr“°¢6öç7B7VÖÖ'•6V7F–öâÒ&ö÷BçVW'•6VÆV7F÷"‚u¶FFÖF6†&ö&B×6V7F–öãÒ'7VÖÖ'’%Òr“°¢–b†6&G2’6&G2æ÷WFW$…DÔÂÒ6&G4‡FÖÃ°¢–b‡&öw&W756V7F–öâ’&öw&W756V7F–öâæ÷WFW$…DÔÂÒ&öw&W74‡FÖÃ°¢–b‡&W6÷W&6W56V7F–öâ’&W6÷W&6W56V7F–öâæ÷WFW$…DÔÂÒ&W6÷W&6W4‡FÖÃ°¢–b‡7VÖÖ'•6V7F–öâ’7VÖÖ'•6V7F–öâæ÷WFW$…DÔÂÒ7VÖÖ'”‡FÖÃ°¢&VæFW%6VÆV7FVEF&vWB‡–ÆöB“°¢&VæFW$F6†&ö&DÖ‡–ÆöBÂ²f—C¢fÇ6RÒ“°¢Ğ ¢7–æ2gVæ7F–öâÆöDwV–FU7FG2†÷F–öç2Ò·Ò’°¢–b‡7FFRæwV–FTÆöD–äfÆ–v‡B’&WGW&ã°¢–b‡7FFRæwV–FTÆöFVDöæ6Rbb÷F–öç2æf÷&6R’&WGW&ã°¢7FFRæwV–FTÆöD–äfÆ–v‡BÒG'VS°¢–b†÷F–öç2æf÷&6R’°¢7FFRæwV–FT7F–öä¶–æBÒ"#°¢7FFRæwV–FT7F–öäÖW76vRÒ%&Vg&W6†–ærF6†&ö&BFFâââ#°¢–b‡7FFRæ7F—fUf–WrÓÓÒ&F6†&ö&B"’&VæFW$F6†&ö&B‚“°¢Ğ¢G'’°¢6öç7B–ÆöBÒv—BfWF6„Æ—fTwV–FT6öÆÆV7F–öâ‚“°¢–b†—4V×G”wV–FU–ÆöB‡–ÆöB’bb7FFRæwV–FU–ÆöB’&WGW&ã°¢7FFRæwV–FU–ÆöBÒ–ÆöC°¢7FFRæwV–FTÆöFVDöæ6RÒG'VS°¢7FFRæÆ7E&Vg&W6„BÒæWrFFR‚’çFôÆö6ÆUF–ÖU7G&–ær‚“°¢–b†÷F–öç2æf÷&6Rbb7FFRæwV–FT7F–öäÖW76vRæ–æ6ÇVFW2‚'7F'FVB"’’°¢7FFRæwV–FT7F–öä¶–æBÒ&vööB#°¢7FFRæwV–FT7F–öäÖW76vRÒ$F6†&ö&BFF&Vg&W6†VBâ#°¢Ğ¢–b‡7FFRæ7F—fUf–WrÓÓÒ&F6†&ö&B"’&VæFW$F6†&ö&B‚“°¢Ò6F6‚†W'&÷"’°¢7FFRæwV–FT7F–öä¶–æBÒ&&B#°¢7FFRæwV–FT7F–öäÖW76vRÒ&Vg&W6‚f–ÆVC¢G¶W'&÷"æÖW76vRÇÂW'&÷'Ö°¢Òf–æÆÇ’°¢7FFRæwV–FTÆöD–äfÆ–v‡BÒfÇ6S°¢–b‡7FFRæ7F—fUf–WrÓÓÒ&F6†&ö&B"’&VæFW$F6†&ö&B‚“°¢Ğ¢Ğ ¢gVæ7F–öâ&ö÷B‚’°¢6öç7BæbÒ6ÆVåF'2‚“°¢Vç7W&TF6†&ö&Ef–Wr‚“°¢æbæFDWfVçDÆ—7FVæW"‚&6Æ–6²"Â†WfVçB’Óâ°¢6öç7B'WGFöâÒWfVçBçF&vWBæ6Æ÷6W7B‚%¶FF×f–WuÒ"“°¢–b‚'WGFöâ’&WGW&ã°¢v–æF÷rç6WEF–ÖV÷WB‚‚’Óâ7F—fFR†'WGFöâæFF6WBçf–Wr’Â“°¢ÒÂG'VR“°¢Fö7VÖVçBæ&öG’æFDWfVçDÆ—7FVæW"‚&6Æ–6²"Â†WfVçB’Óâ°¢–b‚WfVçBçF&vWBæ6Æ÷6W7B‚%¶FFÖ6ÆV"ÖF6†&ö&B×6VÆV7F–öåÒ"’’&WGW&ã°¢WfVçBç&WfVçDFVfVÇB‚“°¢6ÆV$F6†&ö&E6VÆV7F–öâ‚“°¢Ò“°¢Fö7VÖVçBæ&öG’æFDWfVçDÆ—7FVæW"‚&6Æ–6²"Â†WfVçB’Óâ°¢–b‚WfVçBçF&vWBæ6Æ÷6W7B‚%¶FF×&Vg&W6‚ÖF6†&ö&EÒ"’’&WGW&ã°¢WfVçBç&WfVçDFVfVÇB‚“°¢ÆöDwV–FU7FG2‡²f÷&6S¢G'VRÒ“°¢Ò“°¢Fö7VÖVçBæ&öG’æFDWfVçDÆ—7FVæW"‚&6Æ–6²"Â†WfVçB’Óâ°¢–b‚WfVçBçF&vWBæ6Æ÷6W7B‚%¶FF×7F'BÖwV–FRÖ6öÆÆV7F–öåÒ"’’&WGW&ã°¢WfVçBç&WfVçDFVfVÇB‚“°¢7F'DwV–FU&V6öÆÆV7F–öâ‚“°¢Ò“°¢7F—fFR‚'6V&6‚"“°¢Ğ ¢–b†Fö7VÖVçBç&VG•7FFRÓÓÒ&ÆöF–ær"’°¢Fö7VÖVçBæFDWfVçDÆ—7FVæW"‚$DôÔ6öçFVçDÆöFVB"Â&ö÷B“°¢ÒVÇ6R°¢&ö÷B‚“°¢Ğ§Ò’‚“°
+            { key: "collectorCpuPercent", color: "#2563eb" }
+          ])}
+          <div class="resource-legend"><span><i style="--series:#b0123f"></i>Server</span><span><i style="--series:#2563eb"></i>Collector</span></div>
+        </article>
+        <article class="resource-card">
+          <div class="resource-card-head"><div><span>Memory</span><b>${html(memory)}</b></div><small>${html(formatBytes(latest.memoryUsedBytes))} / ${html(formatBytes(latest.memoryTotalBytes))}<br>Collector ${html(formatBytes(latest.collectorMemoryBytes))}</small></div>
+          ${resourceChart(samples, [{ key: "memoryPercent", color: "#0f766e" }])}
+          <div class="resource-legend"><span><i style="--series:#0f766e"></i>Server memory</span></div>
+        </article>
+        <article class="resource-card">
+          <div class="resource-card-head"><div><span>Storage</span><b>${html(disk)}</b></div><small>${html(formatBytes(latest.diskUsedBytes))} / ${html(formatBytes(latest.diskTotalBytes))}<br>${html(formatBytes(latest.diskFreeBytes))} free</small></div>
+          ${resourceChart(samples, [{ key: "diskPercent", color: "#d97706" }])}
+          <div class="resource-legend"><span><i style="--series:#d97706"></i>Disk used</span></div>
+        </article>
+      </div>
+    </section>`;
+  }
+
+  async function fetchJson(path, fallback) {
+    try {
+      const response = await fetch(path, { cache: "no-store" });
+      return response.ok ? response.json() : fallback;
+    } catch (_error) {
+      return fallback;
+    }
+  }
+
+  function isEmptyGuidePayload(payload) {
+    if (!payload || payload.error) return true;
+    const progress = payload.progress || {};
+    const counts = payload.counts || {};
+    return !progress.status && !number(counts.targets || counts.wineLines || counts.wineListSources);
+  }
+
+  async function fetchLiveGuideCollection() {
+    const [proxied, resourceHistory] = await Promise.all([
+      fetchJson("/api/guide-collection", null),
+      fetchJson("/data/resource-history.json", null)
+    ]);
+    if (proxied && resourceHistory?.samples) proxied.resourceHistory = resourceHistory;
+    if (!isEmptyGuidePayload(proxied)) return proxied;
+    return proxied;
+  }
+
+  async function startGuideRecollection() {
+    if (state.guideActionInFlight) return;
+    const password = window.prompt("Enter the recollection password.");
+    if (!password) return;
+    state.guideActionInFlight = true;
+    state.guideActionKind = "";
+    state.guideActionMessage = "Starting recollection...";
+    renderDashboard();
+    try {
+      const response = await fetch("/api/guide-collection", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ password })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        state.guideActionKind = "bad";
+        state.guideActionMessage = payload.error || `Could not start recollection. HTTP ${response.status}`;
+        return;
+      }
+      state.guideActionKind = "good";
+      state.guideActionMessage = payload.message || "Recollection started.";
+      state.guideLoadedOnce = false;
+      await loadGuideStats({ force: true });
+      window.setTimeout(() => loadGuideStats({ force: true }), 2500);
+      window.setTimeout(() => loadGuideStats({ force: true }), 8000);
+    } catch (error) {
+      state.guideActionKind = "bad";
+      state.guideActionMessage = `Could not reach the collection API: ${error.message || error}`;
+    } finally {
+      state.guideActionInFlight = false;
+      if (state.activeView === "dashboard") renderDashboard();
+    }
+  }
+
+  function ensureDashboardView() {
+    let view = document.querySelector("#dashboardView");
+    if (!view) {
+      const commandBar = document.querySelector(".command-bar");
+      view = document.createElement("section");
+      view.id = "dashboardView";
+      view.className = "app-view";
+      view.dataset.viewPanel = "dashboard";
+      commandBar?.insertAdjacentElement("beforebegin", view);
+    }
+    return view;
+  }
+
+  function cleanTabs() {
+    let nav = document.querySelector(".view-tabs");
+    if (!nav) {
+      nav = document.createElement("nav");
+      nav.className = "view-tabs";
+      document.querySelector(".app-header")?.insertAdjacentElement("afterend", nav);
+    }
+    nav.innerHTML = [
+      ["search", "Search"],
+      ["dashboard", "Dashboard"]
+    ].map(([key, label]) => `<button class="view-tab" type="button" data-view="${key}">${label}</button>`).join("");
+    document.querySelector("#watchlistView")?.remove();
+    document.querySelectorAll(".source-strip").forEach((node) => node.remove());
+    return nav;
+  }
+
+  function activate(view) {
+    state.activeView = view;
+    ensureDashboardView();
+    document.querySelectorAll(".view-tab").forEach((tab) => {
+      tab.classList.toggle("active", tab.dataset.view === view);
+    });
+    document.querySelectorAll(".app-view").forEach((panel) => {
+      panel.classList.toggle("active", panel.dataset.viewPanel === view);
+    });
+    const showSearch = view === "search";
+    document.querySelector(".command-bar")?.classList.toggle("hidden", !showSearch);
+    document.querySelector(".workspace")?.classList.toggle("hidden", !showSearch);
+    document.querySelector(".map-panel")?.classList.toggle("hidden", !showSearch);
+    if (view === "dashboard") {
+      renderDashboard();
+      if (!state.guideLoadedOnce) loadGuideStats({ force: true });
+    }
+    if (showSearch) {
+      try {
+        if (typeof renderMap === "function") renderMap(typeof latestResults === "undefined" ? [] : latestResults);
+      } catch (_error) {}
+    }
+  }
+
+  function progressValues(payload) {
+    const progress = payload?.progress || {};
+    const counts = payload?.counts || {};
+    const latestRun = payload?.latestRuns?.[0] || {};
+    const summary = payload?.collectionSummary || {};
+    const running = progress.status === "running" && !progress.stale;
+    const stopped = progress.status === "stalled" || Boolean(progress.stale);
+    const completed = !running && (progress.status === "completed" || latestRun.status === "completed");
+    const summaryTotal = number(summary.totalTargets || counts.targets || latestRun.target_count);
+    const summaryChecked = number(summary.checkedTargets || latestRun.websites_checked);
+    const rawProcessed = number(progress.processedTargets ?? progress.websitesChecked ?? latestRun.websites_checked);
+    const rawTotal = number(progress.totalWebsites || summary.totalTargets || counts.targets || latestRun.target_count);
+    const useSummaryProgress = !running && completed && summaryTotal && summaryChecked && (!rawTotal || rawTotal < summaryTotal);
+    const processed = useSummaryProgress ? summaryChecked : rawProcessed;
+    const total = useSummaryProgress ? summaryTotal : rawTotal;
+    const percent = total ? Math.min(100, Math.max(0, useSummaryProgress ? ((processed / total) * 100) : number(progress.progressPercent || ((processed / total) * 100)))) : 0;
+    return {
+      progress,
+      counts,
+      latestRun,
+      summary,
+      running,
+      stopped,
+      processed,
+      total,
+      remaining: total ? Math.max(0, total - processed) : 0,
+      percent,
+      elapsed: progress.elapsedSeconds ?? secondsBetween(progress.startedAt || latestRun.started_at, progress.finishedAt || latestRun.finished_at),
+      duration: progress.durationSeconds ?? secondsBetween(progress.startedAt || latestRun.started_at, progress.finishedAt || latestRun.finished_at),
+      status: running ? "Collecting" : stopped ? "Stopped" : latestRun.status === "completed" ? "Done" : "Ready"
+    };
+  }
+
+  function statusLabel(status) {
+    const labels = {
+      found: "Verified wine list",
+      no_wine_list: "No wine list",
+      not_checked: "Not checked yet",
+      missing_website: "Website missing",
+      review: "Needs review",
+      error: "Error"
+    };
+    return labels[status] || status || "Unknown";
+  }
+
+  function targetKind(target) {
+    const status = target?.status || "";
+    if (number(target.verifiedWineListCount) > 0 || (
+      target.wineListStatus === "found" &&
+      target.wineListParserStatus === "parsed" &&
+      number(target.chosenWineLineCount) > 0 &&
+      !String(target.wineListLastError || "").trim()
+    )) return "found";
+    if (status === "no_wine_list") return "none";
+    return "pending";
+  }
+
+  function targetPill(target) {
+    const kind = targetKind(target);
+    const cls = kind === "found" ? "good" : kind === "none" ? "bad" : "warn";
+    const label = kind === "found" ? "Verified wine list" : kind === "none" ? "No wine list" : "Needs review";
+    return `<span class="dash-pill ${cls}">${html(label)}</span>`;
+  }
+
+  function visibleMapTargets(payload) {
+    return (payload?.mapTargets || [])
+      .filter((target) => target.lat !== null && target.lng !== null && target.lat !== "" && target.lng !== "")
+      .filter((target) => String(target.websiteUrl || "").trim() !== "")
+      .map((target) => ({ ...target, lat: Number(target.lat), lng: Number(target.lng) }))
+      .filter((target) => Number.isFinite(target.lat) && Number.isFinite(target.lng));
+  }
+
+  function markerColor(kind) {
+    if (kind === "found") return "#16a34a";
+    if (kind === "none") return "#dc2626";
+    return "#f59e0b";
+  }
+
+  function markerLabel(kind) {
+    if (kind === "found") return "F";
+    if (kind === "none") return "N";
+    return "R";
+  }
+
+  function markerZIndex(kind) {
+    if (kind === "found") return 300;
+    if (kind === "none") return 200;
+    return 100;
+  }
+
+  function getGoogleMapsKey() {
+    return window.STARWINE_CONFIG?.googleMapsApiKey || localStorage.getItem("googleMapsApiKey") || "";
+  }
+
+  function loadDashboardGoogleMaps() {
+    if (window.google?.maps) return Promise.resolve(window.google.maps);
+    const key = getGoogleMapsKey();
+    if (!key) return Promise.resolve(null);
+    if (state.dashboardMapPromise) return state.dashboardMapPromise;
+    state.dashboardMapPromise = new Promise((resolve, reject) => {
+      const callbackName = `initDashboardMap${Date.now()}`;
+      const previousAuthFailure = window.gm_authFailure;
+      let settled = false;
+      window.gm_authFailure = () => {
+        window.gm_authFailure = previousAuthFailure;
+        if (typeof previousAuthFailure === "function") previousAuthFailure();
+        if (!settled) {
+          settled = true;
+          reject(new Error(`Google Maps rejected ${window.location.origin}. Add ${window.location.origin}/* to this API key's Website restrictions and make sure Maps JavaScript API and billing are enabled.`));
+        }
+      };
+      window[callbackName] = () => {
+        delete window[callbackName];
+        window.gm_authFailure = previousAuthFailure;
+        if (!settled) {
+          settled = true;
+          resolve(window.google.maps);
+        }
+      };
+      const script = document.createElement("script");
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=${callbackName}&v=weekly&loading=async`;
+      script.async = true;
+      script.defer = true;
+      script.onerror = () => {
+        window.gm_authFailure = previousAuthFailure;
+        if (!settled) {
+          settled = true;
+          reject(new Error("Google Maps failed to load. Check the API key, billing, and allowed Website restrictions."));
+        }
+      };
+      document.head.appendChild(script);
+    });
+    return state.dashboardMapPromise;
+  }
+
+  function markerIcon(maps, color, label = "") {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="38" viewBox="0 0 30 38">
+      <path fill="${color}" stroke="#ffffff" stroke-width="2.2" d="M15 2C8.1 2 2.5 7.6 2.5 14.5 2.5 24 15 36 15 36s12.5-12 12.5-21.5C27.5 7.6 21.9 2 15 2Z"/>
+      <circle cx="15" cy="14.5" r="6" fill="rgba(255,255,255,0.95)"/>
+      <text x="15" y="18.2" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" font-weight="800" fill="${color}">${label}</text>
+    </svg>`;
+    return {
+      url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+      scaledSize: new maps.Size(24, 30),
+      anchor: new maps.Point(12, 30)
+    };
+  }
+
+  function mapSignature(targets) {
+    return targets
+      .map((target) => [
+        target.id,
+        target.status,
+        target.lat,
+        target.lng,
+        target.wineListCount,
+        target.wineLineCount,
+        target.verifiedWineListCount,
+        target.reviewSourceCount,
+        target.wineListParserStatus,
+        target.chosenWineLineCount
+      ].join(":"))
+      .join("|");
+  }
+
+  function targetFeature(target) {
+    return {
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [Number(target.lng), Number(target.lat)]
+      },
+      properties: {
+        id: String(target.id),
+        kind: targetKind(target),
+        name: target.name || "Restaurant"
+      }
+    };
+  }
+
+  function infoHtml(target) {
+    const location = [target.city, target.country].filter(Boolean).join(", ");
+    const kind = targetKind(target);
+    const wineListLabel = kind === "found" ? "Wine list" : "Review source";
+    const wineList = target.wineListUrl
+      ? `<br><a href="${html(target.wineListUrl)}" target="_blank" rel="noreferrer">${html(wineListLabel)}</a>`
+      : "";
+    const website = target.websiteUrl && target.websiteUrl !== target.wineListUrl
+      ? `<br><a href="${html(target.websiteUrl)}" target="_blank" rel="noreferrer">Official website</a>`
+      : "";
+    return `<strong>${html(target.name || "Unknown")}</strong><br>${html(location || "Unknown location")}<br>${targetPill(target)}${wineList}${website}`;
+  }
+
+  async function renderDashboardMap(payload, options = {}) {
+    const mapEl = document.querySelector("#dashboardDbMap");
+    const fallbackEl = document.querySelector("#dashboardMapFallback");
+    if (!mapEl || !fallbackEl) return;
+    if (state.activeView !== "dashboard") return;
+    const targets = visibleMapTargets(payload);
+    if (!targets.length) {
+      if (state.dashboardMarkers.size) return;
+      for (const marker of state.dashboardMarkers.values()) marker.setMap(null);
+      state.dashboardMarkers.clear();
+      fallbackEl.classList.remove("hidden");
+      fallbackEl.innerHTML = `<b>No mapped restaurants yet</b><span>Coordinates will appear as the collector resolves restaurants.</span>`;
+      return;
+    }
+    try {
+      const maps = await loadDashboardGoogleMaps();
+      if (!maps) {
+        fallbackEl.classList.remove("hidden");
+        fallbackEl.innerHTML = `<b>Map unavailable</b><span>Google Maps key is not available in this browser.</span>`;
+        return;
+      }
+      fallbackEl.classList.add("hidden");
+      if (!state.dashboardMap || state.dashboardMapEl !== mapEl) {
+        state.dashboardMapEl = mapEl;
+        state.dashboardMap = new maps.Map(mapEl, {
+          center: { lat: 30, lng: 8 },
+          zoom: 2,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: true,
+          clickableIcons: false,
+          styles: [
+            { featureType: "poi", stylers: [{ visibility: "off" }] },
+            { featureType: "transit", stylers: [{ visibility: "off" }] }
+          ]
+        });
+        state.dashboardInfoWindow = new maps.InfoWindow();
+        state.dashboardMapHasFit = false;
+      }
+      const signature = mapSignature(targets);
+      const bounds = new maps.LatLngBounds();
+      targets.forEach((target) => bounds.extend({ lat: target.lat, lng: target.lng }));
+      if (!state.dashboardDataLayer) {
+        state.dashboardDataLayer = new maps.Data({ map: state.dashboardMap });
+        state.dashboardDataLayer.setStyle((feature) => ({
+          icon: markerIcon(maps, markerColor(feature.getProperty("kind")), markerLabel(feature.getProperty("kind"))),
+          zIndex: markerZIndex(feature.getProperty("kind")),
+          title: feature.getProperty("name") || "Restaurant"
+        }));
+      }
+      if (!state.dashboardDataClickBound) {
+        state.dashboardDataLayer.addListener("click", (event) => {
+          selectDashboardTarget(event.feature.getProperty("id"), true, event.latLng);
+        });
+        state.dashboardDataClickBound = true;
+      }
+      if (signature !== state.dashboardMapSignature) {
+        state.dashboardDataLayer.forEach((feature) => state.dashboardDataLayer.remove(feature));
+        state.dashboardDataLayer.addGeoJson({
+          type: "FeatureCollection",
+          features: targets.map(targetFeature)
+        });
+        state.dashboardMapSignature = signature;
+      }
+      if (!state.dashboardMapHasFit || options.fit) {
+        state.dashboardMap.fitBounds(bounds, 56);
+        if (targets.length === 1) state.dashboardMap.setZoom(12);
+        state.dashboardMapHasFit = true;
+      }
+      if (state.activeTargetId) selectDashboardTarget(state.activeTargetId, false);
+    } catch (error) {
+      fallbackEl.classList.remove("hidden");
+      fallbackEl.innerHTML = `<b>Map unavailable</b><span>${html(error.message)}</span>`;
+    }
+  }
+
+  function selectDashboardTarget(id, shouldScroll = true, clickedLatLng = null) {
+    state.activeTargetId = String(id || "");
+    const payload = state.guidePayload || {};
+    const target = (payload.mapTargets || []).find((item) => String(item.id) === state.activeTargetId);
+    if (!target) return;
+    const marker = state.dashboardMarkers.get(String(target.id));
+    const position = clickedLatLng || (Number.isFinite(Number(target.lat)) && Number.isFinite(Number(target.lng))
+      ? new google.maps.LatLng(Number(target.lat), Number(target.lng))
+      : null);
+    if (state.dashboardMap && position) {
+      state.dashboardMap.panTo(position);
+      if (state.dashboardMap.getZoom() < 8) state.dashboardMap.setZoom(8);
+      state.dashboardInfoWindow?.setContent(infoHtml(target));
+      state.dashboardInfoWindow?.setPosition(position);
+      state.dashboardInfoWindow?.open({ map: state.dashboardMap });
+    }
+    renderSelectedTarget(payload);
+    if (shouldScroll) {
+      document.querySelector("#selectedRestaurant")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
+  function clearDashboardSelection() {
+    state.activeTargetId = null;
+    state.dashboardInfoWindow?.close();
+    renderSelectedTarget(state.guidePayload || {});
+    renderDashboardMap(state.guidePayload || {}, { fit: true });
+    document.querySelector('[data-dashboard-section="map"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function selectedTargetMarkup(payload) {
+    const target = (payload?.mapTargets || []).find((item) => String(item.id) === String(state.activeTargetId || ""));
+    if (!target) {
+      return `<div class="selected-target empty">
+        <h3>No restaurant selected</h3>
+        <p>Click a marker on the map to inspect one restaurant.</p>
+      </div>`;
+    }
+    const location = [target.city, target.country].filter(Boolean).join(", ");
+    const googleMapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([target.name, target.city, target.country].filter(Boolean).join(" "))}`;
+    const kind = targetKind(target);
+    const wineListLabel = kind !== "found"
+      ? "Review source"
+      : /pdf|file/i.test(String(target.wineListType || target.wineListUrl || ""))
+      ? "Wine list file"
+      : "Wine list";
+    return `<div class="selected-target">
+      <div>
+        <p class="dash-kicker">Selected restaurant</p>
+        <h3>${html(target.name || "Unknown")}</h3>
+        <p>${html(location || "Unknown location")}</p>
+      </div>
+      <div class="selected-target-grid">
+        <div class="metric-box"><span>Status</span><b>${targetPill(target)}</b></div>
+        <div class="metric-box"><span>Last checked</span><b>${html(target.lastCheckedAt || "-")}</b></div>
+      </div>
+      <div class="selected-target-actions">
+        ${target.wineListUrl ? `<a class="${kind === "found" ? "" : "secondary"}" href="${html(target.wineListUrl)}" target="_blank" rel="noreferrer">${html(wineListLabel)}</a>` : ""}
+        ${target.websiteUrl && target.websiteUrl !== target.wineListUrl ? `<a class="secondary" href="${html(target.websiteUrl)}" target="_blank" rel="noreferrer">Official website</a>` : ""}
+        <a class="secondary" href="${html(googleMapUrl)}" target="_blank" rel="noreferrer">Google Maps</a>
+        <button class="secondary" type="button" data-clear-dashboard-selection>Close</button>
+      </div>
+    </div>`;
+  }
+
+  function renderSelectedTarget(payload) {
+    const container = document.querySelector("#selectedRestaurant");
+    if (container) container.innerHTML = selectedTargetMarkup(payload);
+  }
+
+  function renderDashboard() {
+    const root = ensureDashboardView();
+    const payload = state.guidePayload || {};
+    const values = progressValues(payload);
+    const summary = values.summary;
+    const progress = values.progress;
+    const mapped = visibleMapTargets(payload).length;
+    const mappedWithWebsite = number(summary.mappedWithWebsite) || mapped;
+    const progressCounts = progress.dbCounts || {};
+    const sourceCount = number(payload.counts?.wineListSources)
+      || number(summary.totalSources)
+      || number(progressCounts.wineListSources)
+      || number(progress.wineListsFound);
+    const savedLines = number(payload.counts?.wineLines)
+      || number(progressCounts.wineLines)
+      || number(progress.wineLinesFound);
+    const parsedSources = number(summary.parsedSources);
+    const reviewSources = number(summary.parseReviewSources);
+    const found = number(summary.foundWineList);
+    const none = number(summary.noWineList);
+    const pending = number(summary.pending) + number(summary.missingWebsite);
+    const errorCount = number(summary.errors || values.progress.errors);
+    const lastCollectionAt = payload.lastCollection?.finished_at || "";
+    const lastCollectionText = lastCollectionAt ? formatTime(lastCollectionAt) : "No completed collection yet";
+    const etaText = values.running
+      ? `${formatDuration(progress.estimatedRemainingSeconds)}${progress.estimatedFinishAt ? ` / ${formatTime(progress.estimatedFinishAt)}` : ""}`
+      : formatDuration(values.duration);
+    const collectionText = values.running
+      ? "The local PC collector is running now."
+      : values.stopped
+        ? "The local PC collector stopped reporting progress."
+        : "No background collection is running right now.";
+    const progressTitle = values.running
+      ? "Collecting restaurant wine lists"
+      : values.stopped
+        ? "Collection stopped"
+        : "Collection status";
+    const progressPillClass = values.running ? "good" : values.stopped ? "warn" : "";
+
+    const cardsHtml = `<div class="dashboard-grid" data-dashboard-section="cards">
+      <div class="dashboard-card"><span>Collection</span><b>${html(values.status)}</b><small>${html(collectionText)}<br>DB updated ${html(lastCollectionText)}<br>Every other Monday 03:00 KST</small></div>
+      <div class="dashboard-card"><span>Progress</span><b>${html(values.percent.toFixed(1))}%</b><small>${html(fmtInt(values.processed))} checked / ${html(fmtInt(values.remaining))} left / ${html(fmtInt(values.total))} total</small></div>
+      <div class="dashboard-card"><span>Verified wine lists</span><b>${html(fmtInt(found))}</b><small>${html(fmtInt(parsedSources))} exact list sources, ${html(fmtInt(savedLines))} saved wine lines.</small></div>
+      <div class="dashboard-card"><span>Needs review</span><b>${html(fmtInt(number(summary.needsReview)))}</b><small>${html(fmtInt(reviewSources))} inconclusive sources / ${html(fmtInt(errorCount))} restaurant errors.</small></div>
+    </div>`;
+
+    const progressHtml = `<section class="dash-panel" data-dashboard-section="progress">
+      <div class="collection-head">
+        <div>
+          <p class="dash-kicker">Collect progress</p>
+          <h2>${html(progressTitle)}</h2>
+        </div>
+        <div class="selected-target-actions dashboard-progress-actions">
+          <span class="dash-pill ${progressPillClass}">${html(values.status)}</span>
+          <button class="dashboard-refresh" type="button" data-start-guide-collection ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(state.guideActionInFlight ? "Starting..." : "Start recollection")}</button>
+          <button class="dashboard-refresh" type="button" data-refresh-dashboard ${state.guideLoadInFlight ? "disabled" : ""}>${html(state.guideLoadInFlight ? "Refreshing..." : "Refresh")}</button>
+          ${state.guideActionMessage ? `<span class="dashboard-action-note ${html(state.guideActionKind)}">${html(state.guideActionMessage)}</span>` : ""}
+          ${state.lastRefreshAt ? `<span class="dashboard-action-note">Last refreshed ${html(state.lastRefreshAt)}</span>` : ""}
+        </div>
+      </div>
+      <div class="dash-progress" style="--dash-progress:${html(values.percent)}%"><i></i></div>
+      <div class="collection-metrics">
+        <div class="metric-box"><span>Checked</span><b>${html(fmtInt(values.processed))} / ${html(fmtInt(values.total))}</b></div>
+        <div class="metric-box"><span>Remaining</span><b>${html(fmtInt(values.remaining))}</b></div>
+        <div class="metric-box"><span>Elapsed</span><b>${html(formatDuration(values.elapsed))}</b></div>
+        <div class="metric-box"><span>${values.running ? "ETA" : "Total time"}</span><b>${html(etaText)}</b></div>
+        <div class="metric-box"><span>Current restaurant</span><b>${html(progress.currentTarget || "-")}</b></div>
+        <div class="metric-box"><span>Errors</span><b>${html(fmtInt(errorCount))}</b></div>
+      </div>
+    </section>`;
+
+    const resourcesHtml = resourcePanelMarkup(payload);
+
+    const summaryHtml = `<section class="dash-panel" data-dashboard-section="summary">
+      <p class="dash-kicker">DB summary</p>
+      <h2>What the collector found</h2>
+      <div class="db-health-grid">
+        <div class="metric-box"><span>Restaurants saved</span><b>${html(fmtInt(summary.totalTargets || values.total))}</b></div>
+        <div class="metric-box"><span>Verified wine lists</span><b>${html(fmtInt(found))}</b></div>
+        <div class="metric-box"><span>No wine list</span><b>${html(fmtInt(none))}</b></div>
+        <div class="metric-box"><span>Pending / no website</span><b>${html(fmtInt(pending))}</b></div>
+        <div class="metric-box"><span>Parsing review</span><b>${html(fmtInt(reviewSources))}</b></div>
+        <div class="metric-box"><span>Mapped DB URLs</span><b>${html(fmtInt(mappedWithWebsite))}</b></div>
+      </div>
+    </section>`;
+
+    const mapHtml = `<section class="dash-panel" data-dashboard-section="map">
+      <div class="collection-head">
+        <div>
+          <p class="dash-kicker">Restaurant map</p>
+          <h2>Wine-list coverage</h2>
+        </div>
+        <div class="map-legend">
+          <span class="legend-dot" style="--dot:#16a34a">Found</span>
+          <span class="legend-dot" style="--dot:#dc2626">No wine list</span>
+          <span class="legend-dot" style="--dot:#f59e0b">Pending / review</span>
+        </div>
+      </div>
+      <div class="dashboard-map-wrap">
+        <div id="dashboardDbMap"></div>
+        <div id="dashboardMapFallback" class="dashboard-map-fallback"><b>Loading map</b><span>Restaurant coordinates are being prepared.</span></div>
+      </div>
+    </section>`;
+
+    const selectedHtml = `<section class="dash-panel" id="selectedRestaurant">
+      ${selectedTargetMarkup(payload)}
+    </section>`;
+
+    const mapAlreadyMounted = Boolean(root.querySelector("#dashboardDbMap"));
+    if (!mapAlreadyMounted) {
+      root.innerHTML = `${cardsHtml}${progressHtml}${resourcesHtml}${summaryHtml}${mapHtml}${selectedHtml}`;
+      renderDashboardMap(payload, { fit: true });
+      return;
+    }
+    const cards = root.querySelector('[data-dashboard-section="cards"]');
+    const progressSection = root.querySelector('[data-dashboard-section="progress"]');
+    const resourcesSection = root.querySelector('[data-dashboard-section="resources"]');
+    const summarySection = root.querySelector('[data-dashboard-section="summary"]');
+    if (cards) cards.outerHTML = cardsHtml;
+    if (progressSection) progressSection.outerHTML = progressHtml;
+    if (resourcesSection) resourcesSection.outerHTML = resourcesHtml;
+    if (summarySection) summarySection.outerHTML = summaryHtml;
+    renderSelectedTarget(payload);
+    renderDashboardMap(payload, { fit: false });
+  }
+
+  async function loadGuideStats(options = {}) {
+    if (state.guideLoadInFlight) return;
+    if (state.guideLoadedOnce && !options.force) return;
+    state.guideLoadInFlight = true;
+    if (options.force) {
+      state.guideActionKind = "";
+      state.guideActionMessage = "Refreshing dashboard data...";
+      if (state.activeView === "dashboard") renderDashboard();
+    }
+    try {
+      const payload = await fetchLiveGuideCollection();
+      if (isEmptyGuidePayload(payload) && state.guidePayload) return;
+      state.guidePayload = payload;
+      state.guideLoadedOnce = true;
+      state.lastRefreshAt = new Date().toLocaleTimeString();
+      if (options.force && !state.guideActionMessage.includes("started")) {
+        state.guideActionKind = "good";
+        state.guideActionMessage = "Dashboard data refreshed.";
+      }
+      if (state.activeView === "dashboard") renderDashboard();
+    } catch (error) {
+      state.guideActionKind = "bad";
+      state.guideActionMessage = `Refresh failed: ${error.message || error}`;
+    } finally {
+      state.guideLoadInFlight = false;
+      if (state.activeView === "dashboard") renderDashboard();
+    }
+  }
+
+  function boot() {
+    const nav = cleanTabs();
+    ensureDashboardView();
+    nav.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-view]");
+      if (!button) return;
+      window.setTimeout(() => activate(button.dataset.view), 0);
+    }, true);
+    document.body.addEventListener("click", (event) => {
+      if (!event.target.closest("[data-clear-dashboard-selection]")) return;
+      event.preventDefault();
+      clearDashboardSelection();
+    });
+    document.body.addEventListener("click", (event) => {
+      if (!event.target.closest("[data-refresh-dashboard]")) return;
+      event.preventDefault();
+      loadGuideStats({ force: true });
+    });
+    document.body.addEventListener("click", (event) => {
+      if (!event.target.closest("[data-start-guide-collection]")) return;
+      event.preventDefault();
+      startGuideRecollection();
+    });
+    activate("search");
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
+  }
+})();
