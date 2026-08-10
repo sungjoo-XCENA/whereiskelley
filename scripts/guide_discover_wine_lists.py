@@ -769,13 +769,13 @@ def main():
     parser.add_argument(
         "--workers",
         type=int,
-        default=max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "48"))),
+        default=max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "72"))),
         help="Restaurant websites crawled concurrently when Google Places is disabled.",
     )
     parser.add_argument(
         "--source-workers",
         type=int,
-        default=max(1, int(os.environ.get("WHEREISKELLEY_SOURCE_WORKERS", "36"))),
+        default=max(1, int(os.environ.get("WHEREISKELLEY_SOURCE_WORKERS", "54"))),
         help="HTML wine-list candidates validated concurrently after discovery.",
     )
     parser.add_argument(
