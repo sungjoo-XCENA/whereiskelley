@@ -67,6 +67,12 @@
       padding: 16px;
       margin-top: 14px;
     }
+    .database-summary-copy {
+      margin: 7px 0 14px;
+      color: var(--muted);
+      font-weight: 750;
+      line-height: 1.4;
+    }
     .collection-head {
       display: flex;
       align-items: start;
@@ -528,7 +534,7 @@
           <p class="dash-kicker">Server resources</p>
           <h2>Collection resource usage</h2>
         </div>
-        <span class="dash-pill">${html(fmtInt(samples.length))} samples · every ${html(fmtInt(interval))}s</span>
+        <span class="dash-pill">${html(fmtInt(samples.length))} samples 쨌 every ${html(fmtInt(interval))}s</span>
       </div>
       <div class="resource-grid">
         <article class="resource-card">
@@ -586,7 +592,7 @@
     state.guideActionInFlight = true;
     state.guideActionKind = "";
     state.guideActionMessage = "Starting recollection...";
-    renderDashboard();
+    renderCollection();
     try {
       const response = await fetch("/api/guide-collection", {
         method: "POST",
@@ -611,202 +617,28 @@
       state.guideActionMessage = `Could not reach the collection API: ${error.message || error}`;
     } finally {
       state.guideActionInFlight = false;
-      if (state.activeView === "dashboard") renderDashboard();
+      if (state.activeView === "collection") renderCollection();
     }
   }
 
-  function ensureDashboardView() {
-    let view = document.querySelector("#dashboardView");
-    if (!view) {
-      const commandBar = document.querySelector(".command-bar");
-      view = document.createElement("section");
-      view.id = "dashboardView";
-      view.className = "app-view";
-      view.dataset.viewPanel = "dashboard";
-      commandBar?.insertAdjacentElement("beforebegin", view);
+  function ensureDataViews() {
+    const commandBar = document.querySelector(".command-bar");
+    let databaseView = document.querySelector("#databaseView");
+    if (!databaseView) {
+      databaseView = document.querySelector("#dashboardView") || document.createElement("section");
+      databaseView.id = "databaseView";
+      databaseView.className = "app-view";
+      databaseView.dataset.viewPanel = "database";
+      if (!databaseView.isConnected) commandBar?.insertAdjacentElement("beforebegin", databaseView);
     }
-    return view;
-  }
 
-  function cleanTabs() {
-    let nav = document.querySelector(".view-tabs");
-    if (!nav) {
-      nav = document.createElement("nav");
-      nav.className = "view-tabs";
-      document.querySelector(".app-header")?.insertAdjacentElement("afterend", nav);
-    }
-    nav.innerHTML = [
-      ["search", "Search"],
-      ["dashboard", "Dashboard"]
-    ].map(([key, label]) => `<button class="view-tab" type="button" data-view="${key}">${label}</button>`).join("");
-    document.querySelector("#watchlistView")?.remove();
-    document.querySelectorAll(".source-strip").forEach((node) => node.remove());
-    return nav;
-  }
-
-  function activate(view) {
-    state.activeView = view;
-    ensureDashboardView();
-    document.querySelectorAll(".view-tab").forEach((tab) => {
-      tab.classList.toggle("active", tab.dataset.view === view);
-    });
-    document.querySelectorAll(".app-view").forEach((panel) => {
-      panel.classList.toggle("active", panel.dataset.viewPanel === view);
-    });
-    const showSearch = view === "search";
-    document.querySelector(".command-bar")?.classList.toggle("hidden", !showSearch);
-    document.querySelector(".workspace")?.classList.toggle("hidden", !showSearch);
-    document.querySelector(".map-panel")?.classList.toggle("hidden", !showSearch);
-    if (view === "dashboard") {
-      renderDashboard();
-      if (!state.guideLoadedOnce) loadGuideStats({ force: true });
-    }
-    if (showSearch) {
-      try {
-        if (typeof renderMap === "function") renderMap(typeof latestResults === "undefined" ? [] : latestResults);
-      } catch (_error) {}
-    }
-  }
-
-  function progressValues(payload) {
-    const progress = payload?.progress || {};
-    const counts = payload?.counts || {};
-    const latestRun = payload?.latestRuns?.[0] || {};
-    const summary = payload?.collectionSummary || {};
-    const running = progress.status === "running" && !progress.stale;
-    const stopped = progress.status === "stalled" || Boolean(progress.stale);
-    const completed = !running && (progress.status === "completed" || latestRun.status === "completed");
-    const summaryTotal = number(summary.totalTargets || counts.targets || latestRun.target_count);
-    const summaryChecked = number(summary.checkedTargets || latestRun.websites_checked);
-    const rawProcessed = number(progress.processedTargets ?? progress.websitesChecked ?? latestRun.websites_checked);
-    const rawTotal = number(progress.totalWebsites || summary.totalTargets || counts.targets || latestRun.target_count);
-    const useSummaryProgress = !running && completed && summaryTotal && summaryChecked && (!rawTotal || rawTotal < summaryTotal);
-    const processed = useSummaryProgress ? summaryChecked : rawProcessed;
-    const total = useSummaryProgress ? summaryTotal : rawTotal;
-    const percent = total ? Math.min(100, Math.max(0, useSummaryProgress ? ((processed / total) * 100) : number(progress.progressPercent || ((processed / total) * 100)))) : 0;
-    return {
-      progress,
-      counts,
-      latestRun,
-      summary,
-      running,
-      stopped,
-      processed,
-      total,
-      remaining: total ? Math.max(0, total - processed) : 0,
-      percent,
-      elapsed: progress.elapsedSeconds ?? secondsBetween(progress.startedAt || latestRun.started_at, progress.finishedAt || latestRun.finished_at),
-      duration: progress.durationSeconds ?? secondsBetween(progress.startedAt || latestRun.started_at, progress.finishedAt || latestRun.finished_at),
-      status: running ? "Collecting" : stopped ? "Stopped" : latestRun.status === "completed" ? "Done" : "Ready"
-    };
-  }
-
-  function statusLabel(status) {
-    const labels = {
-      found: "Verified wine list",
-      no_wine_list: "No wine list",
-      not_checked: "Not checked yet",
-      missing_website: "Website missing",
-      review: "Needs review",
-      error: "Error"
-    };
-    return labels[status] || status || "Unknown";
-  }
-
-  function targetKind(target) {
-    const status = target?.status || "";
-    if (number(target.verifiedWineListCount) > 0 || (
-      target.wineListStatus === "found" &&
-      target.wineListParserStatus === "parsed" &&
-      number(target.chosenWineLineCount) > 0 &&
-      !String(target.wineListLastError || "").trim()
-    )) return "found";
-    if (status === "no_wine_list") return "none";
-    return "pending";
-  }
-
-  function targetPill(target) {
-    const kind = targetKind(target);
-    const cls = kind === "found" ? "good" : kind === "none" ? "bad" : "warn";
-    const label = kind === "found" ? "Verified wine list" : kind === "none" ? "No wine list" : "Needs review";
-    return `<span class="dash-pill ${cls}">${html(label)}</span>`;
-  }
-
-  function visibleMapTargets(payload) {
-    return (payload?.mapTargets || [])
-      .filter((target) => target.lat !== null && target.lng !== null && target.lat !== "" && target.lng !== "")
-      .filter((target) => String(target.websiteUrl || "").trim() !== "")
-      .map((target) => ({ ...target, lat: Number(target.lat), lng: Number(target.lng) }))
-      .filter((target) => Number.isFinite(target.lat) && Number.isFinite(target.lng));
-  }
-
-  function markerColor(kind) {
-    if (kind === "found") return "#16a34a";
-    if (kind === "none") return "#dc2626";
-    return "#f59e0b";
-  }
-
-  function markerLabel(kind) {
-    if (kind === "found") return "F";
-    if (kind === "none") return "N";
-    return "R";
-  }
-
-  function markerZIndex(kind) {
-    if (kind === "found") return 300;
-    if (kind === "none") return 200;
-    return 100;
-  }
-
-  function getGoogleMapsKey() {
-    return window.STARWINE_CONFIG?.googleMapsApiKey || localStorage.getItem("googleMapsApiKey") || "";
-  }
-
-  function loadDashboardGoogleMaps() {
-    if (window.google?.maps) return Promise.resolve(window.google.maps);
-    const key = getGoogleMapsKey();
-    if (!key) return Promise.resolve(null);
-    if (state.dashboardMapPromise) return state.dashboardMapPromise;
-    state.dashboardMapPromise = new Promise((resolve, reject) => {
-      const callbackName = `initDashboardMap${Date.now()}`;
-      const previousAuthFailure = window.gm_authFailure;
-      let settled = false;
-      window.gm_authFailure = () => {
-        window.gm_authFailure = previousAuthFailure;
-        if (typeof previousAuthFailure === "function") previousAuthFailure();
-        if (!settled) {
-          settled = true;
-          reject(new Error(`Google Maps rejected ${window.location.origin}. Add ${window.location.origin}/* to this API key's Website restrictions and make sure Maps JavaScript API and billing are enabled.`));
-        }
-      };
-      window[callbackName] = () => {
-        delete window[callbackName];
-        window.gm_authFailure = previousAuthFailure;
-        if (!settled) {
-          settled = true;
-          resolve(window.google.maps);
-        }
-      };
-      const script = document.createElement("script");
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=${callbackName}&v=weekly&loading=async`;
-      script.async = true;
-      script.defer = true;
-      script.onerror = () => {
-        window.gm_authFailure = previousAuthFailure;
-        if (!settled) {
-          settled = true;
-          reject(new Error("Google Maps failed to load. Check the API key, billing, and allowed Website restrictions."));
-        }
-      };
-      document.head.appendChild(script);
-    });
-    return state.dashboardMapPromise;
-  }
-
-  function markerIcon(maps, color, label = "") {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="38" viewBox="0 0 30 38">
-      <path fill="${color}" stroke="#ffffff" stroke-width="2.2" d="M15 2C8.1 2 2.5 7.6 2.5 14.5 2.5 24 15 36 15 36s12.5-12 12.5-21.5C27.5 7.6 21.9 2 15 2Z"/>
-      <circle cx="15" cy="14.5" r="6" fill="rgba(255,255,255,0.95)"/>
+    let collectionView = document.querySelector("#collectionView");
+    if (!collectionView) {
+      collectionView = document.createElement("section");
+      collectionView.id = "collectionView";
+      collectionView.className = "app-view";
+      collectionView.dataset.viewPanel = "collection";
+      commandBar?.insertAdjacentElement("beforebegin", collectionVi…2034 tokens truncated… cx="15" cy="14.5" r="6" fill="rgba(255,255,255,0.95)"/>
       <text x="15" y="18.2" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" font-weight="800" fill="${color}">${label}</text>
     </svg>`;
     return {
@@ -865,7 +697,7 @@
     const mapEl = document.querySelector("#dashboardDbMap");
     const fallbackEl = document.querySelector("#dashboardMapFallback");
     if (!mapEl || !fallbackEl) return;
-    if (state.activeView !== "dashboard") return;
+    if (state.activeView !== "database") return;
     const targets = visibleMapTargets(payload);
     if (!targets.length) {
       if (state.dashboardMarkers.size) return;
@@ -1007,19 +839,14 @@
     if (container) container.innerHTML = selectedTargetMarkup(payload);
   }
 
-  function renderDashboard() {
-    const root = ensureDashboardView();
-    const payload = state.guidePayload || {};
+  function guideMetrics(input) {
+    const payload = input || {};
     const values = progressValues(payload);
     const summary = values.summary;
     const progress = values.progress;
     const mapped = visibleMapTargets(payload).length;
     const mappedWithWebsite = number(summary.mappedWithWebsite) || mapped;
     const progressCounts = progress.dbCounts || {};
-    const sourceCount = number(payload.counts?.wineListSources)
-      || number(summary.totalSources)
-      || number(progressCounts.wineListSources)
-      || number(progress.wineListsFound);
     const savedLines = number(payload.counts?.wineLines)
       || number(progressCounts.wineLines)
       || number(progress.wineLinesFound);
@@ -1046,49 +873,58 @@
         : "Collection status";
     const progressPillClass = values.running ? "good" : values.stopped ? "warn" : "";
 
-    const cardsHtml = `<div class="dashboard-grid" data-dashboard-section="cards">
-      <div class="dashboard-card"><span>Collection</span><b>${html(values.status)}</b><small>${html(collectionText)}<br>DB updated ${html(lastCollectionText)}<br>Every other Monday 03:00 KST</small></div>
-      <div class="dashboard-card"><span>Progress</span><b>${html(values.percent.toFixed(1))}%</b><small>${html(fmtInt(values.processed))} checked / ${html(fmtInt(values.remaining))} left / ${html(fmtInt(values.total))} total</small></div>
-      <div class="dashboard-card"><span>Verified wine lists</span><b>${html(fmtInt(found))}</b><small>${html(fmtInt(parsedSources))} exact list sources, ${html(fmtInt(savedLines))} saved wine lines.</small></div>
-      <div class="dashboard-card"><span>Needs review</span><b>${html(fmtInt(number(summary.needsReview)))}</b><small>${html(fmtInt(reviewSources))} inconclusive sources / ${html(fmtInt(errorCount))} restaurant errors.</small></div>
-    </div>`;
+    return {
+      payload,
+      values,
+      summary,
+      progress,
+      mappedWithWebsite,
+      savedLines,
+      parsedSources,
+      reviewSources,
+      found,
+      none,
+      pending,
+      errorCount,
+      lastCollectionText,
+      etaText,
+      collectionText,
+      progressTitle,
+      progressPillClass
+    };
+  }
 
-    const progressHtml = `<section class="dash-panel" data-dashboard-section="progress">
+  function renderDatabase() {
+    const root = ensureDataViews().databaseView;
+    const metrics = guideMetrics(state.guidePayload || {});
+    const {
+      payload,
+      values,
+      summary,
+      mappedWithWebsite,
+      savedLines,
+      reviewSources,
+      found,
+      none,
+      pending,
+      lastCollectionText
+    } = metrics;
+
+    const summaryHtml = `<section class="dash-panel database-summary" data-dashboard-section="summary">
       <div class="collection-head">
         <div>
-          <p class="dash-kicker">Collect progress</p>
-          <h2>${html(progressTitle)}</h2>
+          <p class="dash-kicker">Built database</p>
+          <h2>Wine-list database</h2>
+          <p class="database-summary-copy">${html(fmtInt(savedLines))} wine lines saved. Last collection ${html(lastCollectionText)}.</p>
         </div>
-        <div class="selected-target-actions dashboard-progress-actions">
-          <span class="dash-pill ${progressPillClass}">${html(values.status)}</span>
-          <button class="dashboard-refresh" type="button" data-start-guide-collection ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(state.guideActionInFlight ? "Starting..." : "Start recollection")}</button>
-          <button class="dashboard-refresh" type="button" data-refresh-dashboard ${state.guideLoadInFlight ? "disabled" : ""}>${html(state.guideLoadInFlight ? "Refreshing..." : "Refresh")}</button>
-          ${state.guideActionMessage ? `<span class="dashboard-action-note ${html(state.guideActionKind)}">${html(state.guideActionMessage)}</span>` : ""}
-          ${state.lastRefreshAt ? `<span class="dashboard-action-note">Last refreshed ${html(state.lastRefreshAt)}</span>` : ""}
-        </div>
+        <span class="dash-pill">${html(fmtInt(found))} verified</span>
       </div>
-      <div class="dash-progress" style="--dash-progress:${html(values.percent)}%"><i></i></div>
-      <div class="collection-metrics">
-        <div class="metric-box"><span>Checked</span><b>${html(fmtInt(values.processed))} / ${html(fmtInt(values.total))}</b></div>
-        <div class="metric-box"><span>Remaining</span><b>${html(fmtInt(values.remaining))}</b></div>
-        <div class="metric-box"><span>Elapsed</span><b>${html(formatDuration(values.elapsed))}</b></div>
-        <div class="metric-box"><span>${values.running ? "ETA" : "Total time"}</span><b>${html(etaText)}</b></div>
-        <div class="metric-box"><span>Current restaurant</span><b>${html(progress.currentTarget || "-")}</b></div>
-        <div class="metric-box"><span>Errors</span><b>${html(fmtInt(errorCount))}</b></div>
-      </div>
-    </section>`;
-
-    const resourcesHtml = resourcePanelMarkup(payload);
-
-    const summaryHtml = `<section class="dash-panel" data-dashboard-section="summary">
-      <p class="dash-kicker">DB summary</p>
-      <h2>What the collector found</h2>
       <div class="db-health-grid">
         <div class="metric-box"><span>Restaurants saved</span><b>${html(fmtInt(summary.totalTargets || values.total))}</b></div>
         <div class="metric-box"><span>Verified wine lists</span><b>${html(fmtInt(found))}</b></div>
         <div class="metric-box"><span>No wine list</span><b>${html(fmtInt(none))}</b></div>
+        <div class="metric-box"><span>Needs review</span><b>${html(fmtInt(reviewSources))}</b></div>
         <div class="metric-box"><span>Pending / no website</span><b>${html(fmtInt(pending))}</b></div>
-        <div class="metric-box"><span>Parsing review</span><b>${html(fmtInt(reviewSources))}</b></div>
         <div class="metric-box"><span>Mapped DB URLs</span><b>${html(fmtInt(mappedWithWebsite))}</b></div>
       </div>
     </section>`;
@@ -1117,20 +953,75 @@
 
     const mapAlreadyMounted = Boolean(root.querySelector("#dashboardDbMap"));
     if (!mapAlreadyMounted) {
-      root.innerHTML = `${cardsHtml}${progressHtml}${resourcesHtml}${summaryHtml}${mapHtml}${selectedHtml}`;
+      root.innerHTML = `${summaryHtml}${mapHtml}${selectedHtml}`;
       renderDashboardMap(payload, { fit: true });
       return;
     }
-    const cards = root.querySelector('[data-dashboard-section="cards"]');
-    const progressSection = root.querySelector('[data-dashboard-section="progress"]');
-    const resourcesSection = root.querySelector('[data-dashboard-section="resources"]');
     const summarySection = root.querySelector('[data-dashboard-section="summary"]');
-    if (cards) cards.outerHTML = cardsHtml;
-    if (progressSection) progressSection.outerHTML = progressHtml;
-    if (resourcesSection) resourcesSection.outerHTML = resourcesHtml;
     if (summarySection) summarySection.outerHTML = summaryHtml;
     renderSelectedTarget(payload);
     renderDashboardMap(payload, { fit: false });
+  }
+
+  function renderCollection() {
+    const root = ensureDataViews().collectionView;
+    const metrics = guideMetrics(state.guidePayload || {});
+    const {
+      payload,
+      values,
+      summary,
+      progress,
+      savedLines,
+      parsedSources,
+      reviewSources,
+      found,
+      errorCount,
+      lastCollectionText,
+      etaText,
+      collectionText,
+      progressTitle,
+      progressPillClass
+    } = metrics;
+
+    const cardsHtml = `<div class="dashboard-grid" data-dashboard-section="cards">
+      <div class="dashboard-card"><span>Collection</span><b>${html(values.status)}</b><small>${html(collectionText)}<br>DB updated ${html(lastCollectionText)}<br>Every other Monday 03:00 KST</small></div>
+      <div class="dashboard-card"><span>Progress</span><b>${html(values.percent.toFixed(1))}%</b><small>${html(fmtInt(values.processed))} checked / ${html(fmtInt(values.remaining))} left / ${html(fmtInt(values.total))} total</small></div>
+      <div class="dashboard-card"><span>Verified wine lists</span><b>${html(fmtInt(found))}</b><small>${html(fmtInt(parsedSources))} exact list sources, ${html(fmtInt(savedLines))} saved wine lines.</small></div>
+      <div class="dashboard-card"><span>Needs review</span><b>${html(fmtInt(number(summary.needsReview)))}</b><small>${html(fmtInt(reviewSources))} inconclusive sources / ${html(fmtInt(errorCount))} restaurant errors.</small></div>
+    </div>`;
+
+    const progressHtml = `<section class="dash-panel" data-dashboard-section="progress">
+      <div class="collection-head">
+        <div>
+          <p class="dash-kicker">Collect progress</p>
+          <h2>${html(progressTitle)}</h2>
+        </div>
+        <div class="selected-target-actions dashboard-progress-actions">
+          <span class="dash-pill ${progressPillClass}">${html(values.status)}</span>
+          <button class="dashboard-refresh" type="button" data-start-guide-collection ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(state.guideActionInFlight ? "Starting..." : "Start recollection")}</button>
+          <button class="dashboard-refresh" type="button" data-refresh-collection ${state.guideLoadInFlight ? "disabled" : ""}>${html(state.guideLoadInFlight ? "Refreshing..." : "Refresh")}</button>
+          ${state.guideActionMessage ? `<span class="dashboard-action-note ${html(state.guideActionKind)}">${html(state.guideActionMessage)}</span>` : ""}
+          ${state.lastRefreshAt ? `<span class="dashboard-action-note">Last refreshed ${html(state.lastRefreshAt)}</span>` : ""}
+        </div>
+      </div>
+      <div class="dash-progress" style="--dash-progress:${html(values.percent)}%"><i></i></div>
+      <div class="collection-metrics">
+        <div class="metric-box"><span>Checked</span><b>${html(fmtInt(values.processed))} / ${html(fmtInt(values.total))}</b></div>
+        <div class="metric-box"><span>Remaining</span><b>${html(fmtInt(values.remaining))}</b></div>
+        <div class="metric-box"><span>Elapsed</span><b>${html(formatDuration(values.elapsed))}</b></div>
+        <div class="metric-box"><span>${values.running ? "ETA" : "Total time"}</span><b>${html(etaText)}</b></div>
+        <div class="metric-box"><span>Current restaurant</span><b>${html(progress.currentTarget || "-")}</b></div>
+        <div class="metric-box"><span>Errors</span><b>${html(fmtInt(errorCount))}</b></div>
+      </div>
+    </section>`;
+
+    const resourcesHtml = resourcePanelMarkup(payload);
+    root.innerHTML = `${cardsHtml}${progressHtml}${resourcesHtml}`;
+  }
+
+  function renderActiveGuideView() {
+    if (state.activeView === "database") renderDatabase();
+    if (state.activeView === "collection") renderCollection();
   }
 
   async function loadGuideStats(options = {}) {
@@ -1139,8 +1030,8 @@
     state.guideLoadInFlight = true;
     if (options.force) {
       state.guideActionKind = "";
-      state.guideActionMessage = "Refreshing dashboard data...";
-      if (state.activeView === "dashboard") renderDashboard();
+      state.guideActionMessage = "Refreshing saved data...";
+      renderActiveGuideView();
     }
     try {
       const payload = await fetchLiveGuideCollection();
@@ -1150,21 +1041,21 @@
       state.lastRefreshAt = new Date().toLocaleTimeString();
       if (options.force && !state.guideActionMessage.includes("started")) {
         state.guideActionKind = "good";
-        state.guideActionMessage = "Dashboard data refreshed.";
+        state.guideActionMessage = "Saved data refreshed.";
       }
-      if (state.activeView === "dashboard") renderDashboard();
+      renderActiveGuideView();
     } catch (error) {
       state.guideActionKind = "bad";
       state.guideActionMessage = `Refresh failed: ${error.message || error}`;
     } finally {
       state.guideLoadInFlight = false;
-      if (state.activeView === "dashboard") renderDashboard();
+      renderActiveGuideView();
     }
   }
 
   function boot() {
     const nav = cleanTabs();
-    ensureDashboardView();
+    ensureDataViews();
     nav.addEventListener("click", (event) => {
       const button = event.target.closest("[data-view]");
       if (!button) return;
@@ -1176,7 +1067,7 @@
       clearDashboardSelection();
     });
     document.body.addEventListener("click", (event) => {
-      if (!event.target.closest("[data-refresh-dashboard]")) return;
+      if (!event.target.closest("[data-refresh-collection]")) return;
       event.preventDefault();
       loadGuideStats({ force: true });
     });
@@ -1194,3 +1085,4 @@
     boot();
   }
 })();
+
