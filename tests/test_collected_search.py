@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -101,6 +102,90 @@ def insert_star_wine_row(
 
 
 class CollectedSearchTests(unittest.TestCase):
+    def test_filters_split_greater_china_into_user_facing_countries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "search.sqlite"
+            con = create_db(db_path)
+            con.execute(
+                "insert into countries(id, slug, name) values (1, 'greater-china', 'Greater China')"
+            )
+            con.execute(
+                "insert into countries(id, slug, name) values (2, 'taiwan', 'Taiwan')"
+            )
+            con.commit()
+            con.close()
+            previous_path = app.DB_PATH
+            app.DB_PATH = db_path
+            try:
+                payload = app.filters()
+            finally:
+                app.DB_PATH = previous_path
+
+        self.assertNotIn("Greater China", payload["countries"])
+        self.assertTrue({"China", "Hong Kong", "Macau", "Taiwan"}.issubset(payload["countries"]))
+
+    def test_greater_china_rows_are_filtered_by_display_country(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "search.sqlite"
+            con = create_db(db_path)
+            insert_star_wine_row(con, country="Greater China", city="Hong Kong")
+            con.close()
+            previous_path = app.DB_PATH
+            app.DB_PATH = db_path
+            try:
+                hong_kong = app.search(
+                    {"q": ["Romanee Conti"], "country": ["Hong Kong"], "limit": ["100"]}
+                )
+                china = app.search(
+                    {"q": ["Romanee Conti"], "country": ["China"], "limit": ["100"]}
+                )
+            finally:
+                app.DB_PATH = previous_path
+
+        self.assertEqual(hong_kong["count"], 1)
+        self.assertEqual(hong_kong["results"][0]["venue"]["country"], "Hong Kong")
+        self.assertEqual(china["count"], 0)
+
+    def test_live_source_ids_still_require_every_query_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "search.sqlite"
+            con = create_db(db_path)
+            insert_star_wine_row(
+                con,
+                raw_text="2019 Jules Desjourneys Pouilly Loche 980",
+                country="Greater China",
+                city="Hong Kong",
+            )
+            con.execute("update wine_entries set source_item_id='loose-result'")
+            con.commit()
+            con.close()
+            previous_path = app.DB_PATH
+            app.DB_PATH = db_path
+            try:
+                with patch.object(
+                    app,
+                    "refresh_from_search_api",
+                    return_value={"sourceItemIds": ["loose-result"]},
+                ):
+                    payload = app.search(
+                        {
+                            "q": ["Jules Brochet"],
+                            "country": ["Hong Kong"],
+                            "live": ["1"],
+                            "limit": ["100"],
+                        }
+                    )
+            finally:
+                app.DB_PATH = previous_path
+
+        self.assertEqual(payload["count"], 0)
+
+    def test_country_filter_uses_greater_china_only_for_star_wine_region(self):
+        self.assertEqual(app.starwine_region_for_country("China"), "greater-china")
+        self.assertEqual(app.starwine_region_for_country("Hong Kong"), "greater-china")
+        self.assertEqual(app.starwine_region_for_country("Macau"), "greater-china")
+        self.assertEqual(app.starwine_region_for_country("Taiwan"), "taiwan")
+
     def test_collected_result_is_availability_only_and_uses_exact_list_url(self):
         with tempfile.TemporaryDirectory() as directory:
             db_path = Path(directory) / "search.sqlite"

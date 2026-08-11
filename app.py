@@ -682,7 +682,8 @@ def guide_watch(params):
 
 def filters():
     ensure_db()
-    with connect() as con:
+    con = connect()
+    try:
         countries = [
             row["name"]
             for row in con.execute("select name from countries order by name").fetchall()
@@ -693,7 +694,9 @@ def filters():
                 "select distinct city from venues where city is not null and city != '' order by city"
             ).fetchall()
         ]
-        return {"countries": countries, "cities": cities}
+        return {"countries": ui_country_names(countries), "cities": cities}
+    finally:
+        con.close()
 
 
 def search(params):
@@ -712,7 +715,7 @@ def search(params):
     live_source_ids = []
     if live and q:
         live_query = q if not vintage or vintage in q else f"{q} {vintage}"
-        live_region = sync_search_api.slugify(country) if country else ""
+        live_region = starwine_region_for_country(country)
         live_refresh = refresh_from_search_api(
             live_query,
             live_pages,
@@ -724,17 +727,20 @@ def search(params):
 
     where = []
     args = []
-    use_fts = bool(q) and not live_source_ids
+    fts_query = fts_match_query(q)
+    use_fts = bool(fts_query)
     if live_source_ids:
         placeholders = ",".join("?" for _ in live_source_ids)
         where.append(f"e.source_item_id in ({placeholders})")
         args.extend(live_source_ids)
-    elif use_fts:
+    if use_fts:
         where.append("wine_entries_fts match ?")
-        args.append(q.replace('"', " "))
+        args.append(fts_query)
     if country:
-        where.append("c.name = ?")
-        args.append(country)
+        stored_countries = starwine_storage_countries(country)
+        placeholders = ",".join("?" for _ in stored_countries)
+        where.append(f"c.name in ({placeholders})")
+        args.extend(stored_countries)
     if city:
         where.append("v.city like ?")
         args.append(f"%{city}%")
@@ -805,17 +811,28 @@ def search(params):
         item = row_to_dict(row)
         price_text = item.pop("priceText") or ""
         item["prices"] = [price_text] if price_text else []
-        venue_country = item.pop("country")
+        stored_country = item.pop("country")
+        venue_city = item.pop("city")
+        venue_region_slug = item.pop("regionSlug")
+        venue_address = item.pop("address")
+        venue_country = display_country_name(
+            stored_country,
+            city=venue_city,
+            region_slug=venue_region_slug,
+            address=venue_address,
+        )
+        if country and not country_names_match(venue_country, country):
+            continue
         item["venue"] = {
             "id": item.pop("venueId"),
             "name": item.pop("venueName"),
             "type": item.pop("venueType"),
-            "city": item.pop("city"),
+            "city": venue_city,
             "country": venue_country,
-            "regionSlug": item.pop("regionSlug"),
+            "regionSlug": venue_region_slug,
             "lat": item.pop("lat"),
             "lng": item.pop("lng"),
-            "address": item.pop("address"),
+            "address": venue_address,
             "googleMapsUrl": item.pop("googleMapsUrl"),
             "starWineMapUrl": item.pop("starWineMapUrl"),
             "url": item.pop("venueUrl"),
@@ -863,19 +880,10 @@ COUNTRY_ALIAS_GROUPS = {
     "Finland": ("Finland", "핀란드"),
     "France": ("France", "프랑스"),
     "Germany": ("Germany", "독일"),
-    "Greater China": (
-        "Greater China",
-        "China",
-        "Mainland China",
-        "중국 본토",
-        "Hong Kong",
-        "Hong Kong, China",
-        "홍콩",
-        "Macao",
-        "Macau",
-        "Macao, China",
-        "마카오",
-    ),
+    "Greater China": ("Greater China",),
+    "China": ("China", "Mainland China", "중국", "중국 본토"),
+    "Hong Kong": ("Hong Kong", "Hong Kong, China", "홍콩"),
+    "Macau": ("Macao", "Macau", "Macao, China", "Macau, China", "마카오"),
     "Greece": ("Greece", "그리스"),
     "Hungary": ("Hungary", "헝가리"),
     "Iceland": ("Iceland", "아이슬란드"),
@@ -959,6 +967,61 @@ def canonical_country_name(value):
     return COUNTRY_ALIAS_INDEX.get(country_token(raw), raw)
 
 
+GREATER_CHINA_UI_COUNTRIES = ("China", "Hong Kong", "Macau", "Taiwan")
+TAIWAN_CITY_TOKENS = (
+    "taipei",
+    "kaohsiung",
+    "taichung",
+    "tainan",
+    "hsinchu",
+    "keelung",
+    "new taipei",
+    "taoyuan",
+)
+
+
+def display_country_name(value, city="", region_slug="", address=""):
+    canonical = canonical_country_name(value)
+    if canonical != "Greater China":
+        return canonical
+
+    hints = country_token(" ".join((city or "", region_slug or "", address or "")))
+    if "hong kong" in hints:
+        return "Hong Kong"
+    if "macau" in hints or "macao" in hints:
+        return "Macau"
+    if "taiwan" in hints or any(token in hints for token in TAIWAN_CITY_TOKENS):
+        return "Taiwan"
+    return "China"
+
+
+def ui_country_names(values):
+    countries = set()
+    for value in values:
+        canonical = canonical_country_name(value)
+        if canonical == "Greater China":
+            countries.update(GREATER_CHINA_UI_COUNTRIES)
+        elif canonical:
+            countries.add(canonical)
+    return sorted(countries, key=lambda value: fold_text(value))
+
+
+def starwine_region_for_country(country):
+    canonical = canonical_country_name(country)
+    if canonical in {"China", "Hong Kong", "Macau"}:
+        return "greater-china"
+    return sync_search_api.slugify(canonical) if canonical else ""
+
+
+def starwine_storage_countries(country):
+    canonical = canonical_country_name(country)
+    if canonical in {"China", "Hong Kong", "Macau"}:
+        return ["Greater China", canonical]
+    if canonical == "Taiwan":
+        return ["Taiwan", "Greater China"]
+    return [canonical]
+
+
 def country_names_match(left, right):
     return country_token(canonical_country_name(left)) == country_token(
         canonical_country_name(right)
@@ -967,6 +1030,10 @@ def country_names_match(left, right):
 
 def loose_tokens(value):
     return [token for token in sync_search_api.re.findall(r"\w+", fold_text(value)) if len(token) >= 2]
+
+
+def fts_match_query(value):
+    return " AND ".join(f'"{token.replace(chr(34), chr(34) * 2)}"' for token in loose_tokens(value))
 
 
 def search_collected_guides(query, country="", city="", vintage="", limit=5000):
@@ -1020,7 +1087,12 @@ def search_collected_guides(query, country="", city="", vintage="", limit=5000):
         folded_line = fold_text(raw_text)
         if not all(token in folded_line for token in tokens):
             continue
-        if country and not country_names_match(row["country"], country):
+        display_country = display_country_name(
+            row["country"],
+            city=row["city"],
+            address=row["address"],
+        )
+        if country and not country_names_match(display_country, country):
             continue
         if city_folded and city_folded not in fold_text(row["city"]):
             continue
@@ -1036,7 +1108,7 @@ def search_collected_guides(query, country="", city="", vintage="", limit=5000):
         if source_key in seen_sources:
             continue
         seen_sources.add(source_key)
-        canonical_country = canonical_country_name(row["country"])
+        canonical_country = display_country
         try:
             price_value = float(row["price_value"])
             if price_value <= 0:
