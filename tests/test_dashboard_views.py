@@ -36,10 +36,10 @@ class DashboardViewTests(unittest.TestCase):
         self.assertIn('state.activeView !== "database"', self.script)
         self.assertNotIn('state.activeView !== "dashboard"', self.script)
 
-    def test_selected_restaurant_has_clear_world_map_actions(self):
+    def test_selected_restaurant_has_one_clear_world_map_action(self):
         self.assertIn("Back to world map", self.script)
-        self.assertIn("data-world-view-control", self.script)
-        self.assertIn("function syncWorldViewControls()", self.script)
+        self.assertNotIn("data-world-view-control", self.script)
+        self.assertNotIn("function syncWorldViewControls()", self.script)
         self.assertNotIn(">Close</button>", self.script)
 
 

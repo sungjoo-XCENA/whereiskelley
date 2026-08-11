@@ -215,13 +215,6 @@
       font-size: 12px;
       font-weight: 800;
     }
-    .database-map-head-actions {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 10px;
-    }
-    .map-world-view,
     .selected-target-actions button.world-view-button {
       display: inline-flex;
       align-items: center;
@@ -236,18 +229,13 @@
       font-weight: 900;
       cursor: pointer;
     }
-    .map-world-view:hover,
     .selected-target-actions button.world-view-button:hover {
       border-color: #115e59;
       background: #115e59;
     }
-    .map-world-view:focus-visible,
     .selected-target-actions button.world-view-button:focus-visible {
       outline: 3px solid rgba(15, 118, 110, 0.24);
       outline-offset: 2px;
-    }
-    .map-world-view[hidden] {
-      display: none;
     }
     .world-view-icon {
       font-size: 18px;
@@ -425,9 +413,6 @@
     @media (max-width: 640px) {
       .collection-head {
         display: grid;
-      }
-      .database-map-head-actions {
-        align-items: flex-start;
       }
       .dashboard-progress-actions {
         justify-content: flex-start;
@@ -1076,13 +1061,6 @@
     document.querySelector('[data-dashboard-section="map"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  function syncWorldViewControls() {
-    const hasSelection = Boolean(state.activeTargetId);
-    document.querySelectorAll("[data-world-view-control]").forEach((button) => {
-      button.hidden = !hasSelection;
-    });
-  }
-
   function selectedTargetMarkup(payload) {
     const target = (payload?.mapTargets || []).find((item) => String(item.id) === String(state.activeTargetId || ""));
     if (!target) {
@@ -1124,7 +1102,6 @@
   function renderSelectedTarget(payload) {
     const container = document.querySelector("#selectedRestaurant");
     if (container) container.innerHTML = selectedTargetMarkup(payload);
-    syncWorldViewControls();
   }
 
   function guideMetrics(input) {
@@ -1218,16 +1195,10 @@
           <p class="dash-kicker">Built database</p>
           <h2>Database map</h2>
         </div>
-        <div class="database-map-head-actions">
-          <div class="map-legend">
-            <span class="legend-dot" style="--dot:#16a34a">Found</span>
-            <span class="legend-dot" style="--dot:#dc2626">No wine list</span>
-            <span class="legend-dot" style="--dot:#f59e0b">Pending / review</span>
-          </div>
-          <button class="map-world-view" type="button" data-clear-dashboard-selection data-world-view-control hidden title="Reset the map to show every restaurant">
-            <span class="world-view-icon" aria-hidden="true">&#8592;</span>
-            World map
-          </button>
+        <div class="map-legend">
+          <span class="legend-dot" style="--dot:#16a34a">Found</span>
+          <span class="legend-dot" style="--dot:#dc2626">No wine list</span>
+          <span class="legend-dot" style="--dot:#f59e0b">Pending / review</span>
         </div>
       </div>
       <div class="dashboard-map-wrap">
@@ -1243,7 +1214,6 @@
     const mapAlreadyMounted = Boolean(root.querySelector("#dashboardDbMap"));
     if (!mapAlreadyMounted) {
       root.innerHTML = `${mapHtml}${selectedHtml}`;
-      syncWorldViewControls();
       renderDashboardMap(payload, { fit: true });
       return;
     }
