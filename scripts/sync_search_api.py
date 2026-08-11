@@ -1,4 +1,5 @@
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import re
@@ -172,9 +173,7 @@ def country_city_from_result(result):
 
 
 def location_from_result(result, country, city):
-    city_obj = result.get("city") or {}
-    region = ((result.get("item") or {}).get("region") or {})
-    slug = city_obj.get("slug") or (slugify(city) if city and city != country else "") or region.get("slug") or slugify(city)
+    slug = location_slug_from_result(result, country, city)
     location = fetch_location(slug)
     lat = location.get("lat") if location else None
     lng = location.get("lng") if location else None
@@ -182,6 +181,28 @@ def location_from_result(result, country, city):
     if lat is None or lng is None:
         lat, lng = COUNTRY_COORDS.get(country, (None, None))
     return slug, lat, lng, star_map_url
+
+
+def location_slug_from_result(result, country, city):
+    city_obj = result.get("city") or {}
+    region = ((result.get("item") or {}).get("region") or {})
+    return city_obj.get("slug") or (slugify(city) if city and city != country else "") or region.get("slug") or slugify(city)
+
+
+def prefetch_payload_locations(payloads, workers=8):
+    slugs = set()
+    for payload in payloads:
+        for result in payload.get("data") or []:
+            if result.get("item_type") != "wine_list_line":
+                continue
+            country, city = country_city_from_result(result)
+            slug = location_slug_from_result(result, country, city)
+            if slug and slug not in LOCATION_CACHE:
+                slugs.add(slug)
+    if not slugs:
+        return
+    with ThreadPoolExecutor(max_workers=max(1, min(int(workers), len(slugs)))) as executor:
+        list(executor.map(fetch_location, slugs))
 
 
 def venue_slug_from_url(url):
@@ -479,14 +500,25 @@ def download_pdf(con, wine_list_row):
     return True
 
 
-def sync_page(con, page, query, region, download_pdfs, max_pdfs, pdf_counter):
+def fetch_search_page(page, query="", region="", attempts=3):
     params = {"t": "wine-list", "page": page}
     if query:
         params["s"] = query
     if region:
         params["r"] = region
     url = f"{API_URL}?{urlencode(params)}"
-    payload = fetch_json(url)
+    last_error = None
+    for attempt in range(max(1, attempts)):
+        try:
+            return fetch_json(url)
+        except Exception as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                time.sleep(0.25 * (2**attempt))
+    raise last_error
+
+
+def persist_search_payload(con, payload, download_pdfs, max_pdfs, pdf_counter):
     count = 0
     downloaded = 0
     for result in payload.get("data") or []:
@@ -510,6 +542,12 @@ def sync_page(con, page, query, region, download_pdfs, max_pdfs, pdf_counter):
             except Exception as exc:
                 con.execute("update wine_lists set last_error=? where id=?", (str(exc), wine_list_row["id"]))
             con.commit()
+    return count, downloaded
+
+
+def sync_page(con, page, query, region, download_pdfs, max_pdfs, pdf_counter):
+    payload = fetch_search_page(page, query, region)
+    count, downloaded = persist_search_payload(con, payload, download_pdfs, max_pdfs, pdf_counter)
     return payload, count, downloaded
 
 

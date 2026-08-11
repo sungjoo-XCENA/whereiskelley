@@ -23,6 +23,14 @@ class IntegratedSearchUiTests(unittest.TestCase):
         self.assertIn("Matched text only. Database prices are not estimated.", APP_SCRIPT)
         self.assertIn('label = key === "both" ? "Star Wine + Database"', APP_SCRIPT)
 
+    def test_server_html_is_not_rendered_as_search_error(self):
+        get_json = APP_SCRIPT.split("async function getJson(path)", 1)[1].split(
+            "async function getOptionalJson", 1
+        )[0]
+        self.assertNotIn("throw new Error(await response.text())", get_json)
+        self.assertIn("response.status === 504", get_json)
+        self.assertIn("invalid response", get_json)
+
 
 if __name__ == "__main__":
     unittest.main()

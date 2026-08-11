@@ -83,7 +83,24 @@ function escapeHtml(value) {
 
 async function getJson(path) {
   const response = await fetch(path);
-  if (!response.ok) throw new Error(await response.text());
+  const contentType = response.headers.get("content-type") || "";
+  if (!response.ok) {
+    let message = `Request failed (HTTP ${response.status}).`;
+    if (contentType.includes("application/json")) {
+      const payload = await response.json().catch(() => null);
+      message = payload?.error || message;
+    } else if (response.status === 502) {
+      message = "The search server restarted before the scan finished. Please search again.";
+    } else if (response.status === 504) {
+      message = "The full search took too long to finish. Please search again.";
+    } else if (response.status === 503) {
+      message = "The search server is temporarily unavailable. Please try again shortly.";
+    }
+    throw new Error(message);
+  }
+  if (!contentType.includes("application/json") && !contentType.includes("javascript")) {
+    throw new Error("The search server returned an invalid response. Please try again.");
+  }
   return response.json();
 }
 

@@ -7,6 +7,7 @@ import sqlite3
 import sys
 import threading
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, quote_plus, urlparse
@@ -75,6 +76,8 @@ COLLECTOR_PROCESS = None
 SEARCH_REFRESH_LOCK = threading.Lock()
 SEARCH_REFRESH_CACHE = {}
 SEARCH_REFRESH_CACHE_TTL = int(os.environ.get("WHEREISKELLEY_SEARCH_CACHE_SECONDS", "900"))
+SEARCH_PAGE_WORKERS = max(1, min(int(os.environ.get("WHEREISKELLEY_SEARCH_PAGE_WORKERS", "8")), 12))
+SEARCH_LOCATION_WORKERS = max(1, min(int(os.environ.get("WHEREISKELLEY_SEARCH_LOCATION_WORKERS", "8")), 12))
 
 
 PRICE_TOKEN_RE = sync_search_api.re.compile(
@@ -709,7 +712,14 @@ def search(params):
     live_source_ids = []
     if live and q:
         live_query = q if not vintage or vintage in q else f"{q} {vintage}"
-        live_refresh = refresh_from_search_api(live_query, live_pages, live_max_pdfs, live_page_cap)
+        live_region = sync_search_api.slugify(country) if country else ""
+        live_refresh = refresh_from_search_api(
+            live_query,
+            live_pages,
+            live_max_pdfs,
+            live_page_cap,
+            live_region,
+        )
         live_source_ids = live_refresh["sourceItemIds"]
 
     where = []
@@ -1128,8 +1138,8 @@ def pdf_lines(params):
     }
 
 
-def refresh_from_search_api(query, pages=2, max_pdfs=3, page_cap=50):
-    cache_key = (query.strip().casefold(), str(pages), int(max_pdfs), int(page_cap))
+def refresh_from_search_api(query, pages=2, max_pdfs=3, page_cap=50, region=""):
+    cache_key = (query.strip().casefold(), region.strip().casefold(), str(pages), int(max_pdfs), int(page_cap))
     cached = SEARCH_REFRESH_CACHE.get(cache_key)
     now_ts = sync_search_api.time.time()
     if cached and now_ts - cached["storedAt"] <= SEARCH_REFRESH_CACHE_TTL:
@@ -1149,13 +1159,32 @@ def refresh_from_search_api(query, pages=2, max_pdfs=3, page_cap=50):
         if cached and now_ts - cached["storedAt"] <= SEARCH_REFRESH_CACHE_TTL:
             return {**cached["payload"], "cached": True}
 
+        first_payload = sync_search_api.fetch_search_page(1, query, region)
+        first_meta = first_payload.get("meta") or {}
+        last_page = int(first_meta.get("last_page") or 1)
+        target_page = min(max_pages, last_page)
+        page_payloads = {1: first_payload}
+
+        if target_page > 1:
+            with ThreadPoolExecutor(max_workers=min(SEARCH_PAGE_WORKERS, target_page - 1)) as executor:
+                futures = {
+                    executor.submit(sync_search_api.fetch_search_page, page, query, region): page
+                    for page in range(2, target_page + 1)
+                }
+                for future in as_completed(futures):
+                    page_payloads[futures[future]] = future.result()
+
+        sync_search_api.prefetch_payload_locations(
+            [page_payloads[page] for page in sorted(page_payloads)],
+            SEARCH_LOCATION_WORKERS,
+        )
+
         with sync_search_api.connect() as con:
-            for page in range(1, max_pages + 1):
-                payload, page_entries, page_pdfs = sync_search_api.sync_page(
+            for page in sorted(page_payloads):
+                current_payload = page_payloads[page]
+                page_entries, page_pdfs = sync_search_api.persist_search_payload(
                     con,
-                    page,
-                    query,
-                    "",
+                    current_payload,
                     max_pdfs > 0,
                     max_pdfs,
                     pdf_counter,
@@ -1163,22 +1192,17 @@ def refresh_from_search_api(query, pages=2, max_pdfs=3, page_cap=50):
                 con.commit()
                 entries += page_entries
                 pdfs += page_pdfs
-                meta = payload.get("meta") or {}
-                last_page = int(meta.get("last_page") or page)
                 source_ids.extend(
                     str(item.get("item_id"))
-                    for item in payload.get("data", [])
+                    for item in current_payload.get("data", [])
                     if item.get("item_type") == "wine_list_line" and item.get("item_id")
                 )
-                if page >= last_page:
-                    break
-                if requested_all:
-                    sync_search_api.time.sleep(0.15)
     payload = {
         "query": query,
-        "pages": max_pages if requested_all else int(pages),
+        "region": region,
+        "pages": len(page_payloads),
         "lastPage": last_page,
-        "complete": bool(last_page and max_pages >= last_page),
+        "complete": bool(last_page and target_page >= last_page),
         "pageCap": page_cap,
         "entries": entries,
         "pdfs": pdfs,
