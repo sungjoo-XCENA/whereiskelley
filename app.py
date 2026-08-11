@@ -842,6 +842,126 @@ def fold_text(value):
     return "".join(char for char in normalized if not unicodedata.combining(char))
 
 
+def country_token(value):
+    return sync_search_api.re.sub(r"[^\w]+", " ", fold_text(value)).strip()
+
+
+COUNTRY_ALIAS_GROUPS = {
+    "Argentina": ("Argentina", "아르헨티나"),
+    "Australia": ("Australia", "호주"),
+    "Austria": ("Austria", "오스트리아"),
+    "Belgium": ("Belgium", "벨기에"),
+    "Brazil": ("Brazil", "브라질"),
+    "Canada": ("Canada", "캐나다"),
+    "Croatia": ("Croatia", "크로아티아"),
+    "Czech Republic": ("Czech Republic", "Czechia", "체코"),
+    "Denmark": ("Denmark", "덴마크"),
+    "Estonia": ("Estonia", "에스토니아"),
+    "Finland": ("Finland", "핀란드"),
+    "France": ("France", "프랑스"),
+    "Germany": ("Germany", "독일"),
+    "Greater China": (
+        "Greater China",
+        "China",
+        "Mainland China",
+        "중국 본토",
+        "Hong Kong",
+        "Hong Kong, China",
+        "홍콩",
+        "Macao",
+        "Macau",
+        "Macao, China",
+        "마카오",
+    ),
+    "Greece": ("Greece", "그리스"),
+    "Hungary": ("Hungary", "헝가리"),
+    "Iceland": ("Iceland", "아이슬란드"),
+    "Ireland": ("Ireland", "아일랜드"),
+    "Italy": ("Italy", "이탈리아"),
+    "Japan": ("Japan", "일본"),
+    "Latvia": ("Latvia", "라트비아"),
+    "Lithuania": ("Lithuania", "리투아니아"),
+    "Luxembourg": ("Luxembourg", "룩셈부르크"),
+    "Malaysia": ("Malaysia", "말레이시아"),
+    "Malta": ("Malta", "몰타"),
+    "Mexico": ("Mexico", "멕시코"),
+    "Monaco": ("Monaco", "모나코", "모나코 공국"),
+    "Netherlands": (
+        "Netherlands",
+        "Netherlands, Kingdom of the",
+        "네덜란드",
+    ),
+    "New Zealand": ("New Zealand", "뉴질랜드"),
+    "Norway": ("Norway", "노르웨이"),
+    "Philippines": ("Philippines", "필리핀"),
+    "Poland": ("Poland", "폴란드"),
+    "Portugal": ("Portugal", "포르투갈", "포르투칼"),
+    "Serbia": ("Serbia", "세르비아"),
+    "Singapore": ("Singapore", "싱가포르"),
+    "Slovakia": ("Slovakia", "슬로바키아"),
+    "Slovenia": ("Slovenia", "슬로베니아"),
+    "South Africa": ("South Africa", "남아프리카 공화국"),
+    "South Korea": (
+        "South Korea",
+        "Korea, Republic of",
+        "Republic of Korea",
+        "한국",
+        "대한민국",
+    ),
+    "Spain": ("Spain", "스페인"),
+    "Sweden": ("Sweden", "스웨덴"),
+    "Switzerland": ("Switzerland", "스위스"),
+    "Taiwan": ("Taiwan", "Taiwan, China", "대만"),
+    "Thailand": ("Thailand", "태국"),
+    "Türkiye": ("Türkiye", "Turkey", "투르키예"),
+    "UK": ("UK", "United Kingdom", "Great Britain", "영국"),
+    "United Arab Emirates": (
+        "United Arab Emirates",
+        "UAE",
+        "Dubai",
+        "아랍에미리트",
+    ),
+    "USA": (
+        "USA",
+        "U.S.A.",
+        "United States",
+        "United States of America",
+        "CA",
+        "CO",
+        "DC",
+        "FL",
+        "GA",
+        "IL",
+        "LA",
+        "MA",
+        "NC",
+        "NY",
+        "PA",
+        "SC",
+        "TN",
+        "TX",
+        "미국",
+    ),
+    "Vietnam": ("Vietnam", "Viet Nam", "베트남"),
+}
+COUNTRY_ALIAS_INDEX = {
+    country_token(alias): canonical
+    for canonical, aliases in COUNTRY_ALIAS_GROUPS.items()
+    for alias in aliases
+}
+
+
+def canonical_country_name(value):
+    raw = (value or "").strip()
+    return COUNTRY_ALIAS_INDEX.get(country_token(raw), raw)
+
+
+def country_names_match(left, right):
+    return country_token(canonical_country_name(left)) == country_token(
+        canonical_country_name(right)
+    )
+
+
 def loose_tokens(value):
     return [token for token in sync_search_api.re.findall(r"\w+", fold_text(value)) if len(token) >= 2]
 
@@ -886,7 +1006,6 @@ def search_collected_guides(query, country="", city="", vintage="", limit=5000):
         if con is not None:
             con.close()
 
-    country_folded = fold_text(country)
     city_folded = fold_text(city)
     seen_sources = set()
     results = []
@@ -895,7 +1014,7 @@ def search_collected_guides(query, country="", city="", vintage="", limit=5000):
         folded_line = fold_text(raw_text)
         if not all(token in folded_line for token in tokens):
             continue
-        if country_folded and country_folded != fold_text(row["country"]):
+        if country and not country_names_match(row["country"], country):
             continue
         if city_folded and city_folded not in fold_text(row["city"]):
             continue
@@ -927,7 +1046,7 @@ def search_collected_guides(query, country="", city="", vintage="", limit=5000):
                     "name": row["name"] or "",
                     "type": "Restaurant",
                     "city": row["city"] or "",
-                    "country": row["country"] or "",
+                    "country": canonical_country_name(row["country"]),
                     "lat": row["lat"],
                     "lng": row["lng"],
                     "address": row["address"] or "",

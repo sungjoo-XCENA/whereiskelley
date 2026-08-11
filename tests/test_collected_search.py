@@ -23,14 +23,21 @@ def create_db(path):
     return con
 
 
-def insert_guide_row(con, url, status="found", raw_text="2021 Romanee Conti Grand Cru"):
+def insert_guide_row(
+    con,
+    url,
+    status="found",
+    raw_text="2021 Romanee Conti Grand Cru",
+    country="Korea",
+):
     con.execute(
         """
         insert into restaurant_targets
           (id, normalized_key, name, country, city, address, lat, lng, website_url)
-        values (1, 'test|seoul|korea', 'Test Restaurant', 'Korea', 'Seoul',
+        values (1, 'test|seoul|korea', 'Test Restaurant', ?, 'Seoul',
                 '1 Test Road', 37.5, 127.0, 'https://restaurant.example')
-        """
+        """,
+        (country,),
     )
     con.execute(
         """
@@ -130,6 +137,50 @@ class CollectedSearchTests(unittest.TestCase):
         database_result = next(result for result in payload["results"] if result["source"] == "Database")
         self.assertTrue(database_result["availabilityOnly"])
         self.assertIsNone(database_result["priceValue"])
+
+    def test_english_country_filter_matches_localized_guide_country(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "search.sqlite"
+            con = create_db(db_path)
+            insert_guide_row(
+                con,
+                "https://restaurant.example/hyakuyaku-wine-list.pdf",
+                raw_text=(
+                    "2011 Chateauneuf du Pape Rouge Pignan Rayas France 170,000"
+                ),
+                country="일본",
+            )
+            con.close()
+            previous_path = app.DB_PATH
+            app.DB_PATH = db_path
+            try:
+                results = app.search_collected_guides("Rayas", country="Japan")
+            finally:
+                app.DB_PATH = previous_path
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["venue"]["country"], "Japan")
+        self.assertIn("Pignan Rayas", results[0]["text"])
+
+    def test_country_filter_still_excludes_other_countries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "search.sqlite"
+            con = create_db(db_path)
+            insert_guide_row(
+                con,
+                "https://restaurant.example/france-wine-list.pdf",
+                raw_text="2011 Chateauneuf du Pape Rouge Pignan Rayas 170,000",
+                country="프랑스",
+            )
+            con.close()
+            previous_path = app.DB_PATH
+            app.DB_PATH = db_path
+            try:
+                results = app.search_collected_guides("Rayas", country="Japan")
+            finally:
+                app.DB_PATH = previous_path
+
+        self.assertEqual(results, [])
 
 
 class PublishSnapshotTests(unittest.TestCase):
