@@ -226,6 +226,40 @@ button:hover {
   color: #5b21b6;
 }
 
+.price-offers {
+  display: grid;
+  gap: 4px;
+  min-width: 142px;
+}
+
+.price-offer {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.price-offer small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.price-offer .krw-price {
+  font-size: 12px;
+}
+
+.offer-note {
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 750;
+}
+
 .integrated-search-note {
   display: flex;
   align-items: center;

@@ -268,6 +268,17 @@ function resultSource(result = {}) {
   return result.source || result.sourceLabel || "Star Wine";
 }
 
+function resultSourceKind(result = {}) {
+  const source = String(resultSource(result)).toLowerCase();
+  return source.includes("database") || source.includes("collected") || source === "db"
+    ? "db"
+    : "live";
+}
+
+function resultSourceLabel(result = {}) {
+  return resultSourceKind(result) === "db" ? "Database" : "Star Wine";
+}
+
 function sourceBadge(source) {
   const value = String(source || "Star Wine");
   const normalized = value.toLowerCase();
@@ -282,24 +293,9 @@ function mergeResultSources(results = []) {
   const byKey = new Map();
   for (const raw of results) {
     const result = { ...raw };
-    const key = resultDedupKey(result);
+    const key = `${resultSourceKind(result)}|${resultDedupKey(result)}`;
     if (!byKey.has(key)) {
       byKey.set(key, result);
-      continue;
-    }
-    const existing = byKey.get(key);
-    const sources = new Set(
-      [resultSource(existing), resultSource(result)]
-        .join("+")
-        .split("+")
-        .map((item) => item.trim())
-        .filter(Boolean)
-    );
-    const normalizedSources = [...sources].map((source) => source.toLowerCase());
-    const hasDatabase = normalizedSources.some((source) => source.includes("database") || source.includes("collected") || source === "db");
-    const hasStarWine = normalizedSources.some((source) => source.includes("star wine") || source.includes("live"));
-    if (hasDatabase && hasStarWine) {
-      existing.source = "Star Wine + Database";
     }
   }
   return [...byKey.values()];
@@ -404,8 +400,50 @@ function groupUpdatedSortValue(group) {
 }
 
 function groupLowestPriceResult(group) {
-  const candidates = reconciledGroupLines(group);
-  return [...candidates].sort((a, b) => numericPrice(a) - numericPrice(b))[0] || {};
+  const candidates = groupOfferLines(group);
+  return [...candidates].sort((a, b) => groupResultKrwValue(a) - groupResultKrwValue(b))[0] || {};
+}
+
+function groupOfferLines(group) {
+  const databaseLines = uniqueResults(
+    group.results.filter((result) => resultSourceKind(result) === "db")
+  );
+  const starWineGroup = {
+    ...group,
+    results: group.results.filter((result) => resultSourceKind(result) === "live")
+  };
+  return [...reconciledGroupLines(starWineGroup), ...databaseLines];
+}
+
+function sourcePriceOffers(group) {
+  const offerLines = groupOfferLines(group);
+  return [
+    { key: "live", label: "Star Wine" },
+    { key: "db", label: "Database" }
+  ].flatMap((source) => {
+    const sourceLines = offerLines.filter((result) => resultSourceKind(result) === source.key);
+    if (!sourceLines.length) return [];
+    const candidates = sourceLines
+      .filter(hasValidPrice)
+      .sort((a, b) => groupResultKrwValue(a) - groupResultKrwValue(b));
+    return [{ ...source, result: candidates[0] || sourceLines[0] }];
+  });
+}
+
+function groupResultKrwValue(result) {
+  if (!hasValidPrice(result)) return Number.POSITIVE_INFINITY;
+  const rate = KRW_RATES[currencyCode(result)];
+  return rate ? Number(result.priceValue) * rate : Number.POSITIVE_INFINITY;
+}
+
+function priceOffersMarkup(group) {
+  const offers = sourcePriceOffers(group);
+  if (!offers.length) return `<span class="review-pill muted">N/A</span>`;
+  return `<div class="price-offers">${offers.map((offer) => `
+    <span class="price-offer ${escapeHtml(offer.key)}">
+      <small>${escapeHtml(offer.label)}</small>
+      ${krwPriceMarkup(offer.result)}
+    </span>`).join("")}</div>`;
 }
 
 function hasWineLineSignal(result = {}) {
@@ -553,9 +591,7 @@ function reconciledGroupLines(group) {
 
 function groupKrwValue(group) {
   const result = groupLowestPriceResult(group);
-  if (!hasValidPrice(result)) return Number.POSITIVE_INFINITY;
-  const rate = KRW_RATES[currencyCode(result)];
-  return rate ? Number(result.priceValue) * rate : Number.POSITIVE_INFINITY;
+  return groupResultKrwValue(result);
 }
 
 function groupPdfList(group) {
@@ -738,8 +774,10 @@ function csvCell(value) {
 function exportRows() {
   return groupedVenues(latestResults).flatMap((group) => {
     const venue = group.venue || {};
+    const starWineVenue = group.results.find((result) => resultSourceKind(result) === "live")?.venue || {};
+    const databaseVenue = group.results.find((result) => resultSourceKind(result) === "db")?.venue || {};
     const pdfLists = groupPdfLists(group);
-    const lines = reconciledGroupLines(group);
+    const lines = groupOfferLines(group);
     const pdfUrls = pdfLists.map((list) => pdfUrl(list)).filter(Boolean).join(" | ");
     return (lines.length ? lines : [{ text: "", vintage: "", priceValue: "", currency: "", review: true }]).map((line) => ({
       place: fallback(venue.name),
@@ -751,16 +789,18 @@ function exportRows() {
       vintage: line.vintage || "",
       originalPrice: originalPriceText(line),
       krw: krwPriceText(line),
-      source: line.source || "Search index",
+      source: resultSourceLabel(line),
+      sourceUrl: pdfUrl(line.wineList || {}),
       pdfUrls,
-      starWineListUrl: venue.url || "",
-      mapUrl: venue.starWineMapUrl || ""
+      starWineListUrl: starWineVenue.url || "",
+      officialWebsiteUrl: databaseVenue.url || "",
+      mapUrl: databaseVenue.googleMapsUrl || starWineVenue.googleMapsUrl || venue.googleMapsUrl || venue.starWineMapUrl || ""
     }));
   });
 }
 
 function downloadSearchResults() {
-  const headers = ["Place", "Type", "City", "Country", "Updated", "Matched line", "Vintage", "Original price", "KRW", "Source", "PDF URLs", "Star Wine List URL", "Map URL"];
+  const headers = ["Place", "Type", "City", "Country", "Updated", "Matched line", "Vintage", "Original price", "KRW", "Source", "Source URL", "PDF URLs", "Star Wine List URL", "Official website URL", "Map URL"];
   const rows = exportRows();
   const csv = [headers, ...rows.map((row) => [
     row.place,
@@ -773,8 +813,10 @@ function downloadSearchResults() {
     row.originalPrice,
     row.krw,
     row.source,
+    row.sourceUrl,
     row.pdfUrls,
     row.starWineListUrl,
+    row.officialWebsiteUrl,
     row.mapUrl
   ])].map((row) => row.map(csvCell).join(",")).join("\r\n");
   const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
@@ -807,7 +849,7 @@ function renderResultList() {
           <th>${sortHeader("Country", "country")}</th>
           <th>${sortHeader("Updated", "updated")}</th>
           <th>${sortHeader("Matches", "matches")}</th>
-          <th>${sortHeader("Lowest KRW", "krw")}</th>
+          <th>${sortHeader("Price offers", "krw")}</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -819,7 +861,6 @@ function renderPlaceRow(group) {
   const key = group.key;
   const venue = group.venue || {};
   const firstList = group.results[0]?.wineList || {};
-  const lowest = groupLowestPriceResult(group);
   const expanded = key && key === activeVenueKey;
   const sources = [...new Set(group.results.map(resultSource))].sort();
   return `<tr class="place-row${expanded ? " active" : ""}" data-venue-key="${escapeHtml(key)}">
@@ -828,13 +869,13 @@ function renderPlaceRow(group) {
       <td>${escapeHtml(fallback(venue.country))}</td>
       <td>${escapeHtml(fallback(groupUpdatedValue(group) || firstList.updatedDate || firstList.updatedText))}</td>
       <td>${escapeHtml(placeLineLabel(group))}</td>
-      <td class="krw-cell">${krwPriceMarkup(lowest)}</td>
+      <td class="krw-cell">${priceOffersMarkup(group)}</td>
     </tr>${expanded ? renderExpandedPlace(group) : ""}`;
 }
 
 function placeLineLabel(group) {
-  const collected = group.results.filter((result) => result.availabilityOnly);
-  const ordinaryGroup = { ...group, results: group.results.filter((result) => !result.availabilityOnly) };
+  const collected = group.results.filter((result) => resultSourceKind(result) === "db");
+  const ordinaryGroup = { ...group, results: group.results.filter((result) => resultSourceKind(result) === "live") };
   const indexedLines = fallbackWineLines(ordinaryGroup.results);
   const verified = reconciledGroupLines(ordinaryGroup).filter((line) => line.pdfVerified).length;
   if (collected.length && !ordinaryGroup.results.length) return `${collected.length} database match${collected.length === 1 ? "" : "es"}`;
@@ -848,8 +889,8 @@ function placeLineLabel(group) {
 
 function renderExpandedPlace(group) {
   const venue = group.venue || {};
-  const collectedResults = group.results.filter((result) => result.availabilityOnly);
-  const ordinaryGroup = { ...group, results: group.results.filter((result) => !result.availabilityOnly) };
+  const collectedResults = group.results.filter((result) => resultSourceKind(result) === "db");
+  const ordinaryGroup = { ...group, results: group.results.filter((result) => resultSourceKind(result) === "live") };
   const pdfLists = groupPdfLists(ordinaryGroup);
   const pdfLines = groupPdfLines(ordinaryGroup);
   if (ordinaryGroup.results.length && groupPdfPending(ordinaryGroup)) {
@@ -869,45 +910,43 @@ function renderExpandedPlace(group) {
       : reviewReason
         ? `<div class="review-note">${escapeHtml(reviewReason)} ${sourceLines.length ? "The rows below are from the Star Wine List search index." : "No priced wine line was found in the downloaded PDF or search index."}</div>`
         : "";
-  const lines = sourceLines
+  const offerLines = [...sourceLines, ...uniqueResults(collectedResults)];
+  const lines = offerLines
     .slice()
-    .sort((a, b) => numericPrice(a) - numericPrice(b))
+    .sort((a, b) => {
+      const wineDiff = normalizedWineText(a.text).localeCompare(normalizedWineText(b.text));
+      if (wineDiff) return wineDiff;
+      const vintageDiff = String(a.vintage || "").localeCompare(String(b.vintage || ""));
+      if (vintageDiff) return vintageDiff;
+      return numericPrice(a) - numericPrice(b);
+    })
     .map((result) => `<tr>
       <td class="wine-cell">${escapeHtml(result.text)}</td>
       <td>${escapeHtml(result.vintage || "")}</td>
       <td class="price-cell">${originalPriceMarkup(result)}</td>
       <td class="krw-cell">${krwPriceMarkup(result)}</td>
+      <td>${escapeHtml(result.wineList?.updatedDate || result.wineList?.updatedText || "")}</td>
       <td>${escapeHtml(result.pageNumber || "")}</td>
       <td>${sourceBadge(resultSource(result))}</td>
     </tr>`)
     .join("");
-  const collectedMarkup = collectedResults.length
-    ? `<div class="collected-list-results">
-        <div class="collected-list-head"><b>Database wine-list matches</b><span>Stored parsed prices are shown when available.</span></div>
-        ${collectedResults.map((result) => {
-          const listUrl = pdfUrl(result.wineList || {});
-          const originalPrice = hasValidPrice(result) ? originalPriceText(result) : "N/A";
-          return `<div class="collected-list-row">
-            <div><b>${escapeHtml(result.text || "Matching text found in this wine list")}</b>${result.vintage ? `<span>Vintage ${escapeHtml(result.vintage)}</span>` : ""}</div>
-            <div>
-              <div class="collected-list-price"><b>${escapeHtml(originalPrice)}</b><span>${escapeHtml(krwPriceText(result))}</span></div>
-              ${sourceBadge(resultSource(result))}${listUrl ? `<a class="secondary" href="${escapeHtml(listUrl)}" target="_blank" rel="noreferrer">Open wine list</a>` : ""}
-            </div>
-          </div>`;
-        }).join("")}
-      </div>`
+  const offerNote = ordinaryGroup.results.length && collectedResults.length
+    ? `<div class="offer-note">Prices are kept as separate offers by source. Nothing is overwritten when Star Wine and Database prices differ.</div>`
     : "";
-  const ordinaryTable = ordinaryGroup.results.length || pdfLines.length
+  const ordinaryTable = offerLines.length || pdfLines.length
     ? `<table class="line-table">
         <thead>
-          <tr><th>Matched PDF/search line</th><th>Vintage</th><th>Price</th><th>KRW</th><th>Page</th><th>Source</th></tr>
+          <tr><th>Matched wine</th><th>Vintage</th><th>Price</th><th>KRW</th><th>Updated</th><th>Page</th><th>Source</th></tr>
         </thead>
-        <tbody>${lines || `<tr><td colspan="6" class="muted">Review needed. No priced wine line was verified from the PDF.</td></tr>`}</tbody>
+        <tbody>${lines || `<tr><td colspan="7" class="muted">Review needed. No priced wine line was verified from the PDF.</td></tr>`}</tbody>
       </table>`
     : "";
   const collectedListUrls = collectedResults
     .map((result) => pdfUrl(result.wineList || {}))
     .filter((url, index, values) => url && values.indexOf(url) === index);
+  const starWineVenue = group.results.find((result) => resultSourceKind(result) === "live")?.venue || {};
+  const databaseVenue = group.results.find((result) => resultSourceKind(result) === "db")?.venue || {};
+  const mapUrl = databaseVenue.googleMapsUrl || starWineVenue.googleMapsUrl || venue.googleMapsUrl || venue.starWineMapUrl;
   return `<tr class="expanded-row">
     <td colspan="6">
       <div class="expanded-place">
@@ -919,11 +958,12 @@ function renderExpandedPlace(group) {
           <div class="actions compact">
             ${pdfLinksMarkup(pdfLists)}
             ${collectedListUrls.slice(0, 3).map((url) => `<a class="primary-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">Wine list</a>`).join("")}
-            ${(venue.googleMapsUrl || venue.starWineMapUrl) ? `<a class="secondary" href="${escapeHtml(venue.googleMapsUrl || venue.starWineMapUrl)}" target="_blank" rel="noreferrer">Map</a>` : ""}
-            ${venue.url ? `<a class="secondary" href="${escapeHtml(venue.url)}" target="_blank" rel="noreferrer">Place page</a>` : ""}
+            ${mapUrl ? `<a class="secondary" href="${escapeHtml(mapUrl)}" target="_blank" rel="noreferrer">Map</a>` : ""}
+            ${starWineVenue.url ? `<a class="secondary" href="${escapeHtml(starWineVenue.url)}" target="_blank" rel="noreferrer">Star Wine</a>` : ""}
+            ${databaseVenue.url ? `<a class="secondary" href="${escapeHtml(databaseVenue.url)}" target="_blank" rel="noreferrer">Official website</a>` : ""}
           </div>
         </div>
-        ${collectedMarkup}
+        ${offerNote}
         ${reviewNote}
         ${ordinaryTable}
       </div>
@@ -932,7 +972,56 @@ function renderExpandedPlace(group) {
 }
 
 function venueKey(result) {
-  return String(result.venue?.id || result.venue?.url || result.venue?.name || "");
+  const venue = result.venue || {};
+  const name = normalizedVenueText(venue.name);
+  const city = normalizedVenueText(venue.city);
+  const country = normalizedVenueCountry(venue.country);
+  if (name && city && country) return `${name}|${city}|${country}`;
+  return String(venue.id || venue.url || venue.name || "");
+}
+
+function normalizedVenueText(value = "") {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function normalizedVenueCountry(value = "") {
+  const country = normalizedVenueText(value);
+  const aliases = {
+    "u k": "united kingdom",
+    uk: "united kingdom",
+    england: "united kingdom",
+    "great britain": "united kingdom",
+    usa: "united states",
+    "u s a": "united states",
+    "united states of america": "united states",
+    "netherlands kingdom of the": "netherlands"
+  };
+  return aliases[country] || country;
+}
+
+function mergeVenueDetails(current = {}, incoming = {}) {
+  const merged = { ...current };
+  for (const field of [
+    "name", "type", "city", "country", "lat", "lng", "address",
+    "googleMapsUrl", "starWineMapUrl", "url"
+  ]) {
+    const value = incoming[field];
+    if ((merged[field] === null || merged[field] === undefined || merged[field] === "")
+      && value !== null && value !== undefined && value !== "") {
+      merged[field] = value;
+    }
+  }
+  return merged;
+}
+
+function coordinateValue(value) {
+  if (value === null || value === undefined || value === "") return Number.NaN;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : Number.NaN;
 }
 
 function groupedVenues(results) {
@@ -942,7 +1031,14 @@ function groupedVenues(results) {
     const key = venueKey(result);
     if (!key) continue;
     if (!groups.has(key)) {
-      groups.set(key, { key, venue, results: [], lat: Number(venue.lat), lng: Number(venue.lng) });
+      groups.set(key, { key, venue, results: [], lat: coordinateValue(venue.lat), lng: coordinateValue(venue.lng) });
+    } else {
+      const group = groups.get(key);
+      group.venue = mergeVenueDetails(group.venue, venue);
+      const incomingLat = coordinateValue(venue.lat);
+      const incomingLng = coordinateValue(venue.lng);
+      if (!Number.isFinite(group.lat) && Number.isFinite(incomingLat)) group.lat = incomingLat;
+      if (!Number.isFinite(group.lng) && Number.isFinite(incomingLng)) group.lng = incomingLng;
     }
     groups.get(key).results.push(result);
   }

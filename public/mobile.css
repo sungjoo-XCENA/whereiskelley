@@ -126,11 +126,7 @@
   }
 
   .result-table > tbody > tr.place-row > td:nth-child(6)::before {
-    content: 'KRW';
-  }
-
-  .result-table > tbody > tr.place-row > td:nth-child(7)::before {
-    content: 'PDF';
+    content: 'Price offers';
   }
 
   .place-cell {
@@ -217,7 +213,15 @@
   }
 
   .line-table td:nth-child(5)::before {
+    content: 'Updated';
+  }
+
+  .line-table td:nth-child(6)::before {
     content: 'Page';
+  }
+
+  .line-table td:nth-child(7)::before {
+    content: 'Source';
   }
 
   .wine-cell {

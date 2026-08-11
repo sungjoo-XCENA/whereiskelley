@@ -19,11 +19,21 @@ class IntegratedSearchUiTests(unittest.TestCase):
         self.assertNotIn("snapshot-search.js", index)
 
     def test_database_matches_are_availability_results(self):
-        self.assertIn("Database wine-list matches", APP_SCRIPT)
-        self.assertIn("Stored parsed prices are shown when available.", APP_SCRIPT)
+        self.assertIn("Prices are kept as separate offers by source.", APP_SCRIPT)
         self.assertIn('Japan: "JPY"', APP_SCRIPT)
         self.assertIn("krwPriceText(result)", APP_SCRIPT)
         self.assertIn('label = key === "both" ? "Star Wine + Database"', APP_SCRIPT)
+
+    def test_same_restaurant_is_grouped_but_source_prices_stay_separate(self):
+        self.assertIn('return `${name}|${city}|${country}`', APP_SCRIPT)
+        self.assertIn('sortHeader("Price offers", "krw")', APP_SCRIPT)
+        self.assertIn('label: "Star Wine"', APP_SCRIPT)
+        self.assertIn('label: "Database"', APP_SCRIPT)
+        self.assertIn("groupOfferLines(group)", APP_SCRIPT)
+        self.assertIn('`${resultSourceKind(result)}|${resultDedupKey(result)}`', APP_SCRIPT)
+        self.assertIn('source: resultSourceLabel(line)', APP_SCRIPT)
+        self.assertIn('"Source URL"', APP_SCRIPT)
+        self.assertIn("Official website", APP_SCRIPT)
 
     def test_server_html_is_not_rendered_as_search_error(self):
         get_json = APP_SCRIPT.split("async function getJson(", 1)[1].split(
