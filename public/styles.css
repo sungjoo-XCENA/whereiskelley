@@ -284,6 +284,22 @@ button:hover {
   flex: 0 0 auto;
 }
 
+.collected-list-price {
+  min-width: 110px;
+  text-align: right;
+}
+
+.collected-list-price b,
+.collected-list-price span {
+  display: block;
+  margin: 0;
+}
+
+.collected-list-price b {
+  color: #007f67;
+  font-size: 13px;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(360px, 500px) minmax(0, 1fr);

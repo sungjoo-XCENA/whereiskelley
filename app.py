@@ -805,12 +805,13 @@ def search(params):
         item = row_to_dict(row)
         price_text = item.pop("priceText") or ""
         item["prices"] = [price_text] if price_text else []
+        venue_country = item.pop("country")
         item["venue"] = {
             "id": item.pop("venueId"),
             "name": item.pop("venueName"),
             "type": item.pop("venueType"),
             "city": item.pop("city"),
-            "country": item.pop("country"),
+            "country": venue_country,
             "regionSlug": item.pop("regionSlug"),
             "lat": item.pop("lat"),
             "lng": item.pop("lng"),
@@ -819,6 +820,8 @@ def search(params):
             "starWineMapUrl": item.pop("starWineMapUrl"),
             "url": item.pop("venueUrl"),
         }
+        if not item.get("currency"):
+            item["currency"] = sync_search_api.normalize_currency("", venue_country) or ""
         item["wineList"] = {
             "id": item.pop("wineListId"),
             "label": item.pop("wineListLabel"),
@@ -976,6 +979,9 @@ def search_collected_guides(query, country="", city="", vintage="", limit=5000):
           e.id as entry_id,
           e.raw_text,
           e.vintage,
+          e.price_text,
+          e.price_value,
+          e.currency,
           e.source_url,
           s.id as source_id,
           s.url as list_url,
@@ -1030,15 +1036,28 @@ def search_collected_guides(query, country="", city="", vintage="", limit=5000):
         if source_key in seen_sources:
             continue
         seen_sources.add(source_key)
+        canonical_country = canonical_country_name(row["country"])
+        try:
+            price_value = float(row["price_value"])
+            if price_value <= 0:
+                price_value = None
+        except (TypeError, ValueError):
+            price_value = None
+        price_text = (row["price_text"] or "").strip() if price_value is not None else ""
+        currency = (
+            sync_search_api.normalize_currency(row["currency"], canonical_country) or ""
+            if price_value is not None
+            else ""
+        )
         map_query = ", ".join(filter(None, (row["name"], row["address"], row["city"], row["country"])))
         results.append(
             {
                 "id": f"guide-{source_id}-{row['entry_id']}",
                 "text": raw_text,
                 "vintage": row["vintage"] or "",
-                "priceValue": None,
-                "currency": "",
-                "prices": [],
+                "priceValue": price_value,
+                "currency": currency,
+                "prices": [price_text] if price_text else [],
                 "source": "Database",
                 "availabilityOnly": True,
                 "venue": {
@@ -1046,7 +1065,7 @@ def search_collected_guides(query, country="", city="", vintage="", limit=5000):
                     "name": row["name"] or "",
                     "type": "Restaurant",
                     "city": row["city"] or "",
-                    "country": canonical_country_name(row["country"]),
+                    "country": canonical_country,
                     "lat": row["lat"],
                     "lng": row["lng"],
                     "address": row["address"] or "",

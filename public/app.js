@@ -41,6 +41,7 @@ const COUNTRY_CURRENCY = {
   "Greater China": "CNY",
   "Hong Kong": "HKD",
   Italy: "EUR",
+  Japan: "JPY",
   Netherlands: "EUR",
   Norway: "NOK",
   Singapore: "SGD",
@@ -879,12 +880,16 @@ function renderExpandedPlace(group) {
     .join("");
   const collectedMarkup = collectedResults.length
     ? `<div class="collected-list-results">
-        <div class="collected-list-head"><b>Database wine-list matches</b><span>Matched text only. Database prices are not estimated.</span></div>
+        <div class="collected-list-head"><b>Database wine-list matches</b><span>Stored parsed prices are shown when available.</span></div>
         ${collectedResults.map((result) => {
           const listUrl = pdfUrl(result.wineList || {});
+          const originalPrice = hasValidPrice(result) ? originalPriceText(result) : "N/A";
           return `<div class="collected-list-row">
             <div><b>${escapeHtml(result.text || "Matching text found in this wine list")}</b>${result.vintage ? `<span>Vintage ${escapeHtml(result.vintage)}</span>` : ""}</div>
-            <div>${sourceBadge(resultSource(result))}${listUrl ? `<a class="secondary" href="${escapeHtml(listUrl)}" target="_blank" rel="noreferrer">Open wine list</a>` : ""}</div>
+            <div>
+              <div class="collected-list-price"><b>${escapeHtml(originalPrice)}</b><span>${escapeHtml(krwPriceText(result))}</span></div>
+              ${sourceBadge(resultSource(result))}${listUrl ? `<a class="secondary" href="${escapeHtml(listUrl)}" target="_blank" rel="noreferrer">Open wine list</a>` : ""}
+            </div>
           </div>`;
         }).join("")}
       </div>`

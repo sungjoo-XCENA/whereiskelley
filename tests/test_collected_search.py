@@ -29,6 +29,9 @@ def insert_guide_row(
     status="found",
     raw_text="2021 Romanee Conti Grand Cru",
     country="Korea",
+    price_text=None,
+    price_value=None,
+    currency=None,
 ):
     con.execute(
         """
@@ -50,22 +53,35 @@ def insert_guide_row(
     con.execute(
         """
         insert into guide_wine_entries
-          (id, target_id, wine_list_source_id, raw_text, vintage, source_url)
-        values (1, 1, 1, ?, '2021', ?)
+          (id, target_id, wine_list_source_id, raw_text, vintage,
+           price_text, price_value, currency, source_url)
+        values (1, 1, 1, ?, '2021', ?, ?, ?, ?)
         """,
-        (raw_text, url),
+        (raw_text, price_text, price_value, currency, url),
     )
     con.commit()
 
 
-def insert_star_wine_row(con, raw_text="2020 Romanee Conti Grand Cru 1200"):
-    con.execute("insert into countries(id, slug, name) values (1, 'france', 'France')")
+def insert_star_wine_row(
+    con,
+    raw_text="2020 Romanee Conti Grand Cru 1200",
+    country="France",
+    city="Paris",
+    price_text="1200",
+    price_value=1200,
+    currency="EUR",
+):
+    con.execute(
+        "insert into countries(id, slug, name) values (1, 'country', ?)",
+        (country,),
+    )
     con.execute(
         """
         insert into venues(id, slug, name, type, country_id, city, venue_url)
-        values (1, 'star-restaurant', 'Star Restaurant', 'Restaurant', 1, 'Paris',
+        values (1, 'star-restaurant', 'Star Restaurant', 'Restaurant', 1, ?,
                 'https://starwinelist.com/wine-place/star-restaurant')
-        """
+        """,
+        (city,),
     )
     con.execute(
         """
@@ -77,9 +93,9 @@ def insert_star_wine_row(con, raw_text="2020 Romanee Conti Grand Cru 1200"):
         """
         insert into wine_entries(
           id, wine_list_id, venue_id, raw_text, vintage, price_text, price_value, currency
-        ) values (1, 1, 1, ?, '2020', '1200', 1200, 'EUR')
+        ) values (1, 1, 1, ?, '2020', ?, ?, ?)
         """,
-        (raw_text,),
+        (raw_text, price_text, price_value, currency),
     )
     con.commit()
 
@@ -138,6 +154,31 @@ class CollectedSearchTests(unittest.TestCase):
         self.assertTrue(database_result["availabilityOnly"])
         self.assertIsNone(database_result["priceValue"])
 
+    def test_star_wine_price_uses_country_currency_when_currency_is_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "search.sqlite"
+            con = create_db(db_path)
+            insert_star_wine_row(
+                con,
+                raw_text="2011 Chateauneuf du Pape Rouge Pignan Rayas France 170,000",
+                country="Japan",
+                city="Tokyo",
+                price_text="170,000",
+                price_value=170000,
+                currency="",
+            )
+            con.close()
+            previous_path = app.DB_PATH
+            app.DB_PATH = db_path
+            try:
+                payload = app.search({"q": ["Rayas"], "country": ["Japan"], "limit": ["100"]})
+            finally:
+                app.DB_PATH = previous_path
+
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["priceValue"], 170000)
+        self.assertEqual(payload["results"][0]["currency"], "JPY")
+
     def test_english_country_filter_matches_localized_guide_country(self):
         with tempfile.TemporaryDirectory() as directory:
             db_path = Path(directory) / "search.sqlite"
@@ -149,6 +190,8 @@ class CollectedSearchTests(unittest.TestCase):
                     "2011 Chateauneuf du Pape Rouge Pignan Rayas France 170,000"
                 ),
                 country="일본",
+                price_text="170,000",
+                price_value=170000,
             )
             con.close()
             previous_path = app.DB_PATH
@@ -161,6 +204,9 @@ class CollectedSearchTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["venue"]["country"], "Japan")
         self.assertIn("Pignan Rayas", results[0]["text"])
+        self.assertEqual(results[0]["priceValue"], 170000)
+        self.assertEqual(results[0]["currency"], "JPY")
+        self.assertEqual(results[0]["prices"], ["170,000"])
 
     def test_country_filter_still_excludes_other_countries(self):
         with tempfile.TemporaryDirectory() as directory:

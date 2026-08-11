@@ -60,6 +60,7 @@ COUNTRY_CURRENCIES = {
     "Greater China": "CNY",
     "Hong Kong": "HKD",
     "Italy": "EUR",
+    "Japan": "JPY",
     "Netherlands": "EUR",
     "Norway": "NOK",
     "Singapore": "SGD",

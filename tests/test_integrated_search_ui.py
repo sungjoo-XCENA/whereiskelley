@@ -20,7 +20,9 @@ class IntegratedSearchUiTests(unittest.TestCase):
 
     def test_database_matches_are_availability_results(self):
         self.assertIn("Database wine-list matches", APP_SCRIPT)
-        self.assertIn("Matched text only. Database prices are not estimated.", APP_SCRIPT)
+        self.assertIn("Stored parsed prices are shown when available.", APP_SCRIPT)
+        self.assertIn('Japan: "JPY"', APP_SCRIPT)
+        self.assertIn("krwPriceText(result)", APP_SCRIPT)
         self.assertIn('label = key === "both" ? "Star Wine + Database"', APP_SCRIPT)
 
     def test_server_html_is_not_rendered_as_search_error(self):
