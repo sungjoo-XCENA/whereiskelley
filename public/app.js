@@ -25,6 +25,8 @@ let googleMapsPromise = null;
 let mapRenderToken = 0;
 let snapshotManifestCache = null;
 let snapshotLineCache = null;
+let activeSearchController = null;
+let activeSearchRequestId = 0;
 
 const COUNTRY_CURRENCY = {
   Argentina: "ARS",
@@ -81,8 +83,8 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-async function getJson(path) {
-  const response = await fetch(path);
+async function getJson(path, options = {}) {
+  const response = await fetch(path, options);
   const contentType = response.headers.get("content-type") || "";
   if (!response.ok) {
     let message = `Request failed (HTTP ${response.status}).`;
@@ -102,6 +104,28 @@ async function getJson(path) {
     throw new Error("The search server returned an invalid response. Please try again.");
   }
   return response.json();
+}
+
+function setSearchButtonState(searching) {
+  submitButton.textContent = searching ? "Stop" : "Search";
+  submitButton.classList.toggle("stop-search", searching);
+  submitButton.setAttribute("aria-label", searching ? "Stop current search" : "Search");
+  submitButton.setAttribute("aria-pressed", searching ? "true" : "false");
+  form.setAttribute("aria-busy", searching ? "true" : "false");
+}
+
+function stopActiveSearch() {
+  if (!activeSearchController) return false;
+  const controller = activeSearchController;
+  activeSearchController = null;
+  activeSearchRequestId += 1;
+  controller.abort();
+  setSearchButtonState(false);
+  countEl.textContent = "0";
+  resultsEl.innerHTML = `<div class="empty-list"><h3>Search stopped</h3><p>Change the filters or press Search to start again.</p></div>`;
+  mapSummaryEl.textContent = "Search stopped";
+  showMapFallback("Ready for another search.", "Search stopped", false);
+  return true;
 }
 
 async function getOptionalJson(path) {
@@ -1082,6 +1106,9 @@ function scrollToVenue(key) {
 }
 
 async function runSearch() {
+  const controller = new AbortController();
+  const requestId = ++activeSearchRequestId;
+  activeSearchController = controller;
   activeId = "";
   activeVenueKey = "";
   latestResults = [];
@@ -1093,7 +1120,7 @@ async function runSearch() {
   mapSummaryEl.textContent = "Searching...";
   showMapFallback("Scanning all matching pages before drawing the map.", "Searching places", true);
   clearGoogleMarkers();
-  submitButton.disabled = true;
+  setSearchButtonState(true);
   const params = new URLSearchParams();
   if (queryInput.value.trim()) params.set("q", queryInput.value.trim());
   if (countryInput.value) params.set("country", countryInput.value);
@@ -1107,7 +1134,10 @@ async function runSearch() {
   }
   params.set("limit", "5000");
   try {
-    const payload = await getJson(`/api/search_v2?${params.toString()}`);
+    const payload = await getJson(`/api/search_v2?${params.toString()}`, {
+      signal: controller.signal
+    });
+    if (controller.signal.aborted || requestId !== activeSearchRequestId) return;
     const results = Array.isArray(payload.results) ? payload.results : [];
     const databaseMatches = results.filter((result) => result.source === "Database" || result.source === "Collected DB").length;
     const starWineMatches = results.length - databaseMatches;
@@ -1117,13 +1147,18 @@ async function runSearch() {
       starWineMatches
     });
   } finally {
-    submitButton.disabled = false;
+    if (activeSearchController === controller) {
+      activeSearchController = null;
+      setSearchButtonState(false);
+    }
   }
 }
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (stopActiveSearch()) return;
   runSearch().catch((error) => {
+    if (error.name === "AbortError") return;
     resultsEl.innerHTML = `<div class="empty-list"><h3>Search error</h3><p>${escapeHtml(error.message)}</p></div>`;
   });
 });

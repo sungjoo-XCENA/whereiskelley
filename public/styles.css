@@ -137,6 +137,20 @@ h1 {
   align-items: center;
 }
 
+.search-form button[type="submit"] {
+  min-width: 96px;
+}
+
+.search-form button.stop-search {
+  border-color: #17191f;
+  background: #17191f;
+}
+
+.search-form button.stop-search:hover {
+  border-color: #000;
+  background: #000;
+}
+
 .query-wrap {
   position: relative;
 }
