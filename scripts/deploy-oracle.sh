@@ -38,6 +38,10 @@ if [[ -f db/starwine.sqlite ]]; then
   mkdir -p "$backup_dir/db"
   cp -p db/starwine.sqlite "$backup_dir/db/starwine.sqlite"
 fi
+if [[ -f db/wine_shops.sqlite ]]; then
+  mkdir -p "$backup_dir/db"
+  cp -p db/wine_shops.sqlite "$backup_dir/db/wine_shops.sqlite"
+fi
 if [[ -d public/data ]]; then
   tar -czf "$backup_dir/public-data.tar.gz" public/data
 fi
@@ -51,6 +55,10 @@ fi
 if [[ -f "$backup_dir/db/starwine.sqlite" ]]; then
   mkdir -p db
   cp -p "$backup_dir/db/starwine.sqlite" db/starwine.sqlite
+fi
+if [[ -f "$backup_dir/db/wine_shops.sqlite" ]]; then
+  mkdir -p db
+  cp -p "$backup_dir/db/wine_shops.sqlite" db/wine_shops.sqlite
 fi
 if [[ -f "$backup_dir/public-data.tar.gz" ]]; then
   tar -xzf "$backup_dir/public-data.tar.gz" -C "$APP_DIR"

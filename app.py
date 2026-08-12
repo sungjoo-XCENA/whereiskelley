@@ -70,9 +70,11 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import sync_search_api
+from wine_shop_db import search_shop_products, shop_collection_status
 
 
 COLLECTOR_PROCESS = None
+SHOP_COLLECTOR_PROCESSES = {}
 SEARCH_REFRESH_LOCK = threading.Lock()
 SEARCH_REFRESH_CACHE = {}
 SEARCH_REFRESH_CACHE_TTL = int(os.environ.get("WHEREISKELLEY_SEARCH_CACHE_SECONDS", "900"))
@@ -203,13 +205,102 @@ def start_wine_collection(payload):
     }, 202
 
 
+def running_shop_collector(phase=""):
+    process = SHOP_COLLECTOR_PROCESSES.get(phase)
+    if process is not None:
+        if process.poll() is None:
+            return process.pid
+        SHOP_COLLECTOR_PROCESSES.pop(phase, None)
+    if os.name == "nt":
+        return None
+    patterns = {
+        "merchant_scan": "wine_shop_collect.py merchant-scan",
+        "inventory": "wine_shop_collect.py inventory",
+    }
+    pattern = patterns.get(phase, "wine_shop_collect.py")
+    try:
+        output = subprocess.check_output(
+            ["pgrep", "-f", pattern], text=True, stderr=subprocess.DEVNULL
+        )
+    except Exception:
+        return None
+    for raw_pid in output.splitlines():
+        try:
+            pid = int(raw_pid.strip())
+        except ValueError:
+            continue
+        if pid != os.getpid():
+            return pid
+    return None
+
+
+def start_shop_collection(payload):
+    if not ADMIN_PASSWORD:
+        return {"ok": False, "error": "Admin password is not configured on this server."}, 503
+    if str(payload.get("password") or "") != ADMIN_PASSWORD:
+        return {"ok": False, "error": "Wrong password."}, 401
+    phase = str(payload.get("phase") or "inventory").strip()
+    if phase not in {"merchant_scan", "inventory"}:
+        return {"ok": False, "error": "phase must be merchant_scan or inventory."}, 400
+    running_pid = running_shop_collector(phase)
+    if running_pid:
+        return {"ok": True, "running": True, "phase": phase, "pid": running_pid, "message": "This wine-shop collection phase is already running."}, 200
+
+    script = str(SCRIPTS_DIR / "wine_shop_collect.py")
+    if phase == "merchant_scan":
+        command = [
+            sys.executable, script, "merchant-scan",
+            "--start", str(max(2, int(payload.get("start") or 2))),
+            "--end", str(min(239995, int(payload.get("end") or 239995))),
+            "--workers", str(max(1, int(payload.get("workers") or os.environ.get("WHEREISKELLEY_SHOP_PROFILE_WORKERS", "24")))),
+            "--rps", str(max(0.1, float(payload.get("rps") or os.environ.get("WHEREISKELLEY_SHOP_PROFILE_RPS", "4")))),
+            "--max-rps", str(max(0.1, float(os.environ.get("WHEREISKELLEY_SHOP_PROFILE_MAX_RPS", "8")))),
+            "--resume",
+        ]
+    else:
+        command = [
+            sys.executable, script, "inventory",
+            "--workers", str(max(1, int(payload.get("workers") or os.environ.get("WHEREISKELLEY_SHOP_INVENTORY_WORKERS", "64")))),
+            "--per-domain", str(max(1, int(os.environ.get("WHEREISKELLEY_SHOP_PER_DOMAIN", "2")))),
+            "--max-pages", str(max(10, int(payload.get("maxPages") or os.environ.get("WHEREISKELLEY_SHOP_MAX_PAGES", "160")))),
+            "--depth", str(max(1, min(5, int(payload.get("depth") or 5)))),
+            "--stale-days", str(max(0, int(payload.get("staleDays") or 14))),
+            "--resume",
+        ]
+        if int(payload.get("limit") or 0) > 0:
+            command.extend(["--limit", str(int(payload["limit"]))])
+
+    log_dir = ROOT / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stdout = open(log_dir / f"wine-shop-{phase}.log", "ab")
+    stderr = open(log_dir / f"wine-shop-{phase}.err.log", "ab")
+    kwargs = {
+        "cwd": str(ROOT), "stdout": stdout, "stderr": stderr,
+        "env": {**os.environ, "PYTHONIOENCODING": "utf-8"},
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+    try:
+        process = subprocess.Popen(command, **kwargs)
+        SHOP_COLLECTOR_PROCESSES[phase] = process
+    finally:
+        stdout.close()
+        stderr.close()
+    return {
+        "ok": True, "running": True, "phase": phase, "pid": process.pid,
+        "message": "Merchant registry scan started." if phase == "merchant_scan" else "Wine-shop inventory collection started.",
+    }, 202
+
+
 def text_response(handler, text, status=200):
     body = text.encode("utf-8")
     handler.send_response(status)
     handler.send_header("content-type", "text/plain; charset=utf-8")
     handler.send_header("access-control-allow-origin", ALLOWED_ORIGIN)
     handler.send_header("access-control-allow-headers", "content-type, x-whereiskelley-token")
-    handler.send_header("access-control-allow-methods", "GET, OPTIONS")
+    handler.send_header("access-control-allow-methods", "GET, POST, OPTIONS")
     handler.send_header("access-control-allow-private-network", "true")
     handler.send_header("content-length", str(len(body)))
     handler.end_headers()
@@ -860,6 +951,7 @@ def search(params):
         item["source"] = "Star Wine"
         results.append(item)
     results.extend(search_collected_guides(q, country, city, vintage, limit))
+    results.extend(search_shop_products(q, country, city, vintage, limit))
     return {"query": q, "count": len(results), "results": results, "liveRefresh": live_refresh}
 
 
@@ -1534,6 +1626,13 @@ class Handler(BaseHTTPRequestHandler):
                 )
             if parsed.path == "/api/guide-collection":
                 return json_response(self, guide_collection_status())
+            if parsed.path == "/api/shop-collection":
+                payload = shop_collection_status()
+                payload["running"] = {
+                    "merchantScan": running_shop_collector("merchant_scan"),
+                    "inventory": running_shop_collector("inventory"),
+                }
+                return json_response(self, payload)
             if parsed.path == "/api/stats":
                 return json_response(self, stats())
             if parsed.path == "/api/guide-watch":
@@ -1571,6 +1670,9 @@ class Handler(BaseHTTPRequestHandler):
                 return json_response(self, {"ok": False, "error": "Invalid JSON body."}, status=400)
             if parsed.path in ("/api/guide-collection", "/api/guide-collection/run"):
                 result, status = start_wine_collection(payload if isinstance(payload, dict) else {})
+                return json_response(self, result, status=status)
+            if parsed.path in ("/api/shop-collection", "/api/shop-collection/run"):
+                result, status = start_shop_collection(payload if isinstance(payload, dict) else {})
                 return json_response(self, result, status=status)
             return json_response(self, {"ok": False, "error": "Not found."}, status=404)
         except Exception as exc:

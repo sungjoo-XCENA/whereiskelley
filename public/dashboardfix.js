@@ -1,6 +1,8 @@
 (function () {
   const state = {
     guidePayload: null,
+    shopPayload: null,
+    databaseMode: "restaurants",
     dashboardMap: null,
     dashboardMapEl: null,
     dashboardInfoWindow: null,
@@ -19,6 +21,8 @@
     guideActionInFlight: false,
     guideActionMessage: "",
     guideActionKind: "",
+    shopActionInFlight: false,
+    shopActionMessage: "",
     lastRefreshAt: ""
   };
 
@@ -66,6 +70,28 @@
     .dash-panel {
       padding: 16px;
       margin-top: 14px;
+    }
+    .database-mode-control {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f5f7fa;
+    }
+    .database-mode-control button {
+      min-height: 34px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .database-mode-control button.active {
+      background: #111418;
+      color: #fff;
     }
     .database-summary-copy {
       margin: 7px 0 14px;
@@ -678,13 +704,43 @@
   }
 
   async function fetchLiveGuideCollection() {
-    const [proxied, resourceHistory] = await Promise.all([
+    const [proxied, shops, resourceHistory] = await Promise.all([
       fetchJson("/api/guide-collection", null),
+      fetchJson("/api/shop-collection", null),
       fetchJson("/data/resource-history.json", null)
     ]);
+    state.shopPayload = shops;
     if (proxied && resourceHistory?.samples) proxied.resourceHistory = resourceHistory;
     if (!isEmptyGuidePayload(proxied)) return proxied;
     return proxied;
+  }
+
+  async function startShopCollection(phase) {
+    if (state.shopActionInFlight) return;
+    const label = phase === "merchant_scan" ? "one-time merchant registry scan" : "wine-shop inventory refresh";
+    const password = window.prompt(`Enter the admin password to start the ${label}.`);
+    if (!password) return;
+    state.shopActionInFlight = true;
+    state.shopActionMessage = `Starting ${label}...`;
+    renderCollection();
+    try {
+      const response = await fetch("/api/shop-collection", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ password, phase })
+      });
+      const payload = await response.json().catch(() => ({}));
+      state.shopActionMessage = payload.message || payload.error || `HTTP ${response.status}`;
+      if (response.ok && payload.ok !== false) {
+        window.setTimeout(() => loadGuideStats({ force: true }), 1500);
+      }
+    } catch (error) {
+      state.shopActionMessage = `Could not start wine-shop collection: ${error.message || error}`;
+    } finally {
+      state.shopActionInFlight = false;
+      renderCollection();
+    }
   }
 
   async function startGuideRecollection() {
@@ -876,6 +932,42 @@
       .filter((target) => Number.isFinite(target.lat) && Number.isFinite(target.lng));
   }
 
+  function shopDatabasePayload() {
+    const payload = state.shopPayload || {};
+    return {
+      mapTargets: (payload.mapMerchants || []).map((merchant) => {
+        const status = merchant.inventoryStatus === "found"
+          ? "found"
+          : merchant.inventoryStatus === "no_wine_list"
+            ? "no_wine_list"
+            : "review";
+        return {
+          id: `shop-${merchant.id}`,
+          name: merchant.name,
+          merchantType: merchant.merchantType || "Wine Shop",
+          country: merchant.country,
+          city: merchant.city,
+          address: merchant.address,
+          lat: merchant.lat,
+          lng: merchant.lng,
+          websiteUrl: merchant.websiteUrl || merchant.wineSearcherUrl,
+          wineListUrl: merchant.inventoryUrl || merchant.websiteUrl || merchant.wineSearcherUrl,
+          wineListType: "inventory",
+          lastCheckedAt: merchant.lastCheckedAt,
+          status,
+          verifiedWineListCount: status === "found" ? Number(merchant.sourceCount || 1) : 0,
+          chosenWineLineCount: Number(merchant.productCount || 0),
+          productCount: Number(merchant.productCount || 0),
+          sourceCount: Number(merchant.sourceCount || 0)
+        };
+      })
+    };
+  }
+
+  function activeDatabasePayload() {
+    return state.databaseMode === "shops" ? shopDatabasePayload() : (state.guidePayload || {});
+  }
+
   function markerColor(kind) {
     if (kind === "found") return "#16a34a";
     if (kind === "none") return "#dc2626";
@@ -953,7 +1045,7 @@
   }
 
   function mapSignature(targets) {
-    return targets
+    return `${state.databaseMode}|${targets
       .map((target) => [
         target.id,
         target.status,
@@ -966,7 +1058,7 @@
         target.wineListParserStatus,
         target.chosenWineLineCount
       ].join(":"))
-      .join("|");
+      .join("|")}`;
   }
 
   function targetFeature(target) {
@@ -1004,11 +1096,12 @@
     if (state.activeView !== "database") return;
     const targets = visibleMapTargets(payload);
     if (!targets.length) {
+      const noun = state.databaseMode === "shops" ? "wine shops" : "restaurants";
       if (state.dashboardMarkers.size) return;
       for (const marker of state.dashboardMarkers.values()) marker.setMap(null);
       state.dashboardMarkers.clear();
       fallbackEl.classList.remove("hidden");
-      fallbackEl.innerHTML = `<b>No mapped restaurants yet</b><span>Coordinates will appear as the collector resolves restaurants.</span>`;
+      fallbackEl.innerHTML = `<b>No mapped ${noun} yet</b><span>Coordinates will appear as the collector resolves ${noun}.</span>`;
       return;
     }
     try {
@@ -1020,6 +1113,9 @@
       }
       fallbackEl.classList.add("hidden");
       if (!state.dashboardMap || state.dashboardMapEl !== mapEl) {
+        state.dashboardDataLayer?.setMap(null);
+        state.dashboardDataLayer = null;
+        state.dashboardDataClickBound = false;
         state.dashboardMapEl = mapEl;
         state.dashboardMap = new maps.Map(mapEl, {
           center: { lat: 30, lng: 8 },
@@ -1075,7 +1171,7 @@
 
   function selectDashboardTarget(id, shouldScroll = true, clickedLatLng = null) {
     state.activeTargetId = String(id || "");
-    const payload = state.guidePayload || {};
+    const payload = activeDatabasePayload();
     const target = (payload.mapTargets || []).find((item) => String(item.id) === state.activeTargetId);
     if (!target) return;
     const marker = state.dashboardMarkers.get(String(target.id));
@@ -1098,17 +1194,19 @@
   function clearDashboardSelection() {
     state.activeTargetId = null;
     state.dashboardInfoWindow?.close();
-    renderSelectedTarget(state.guidePayload || {});
-    renderDashboardMap(state.guidePayload || {}, { fit: true });
+    const payload = activeDatabasePayload();
+    renderSelectedTarget(payload);
+    renderDashboardMap(payload, { fit: true });
     document.querySelector('[data-dashboard-section="map"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function selectedTargetMarkup(payload) {
     const target = (payload?.mapTargets || []).find((item) => String(item.id) === String(state.activeTargetId || ""));
     if (!target) {
+      const noun = state.databaseMode === "shops" ? "wine shop" : "restaurant";
       return `<div class="selected-target empty">
-        <h3>No restaurant selected</h3>
-        <p>Click a marker on the map to inspect one restaurant.</p>
+        <h3>No ${noun} selected</h3>
+        <p>Click a marker on the map to inspect one ${noun}.</p>
       </div>`;
     }
     const location = [target.city, target.country].filter(Boolean).join(", ");
@@ -1121,13 +1219,14 @@
       : "Wine list";
     return `<div class="selected-target">
       <div>
-        <p class="dash-kicker">Selected restaurant</p>
+        <p class="dash-kicker">Selected ${state.databaseMode === "shops" ? "wine shop" : "restaurant"}</p>
         <h3>${html(target.name || "Unknown")}</h3>
         <p>${html(location || "Unknown location")}</p>
       </div>
       <div class="selected-target-grid">
         <div class="metric-box"><span>Status</span><b>${targetPill(target)}</b></div>
         <div class="metric-box"><span>Last checked</span><b>${html(target.lastCheckedAt || "-")}</b></div>
+        ${state.databaseMode === "shops" ? `<div class="metric-box"><span>Saved products</span><b>${html(fmtInt(target.productCount))}</b></div>` : ""}
       </div>
       <div class="selected-target-actions">
         ${target.wineListUrl ? `<a class="${kind === "found" ? "" : "secondary"}" href="${html(target.wineListUrl)}" target="_blank" rel="noreferrer">${html(wineListLabel)}</a>` : ""}
@@ -1229,8 +1328,8 @@
 
   function renderDatabase() {
     const root = ensureDataViews().databaseView;
-    const metrics = guideMetrics(state.guidePayload || {});
-    const { payload } = metrics;
+    const payload = activeDatabasePayload();
+    const noun = state.databaseMode === "shops" ? "wine shops" : "restaurants";
 
     const mapHtml = `<section class="dash-panel" data-dashboard-section="map">
       <div class="collection-head">
@@ -1238,15 +1337,21 @@
           <p class="dash-kicker">Built database</p>
           <h2>Database map</h2>
         </div>
-        <div class="map-legend">
-          <span class="legend-dot" style="--dot:#16a34a">Found</span>
-          <span class="legend-dot" style="--dot:#dc2626">No wine list</span>
-          <span class="legend-dot" style="--dot:#f59e0b">Pending / review</span>
+        <div>
+          <div class="database-mode-control" aria-label="Database type">
+            <button type="button" data-database-mode="restaurants" class="${state.databaseMode === "restaurants" ? "active" : ""}">Restaurants</button>
+            <button type="button" data-database-mode="shops" class="${state.databaseMode === "shops" ? "active" : ""}">Wine shops</button>
+          </div>
+          <div class="map-legend">
+            <span class="legend-dot" style="--dot:#16a34a">Inventory found</span>
+            <span class="legend-dot" style="--dot:#dc2626">No wine list</span>
+            <span class="legend-dot" style="--dot:#f59e0b">Pending / review</span>
+          </div>
         </div>
       </div>
       <div class="dashboard-map-wrap">
         <div id="dashboardDbMap"></div>
-        <div id="dashboardMapFallback" class="dashboard-map-fallback"><b>Loading map</b><span>Restaurant coordinates are being prepared.</span></div>
+        <div id="dashboardMapFallback" class="dashboard-map-fallback"><b>Loading map</b><span>${html(noun)} coordinates are being prepared.</span></div>
       </div>
     </section>`;
 
@@ -1254,9 +1359,12 @@
       ${selectedTargetMarkup(payload)}
     </section>`;
 
-    const mapAlreadyMounted = Boolean(root.querySelector("#dashboardDbMap"));
+    const mapAlreadyMounted = Boolean(root.querySelector("#dashboardDbMap")) && root.dataset.databaseMode === state.databaseMode;
     if (!mapAlreadyMounted) {
+      root.dataset.databaseMode = state.databaseMode;
       root.innerHTML = `${mapHtml}${selectedHtml}`;
+      state.dashboardMapSignature = "";
+      state.dashboardMapHasFit = false;
       renderDashboardMap(payload, { fit: true });
       return;
     }
@@ -1318,7 +1426,39 @@
     </section>`;
 
     const resourcesHtml = resourcePanelMarkup(payload);
-    root.innerHTML = `${cardsHtml}${progressHtml}${resourcesHtml}`;
+    const shop = state.shopPayload || {};
+    const shopProgress = shop.progress || {};
+    const shopCounts = shop.counts || {};
+    const shopRunning = Boolean(shop.running?.merchantScan || shop.running?.inventory || shopProgress.status === "running");
+    const shopChecked = number(shopProgress.checked || shopCounts.idsChecked);
+    const shopTotal = number(shopProgress.total || (shopProgress.rangeEnd && shopProgress.rangeStart
+      ? shopProgress.rangeEnd - shopProgress.rangeStart + 1
+      : 239994));
+    const shopPercent = shopTotal ? Math.min(100, (shopChecked / shopTotal) * 100) : 0;
+    const shopCollectionHtml = `<section class="dash-panel" data-dashboard-section="shop-collection">
+      <div class="collection-head">
+        <div>
+          <p class="dash-kicker">Wine shop database</p>
+          <h2>Merchant and inventory collection</h2>
+        </div>
+        <div class="selected-target-actions dashboard-progress-actions">
+          <span class="dash-pill ${shopRunning ? "good" : ""}">${html(shopRunning ? "Collecting" : (shopProgress.status || "Ready"))}</span>
+          <button class="dashboard-refresh" type="button" data-start-shop-collection="merchant_scan" ${shopRunning || state.shopActionInFlight ? "disabled" : ""}>Scan merchant registry</button>
+          <button class="dashboard-refresh" type="button" data-start-shop-collection="inventory" ${shopRunning || state.shopActionInFlight || !number(shopCounts.withWebsite) ? "disabled" : ""}>Refresh inventories</button>
+          ${state.shopActionMessage ? `<span class="dashboard-action-note">${html(state.shopActionMessage)}</span>` : ""}
+        </div>
+      </div>
+      <div class="dash-progress" style="--dash-progress:${html(shopPercent)}%"><i></i></div>
+      <div class="collection-metrics">
+        <div class="metric-box"><span>Merchant IDs checked</span><b>${html(fmtInt(shopCounts.idsChecked))}</b></div>
+        <div class="metric-box"><span>Merchants saved</span><b>${html(fmtInt(shopCounts.merchants))}</b></div>
+        <div class="metric-box"><span>Official websites</span><b>${html(fmtInt(shopCounts.withWebsite))}</b></div>
+        <div class="metric-box"><span>Inventories found</span><b>${html(fmtInt(shopCounts.inventoryFound))}</b></div>
+        <div class="metric-box"><span>Products searchable</span><b>${html(fmtInt(shopCounts.products))}</b></div>
+        <div class="metric-box"><span>Needs review</span><b>${html(fmtInt(shopCounts.openReviews))}</b></div>
+      </div>
+    </section>`;
+    root.innerHTML = `${cardsHtml}${progressHtml}${shopCollectionHtml}${resourcesHtml}`;
   }
 
   function renderActiveGuideView() {
@@ -1377,6 +1517,23 @@
       if (!event.target.closest("[data-start-guide-collection]")) return;
       event.preventDefault();
       startGuideRecollection();
+    });
+    document.body.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-start-shop-collection]");
+      if (!button) return;
+      event.preventDefault();
+      startShopCollection(button.dataset.startShopCollection);
+    });
+    document.body.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-database-mode]");
+      if (!button || button.dataset.databaseMode === state.databaseMode) return;
+      event.preventDefault();
+      state.databaseMode = button.dataset.databaseMode;
+      state.activeTargetId = null;
+      state.dashboardInfoWindow?.close();
+      state.dashboardMapSignature = "";
+      state.dashboardMapHasFit = false;
+      renderDatabase();
     });
     activate("search");
   }

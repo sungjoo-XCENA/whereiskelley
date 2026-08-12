@@ -1,0 +1,11 @@
+[Unit]
+Description=Check whether the Where is Kelley wine-shop inventory refresh is due
+
+[Timer]
+OnCalendar=Mon *-*-* 04:00:00 Asia/Seoul
+Persistent=true
+RandomizedDelaySec=10m
+Unit=whereiskelley-shop-inventory.service
+
+[Install]
+WantedBy=timers.target

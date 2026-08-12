@@ -226,6 +226,16 @@ button:hover {
   color: #5b21b6;
 }
 
+.source-badge.shop {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.price-offer.shop {
+  border-color: #fdba74;
+  background: #fff7ed;
+}
+
 .price-offers {
   display: grid;
   gap: 4px;

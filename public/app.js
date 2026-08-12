@@ -270,18 +270,22 @@ function resultSource(result = {}) {
 
 function resultSourceKind(result = {}) {
   const source = String(resultSource(result)).toLowerCase();
-  return source.includes("database") || source.includes("collected") || source === "db"
-    ? "db"
-    : "live";
+  if (source.includes("wine shop")) return "shop";
+  if (source.includes("database") || source.includes("collected") || source === "db") return "db";
+  return "live";
 }
 
 function resultSourceLabel(result = {}) {
-  return resultSourceKind(result) === "db" ? "Database" : "Star Wine";
+  const kind = resultSourceKind(result);
+  return kind === "shop" ? "Wine Shop DB" : kind === "db" ? "Restaurant DB" : "Star Wine";
 }
 
 function sourceBadge(source) {
   const value = String(source || "Star Wine");
   const normalized = value.toLowerCase();
+  if (normalized.includes("wine shop")) {
+    return `<span class="source-badge shop">Wine Shop DB</span>`;
+  }
   const hasDatabase = normalized.includes("database") || normalized.includes("collected") || normalized.includes("db");
   const hasStarWine = normalized.includes("star wine") || normalized.includes("live");
   const key = hasDatabase && hasStarWine ? "both" : hasDatabase ? "db" : "live";
@@ -406,7 +410,7 @@ function groupLowestPriceResult(group) {
 
 function groupOfferLines(group) {
   const databaseLines = uniqueResults(
-    group.results.filter((result) => resultSourceKind(result) === "db")
+    group.results.filter((result) => resultSourceKind(result) !== "live")
   );
   const starWineGroup = {
     ...group,
@@ -419,7 +423,8 @@ function sourcePriceOffers(group) {
   const offerLines = groupOfferLines(group);
   return [
     { key: "live", label: "Star Wine" },
-    { key: "db", label: "Database" }
+    { key: "db", label: "Restaurant DB" },
+    { key: "shop", label: "Wine Shop DB" }
   ].flatMap((source) => {
     const sourceLines = offerLines.filter((result) => resultSourceKind(result) === source.key);
     if (!sourceLines.length) return [];
@@ -727,7 +732,7 @@ function sortHeader(label, key) {
 function liveRefreshLine(liveRefresh) {
   if (!liveRefresh) return "";
   if (liveRefresh.sourceSummary && "databaseMatches" in liveRefresh) {
-    return `<div class="sync-note integrated-search-note"><b>${escapeHtml(liveRefresh.sourceSummary)}</b><span>${escapeHtml(String(liveRefresh.starWineMatches || 0))} Star Wine matches</span><span>${escapeHtml(String(liveRefresh.databaseMatches || 0))} Database matches</span></div>`;
+    return `<div class="sync-note integrated-search-note"><b>${escapeHtml(liveRefresh.sourceSummary)}</b><span>${escapeHtml(String(liveRefresh.starWineMatches || 0))} Star Wine matches</span><span>${escapeHtml(String(liveRefresh.databaseMatches || 0))} Restaurant DB matches</span><span>${escapeHtml(String(liveRefresh.shopMatches || 0))} Wine Shop DB matches</span></div>`;
   }
   if (liveRefresh.sourceSummary) {
     return `<div class="sync-note">${escapeHtml(liveRefresh.sourceSummary)}: ${escapeHtml(String(liveRefresh.snapshotMatches || 0))} DB matches from ${escapeHtml(String(liveRefresh.snapshotLines || 0))} saved lines, ${escapeHtml(String(liveRefresh.liveMatches || 0))} live matches</div>`;
@@ -775,7 +780,7 @@ function exportRows() {
   return groupedVenues(latestResults).flatMap((group) => {
     const venue = group.venue || {};
     const starWineVenue = group.results.find((result) => resultSourceKind(result) === "live")?.venue || {};
-    const databaseVenue = group.results.find((result) => resultSourceKind(result) === "db")?.venue || {};
+    const databaseVenue = group.results.find((result) => resultSourceKind(result) !== "live")?.venue || {};
     const pdfLists = groupPdfLists(group);
     const lines = groupOfferLines(group);
     const pdfUrls = pdfLists.map((list) => pdfUrl(list)).filter(Boolean).join(" | ");
@@ -874,7 +879,7 @@ function renderPlaceRow(group) {
 }
 
 function placeLineLabel(group) {
-  const collected = group.results.filter((result) => resultSourceKind(result) === "db");
+  const collected = group.results.filter((result) => resultSourceKind(result) !== "live");
   const ordinaryGroup = { ...group, results: group.results.filter((result) => resultSourceKind(result) === "live") };
   const indexedLines = fallbackWineLines(ordinaryGroup.results);
   const verified = reconciledGroupLines(ordinaryGroup).filter((line) => line.pdfVerified).length;
@@ -889,7 +894,7 @@ function placeLineLabel(group) {
 
 function renderExpandedPlace(group) {
   const venue = group.venue || {};
-  const collectedResults = group.results.filter((result) => resultSourceKind(result) === "db");
+  const collectedResults = group.results.filter((result) => resultSourceKind(result) !== "live");
   const ordinaryGroup = { ...group, results: group.results.filter((result) => resultSourceKind(result) === "live") };
   const pdfLists = groupPdfLists(ordinaryGroup);
   const pdfLines = groupPdfLines(ordinaryGroup);
@@ -945,7 +950,7 @@ function renderExpandedPlace(group) {
     .map((result) => pdfUrl(result.wineList || {}))
     .filter((url, index, values) => url && values.indexOf(url) === index);
   const starWineVenue = group.results.find((result) => resultSourceKind(result) === "live")?.venue || {};
-  const databaseVenue = group.results.find((result) => resultSourceKind(result) === "db")?.venue || {};
+  const databaseVenue = group.results.find((result) => resultSourceKind(result) !== "live")?.venue || {};
   const mapUrl = databaseVenue.googleMapsUrl || starWineVenue.googleMapsUrl || venue.googleMapsUrl || venue.starWineMapUrl;
   return `<tr class="expanded-row">
     <td colspan="6">
@@ -1243,11 +1248,13 @@ async function runSearch() {
     });
     if (controller.signal.aborted || requestId !== activeSearchRequestId) return;
     const results = Array.isArray(payload.results) ? payload.results : [];
-    const databaseMatches = results.filter((result) => result.source === "Database" || result.source === "Collected DB").length;
-    const starWineMatches = results.length - databaseMatches;
+    const shopMatches = results.filter((result) => resultSourceKind(result) === "shop").length;
+    const databaseMatches = results.filter((result) => resultSourceKind(result) === "db").length;
+    const starWineMatches = results.filter((result) => resultSourceKind(result) === "live").length;
     renderResults(results, {
       sourceSummary: "Integrated search complete",
       databaseMatches,
+      shopMatches,
       starWineMatches
     });
   } finally {
