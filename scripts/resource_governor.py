@@ -74,7 +74,7 @@ class AdaptiveResourceGovernor:
         self.min_free_memory_bytes = int(float(min_free_memory_gb) * 1024**3)
         self.sample_seconds = max(0.05, float(sample_seconds))
         self.control_seconds = max(self.sample_seconds, float(control_seconds))
-        self.dispatch_fraction = 0.5
+        self.dispatch_fraction = 0.7
         self.last_control_at = 0.0
         self.previous_cpu = read_cpu_totals()
         self.last_sample_at = 0.0
@@ -139,12 +139,16 @@ class AdaptiveResourceGovernor:
         reason = ""
         now = time.monotonic()
         if now - self.last_control_at >= self.control_seconds:
-            if cpu is not None and cpu < self.target_cpu_percent - 8:
-                self.dispatch_fraction = min(1.0, self.dispatch_fraction + 0.1)
+            if cpu is not None and cpu < self.target_cpu_percent - 10:
+                self.dispatch_fraction = min(1.0, self.dispatch_fraction + 0.05)
+            elif cpu is not None and cpu < self.target_cpu_percent - 4:
+                self.dispatch_fraction = min(1.0, self.dispatch_fraction + 0.02)
+            elif cpu is not None and cpu > self.target_cpu_percent + 10:
+                self.dispatch_fraction = max(0.1, self.dispatch_fraction - 0.1)
             elif cpu is not None and cpu > self.target_cpu_percent + 5:
-                self.dispatch_fraction = max(0.1, self.dispatch_fraction * 0.75)
-            elif cpu is not None and cpu > self.target_cpu_percent:
                 self.dispatch_fraction = max(0.1, self.dispatch_fraction - 0.05)
+            elif cpu is not None and cpu > self.target_cpu_percent + 2:
+                self.dispatch_fraction = max(0.1, self.dispatch_fraction - 0.02)
             self.last_control_at = now
 
         limit = max(1, int(workers * self.dispatch_fraction))

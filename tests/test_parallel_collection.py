@@ -104,8 +104,8 @@ class ParallelCollectionTests(unittest.TestCase):
         governor.snapshot.update(cpuPercent=30, memoryPercent=20, networkPressurePercent=0)
         governor.last_sample_at = time.monotonic()
         governor.last_control_at = 0
-        self.assertEqual(governor.pending_limit(100), 60)
-        self.assertEqual(governor.snapshot["dispatchPercent"], 60.0)
+        self.assertEqual(governor.pending_limit(100), 75)
+        self.assertEqual(governor.snapshot["dispatchPercent"], 75.0)
 
     def test_resource_governor_stops_new_work_at_memory_limit(self):
         governor = resource_governor.AdaptiveResourceGovernor(sample_seconds=60)
