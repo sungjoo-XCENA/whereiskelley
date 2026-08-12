@@ -1435,6 +1435,7 @@
       ? shopProgress.rangeEnd - shopProgress.rangeStart + 1
       : 239994));
     const shopPercent = shopTotal ? Math.min(100, (shopChecked / shopTotal) * 100) : 0;
+    const shopStatusMessage = String(shopProgress.message || "").trim();
     const shopCollectionHtml = `<section class="dash-panel" data-dashboard-section="shop-collection">
       <div class="collection-head">
         <div>
@@ -1448,6 +1449,7 @@
           ${state.shopActionMessage ? `<span class="dashboard-action-note">${html(state.shopActionMessage)}</span>` : ""}
         </div>
       </div>
+      ${shopStatusMessage ? `<div class="dashboard-action-note ${shopProgress.status === "blocked" ? "warn" : ""}">${html(shopStatusMessage)}</div>` : ""}
       <div class="dash-progress" style="--dash-progress:${html(shopPercent)}%"><i></i></div>
       <div class="collection-metrics">
         <div class="metric-box"><span>Merchant IDs checked</span><b>${html(fmtInt(shopCounts.idsChecked))}</b></div>
