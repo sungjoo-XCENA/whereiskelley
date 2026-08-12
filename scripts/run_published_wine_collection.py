@@ -101,9 +101,9 @@ def main():
     parser.add_argument("--max-links", type=int, default=60)
     parser.add_argument("--max-targets", type=int, default=0)
     parser.add_argument("--sleep", default="0.08")
-    parser.add_argument("--workers", type=int, default=72)
-    parser.add_argument("--source-workers", type=int, default=54)
-    parser.add_argument("--pdf-workers", type=int, default=3)
+    parser.add_argument("--workers", type=int, default=96)
+    parser.add_argument("--source-workers", type=int, default=72)
+    parser.add_argument("--pdf-workers", type=int, default=4)
     args = parser.parse_args()
 
     live_path = live_db_path().resolve()
@@ -115,6 +115,14 @@ def main():
         status="preparing",
         phase="preparing_staging",
         message="Preparing a separate collection database. Current search data remains available.",
+        workerConfig={
+            "discovery": args.workers,
+            "html": args.source_workers,
+            "pdf": args.pdf_workers,
+            "targetCpuPercent": float(os.environ.get("WHEREISKELLEY_TARGET_CPU_PERCENT", "80")),
+            "maxMemoryPercent": float(os.environ.get("WHEREISKELLEY_MAX_MEMORY_PERCENT", "80")),
+            "maxDiskPercent": float(os.environ.get("WHEREISKELLEY_MAX_DISK_PERCENT", "85")),
+        },
     )
     copy_sqlite(live_path, staging_path)
     reset_staging_collection(staging_path)

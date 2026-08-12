@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import guide_discover_wine_lists as discover
+import resource_governor
 
 
 class ParallelCollectionTests(unittest.TestCase):
@@ -67,6 +68,49 @@ class ParallelCollectionTests(unittest.TestCase):
         self.assertGreaterEqual(state["peak"], 8)
         self.assertLessEqual(state["peak"], 12)
         self.assertTrue(state["pdf_started_after_html"])
+
+    def test_bounded_futures_never_queues_the_whole_collection(self):
+        state = {"peak": 0}
+        governor = mock.Mock()
+        governor.wait_for_capacity.return_value = {}
+        governor.capacity_available.return_value = True
+        governor.pending_limit.side_effect = lambda workers: workers * 2
+
+        def submit(pool, item):
+            future = pool.submit(lambda value: value, item)
+            state["peak"] = max(state["peak"], 1)
+            return future
+
+        with discover.ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(resource_governor.bounded_futures(
+                executor, range(100), submit, 4, governor
+            ))
+
+        self.assertEqual(len(results), 100)
+        self.assertGreater(governor.pending_limit.call_count, 1)
+
+    def test_resource_governor_reduces_concurrency_at_cpu_target(self):
+        governor = resource_governor.AdaptiveResourceGovernor(sample_seconds=60)
+        governor.snapshot.update(cpuPercent=82, memoryPercent=40, networkPressurePercent=0)
+        governor.last_sample_at = time.monotonic()
+        self.assertEqual(governor.pending_limit(100), 90)
+        governor.snapshot["cpuPercent"] = 92
+        self.assertEqual(governor.pending_limit(100), 75)
+
+    def test_resource_governor_stops_new_work_at_memory_limit(self):
+        governor = resource_governor.AdaptiveResourceGovernor(sample_seconds=60)
+        governor.snapshot.update(cpuPercent=40, memoryPercent=80, networkPressurePercent=0)
+        governor.last_sample_at = time.monotonic()
+        self.assertEqual(governor.pending_limit(96), 1)
+        self.assertEqual(governor.snapshot["reason"], "memory reached its safety limit")
+
+    def test_resource_governor_halves_concurrency_on_remote_pressure(self):
+        governor = resource_governor.AdaptiveResourceGovernor(sample_seconds=60)
+        governor.snapshot.update(cpuPercent=30, memoryPercent=40)
+        governor.last_sample_at = time.monotonic()
+        for _index in range(20):
+            governor.report("HTTP Error 429: Too Many Requests")
+        self.assertEqual(governor.pending_limit(96), 48)
 
     def test_phase_eta_uses_recent_phase_throughput(self):
         with mock.patch.object(discover.time, "time", return_value=200.0):

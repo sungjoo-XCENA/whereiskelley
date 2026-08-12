@@ -12,6 +12,7 @@ from urllib.parse import urlencode, urljoin, urlparse
 
 import guide_collect as guide
 import firebase_sync
+from resource_governor import AdaptiveResourceGovernor, bounded_futures
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -351,6 +352,7 @@ def collect_saved_targets_parallel(
     run_id,
     started_at,
     targets_total,
+    governor=None,
 ):
     websites_checked = 0
     wine_lists_found = 0
@@ -370,16 +372,29 @@ def collect_saved_targets_parallel(
     pdf_jobs = []
     finalized = 0
     error_targets = set()
+    governor = governor or AdaptiveResourceGovernor.from_env()
+    worker_config = {
+        "discovery": workers,
+        "html": source_workers,
+        "pdf": pdf_workers,
+        "targetCpuPercent": governor.target_cpu_percent,
+        "maxMemoryPercent": governor.max_memory_percent,
+        "maxDiskPercent": governor.max_disk_percent,
+    }
 
     # Phase 1: use the large network pool only for crawling restaurant sites.
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="wine-site") as executor:
-        futures = {
-            executor.submit(discover_saved_target, target, max_links): target
-            for target in targets
-        }
-        for completed, future in enumerate(as_completed(futures), start=1):
+        completed_futures = bounded_futures(
+            executor,
+            targets,
+            lambda pool, target: pool.submit(discover_saved_target, target, max_links),
+            workers,
+            governor,
+        )
+        for completed, (future, _submitted_target) in enumerate(completed_futures, start=1):
             result = future.result()
             target = result["target"]
+            governor.report(result.get("error"))
             websites_checked += 1
             state = {
                 "target": target,
@@ -432,6 +447,8 @@ def collect_saved_targets_parallel(
                 discoveryTotal=total,
                 sourceCandidatesProcessed=0,
                 sourceCandidatesTotal=0,
+                workerConfig=worker_config,
+                resourceGovernor=governor.progress_payload(workers),
                 message=(
                     f"Discovering wine-list links with {workers} parallel workers. "
                     "PDF extraction is deferred."
@@ -464,12 +481,14 @@ def collect_saved_targets_parallel(
         phase_completed = 0
         phase_samples = deque(maxlen=500)
         with ThreadPoolExecutor(max_workers=phase_workers, thread_name_prefix=phase) as executor:
-            futures = {
-                executor.submit(scan_saved_source, target, link, watches): (target, link)
-                for target, link in jobs
-            }
-            for future in as_completed(futures):
-                target, link = futures[future]
+            completed_futures = bounded_futures(
+                executor,
+                jobs,
+                lambda pool, job: pool.submit(scan_saved_source, job[0], job[1], watches),
+                phase_workers,
+                governor,
+            )
+            for future, (target, link) in completed_futures:
                 try:
                     result = future.result()
                 except Exception as exc:
@@ -481,6 +500,7 @@ def collect_saved_targets_parallel(
                         "error": str(exc),
                         "needs_review": True,
                     }
+                governor.report(result.get("error"))
                 state = states[target["id"]]
                 state["sources"] += result["sources"]
                 state["lines"] += result["lines"]
@@ -524,6 +544,8 @@ def collect_saved_targets_parallel(
                     discoveryTotal=total,
                     sourceCandidatesProcessed=source_completed,
                     sourceCandidatesTotal=source_total,
+                    workerConfig=worker_config,
+                    resourceGovernor=governor.progress_payload(phase_workers),
                     message=f"{label} with {phase_workers} parallel workers.",
                     **timing,
                 )
@@ -833,19 +855,19 @@ def main():
     parser.add_argument(
         "--workers",
         type=int,
-        default=max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "72"))),
+        default=max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "96"))),
         help="Restaurant websites crawled concurrently when Google Places is disabled.",
     )
     parser.add_argument(
         "--source-workers",
         type=int,
-        default=max(1, int(os.environ.get("WHEREISKELLEY_SOURCE_WORKERS", "54"))),
+        default=max(1, int(os.environ.get("WHEREISKELLEY_SOURCE_WORKERS", "72"))),
         help="HTML wine-list candidates validated concurrently after discovery.",
     )
     parser.add_argument(
         "--pdf-workers",
         type=int,
-        default=max(1, int(os.environ.get("WHEREISKELLEY_PDF_WORKERS", "3"))),
+        default=max(1, int(os.environ.get("WHEREISKELLEY_PDF_WORKERS", "4"))),
         help="PDF candidates extracted concurrently after HTML validation.",
     )
     args = parser.parse_args()

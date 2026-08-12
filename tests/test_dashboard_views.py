@@ -42,6 +42,12 @@ class DashboardViewTests(unittest.TestCase):
         self.assertNotIn("function syncWorldViewControls()", self.script)
         self.assertNotIn(">Close</button>", self.script)
 
+    def test_collection_shows_worker_and_resource_limits(self):
+        self.assertIn("workerConfig", self.script)
+        self.assertIn("resourceGovernor", self.script)
+        self.assertIn("Safety limits", self.script)
+        self.assertIn("Controller", self.script)
+
 
 if __name__ == "__main__":
     unittest.main()

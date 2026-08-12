@@ -312,6 +312,30 @@
       gap: 12px;
       margin-top: 14px;
     }
+    .resource-policy {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .resource-policy span {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 9px;
+      background: #f8fafc;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .resource-policy span.warn {
+      border-color: #fed7aa;
+      background: #fff7ed;
+      color: #9a3412;
+    }
+    .resource-policy b {
+      margin-right: 4px;
+      color: var(--ink);
+    }
     .resource-card {
       min-width: 0;
       border: 1px solid var(--line);
@@ -588,6 +612,19 @@
     const memory = Number.isFinite(Number(latest.memoryPercent)) ? `${number(latest.memoryPercent).toFixed(1)}%` : "-";
     const disk = Number.isFinite(Number(latest.diskPercent)) ? `${number(latest.diskPercent).toFixed(1)}%` : "-";
     const interval = number(payload?.resourceHistory?.intervalSeconds) || 30;
+    const workers = payload?.progress?.workerConfig || {};
+    const governor = payload?.progress?.resourceGovernor || {};
+    const workerText = workers.discovery
+      ? `${fmtInt(workers.discovery)} discovery / ${fmtInt(workers.html)} HTML / ${fmtInt(workers.pdf)} PDF`
+      : "Waiting for collection";
+    const limitText = workers.targetCpuPercent
+      ? `CPU ${fmtInt(workers.targetCpuPercent)}% / Memory ${fmtInt(workers.maxMemoryPercent)}% / Disk ${fmtInt(workers.maxDiskPercent)}%`
+      : "CPU 80% / Memory 80% / Disk 85%";
+    const controllerText = governor.throttled
+      ? `${governor.reason || "Resource limit active"} / dispatch ${fmtInt(governor.pendingLimit)}`
+      : governor.configuredWorkers
+        ? `Full capacity / dispatch ${fmtInt(governor.pendingLimit)}`
+        : "Ready";
     return `<section class="dash-panel" data-dashboard-section="resources">
       <div class="collection-head">
         <div>
@@ -595,6 +632,11 @@
           <h2>Collection resource usage</h2>
         </div>
         <span class="dash-pill">${html(fmtInt(samples.length))} samples · every ${html(fmtInt(interval))}s</span>
+      </div>
+      <div class="resource-policy">
+        <span><b>Workers</b>${html(workerText)}</span>
+        <span><b>Safety limits</b>${html(limitText)}</span>
+        <span class="${governor.throttled ? "warn" : ""}"><b>Controller</b>${html(controllerText)}</span>
       </div>
       <div class="resource-grid">
         <article class="resource-card">
