@@ -867,7 +867,7 @@ def main():
     parser.add_argument(
         "--pdf-workers",
         type=int,
-        default=max(1, int(os.environ.get("WHEREISKELLEY_PDF_WORKERS", "4"))),
+        default=max(1, int(os.environ.get("WHEREISKELLEY_PDF_WORKERS", "6"))),
         help="PDF candidates extracted concurrently after HTML validation.",
     )
     args = parser.parse_args()
