@@ -164,7 +164,7 @@ def start_wine_collection(payload):
         "--sleep",
         sleep_seconds,
         "--workers",
-        str(max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "512")))),
+        str(max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "96")))),
         "--source-workers",
         str(max(1, int(os.environ.get("WHEREISKELLEY_SOURCE_WORKERS", "256")))),
         "--pdf-workers",

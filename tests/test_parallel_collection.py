@@ -55,7 +55,9 @@ class ParallelCollectionTests(unittest.TestCase):
             for index in range(24)
         ]
         con = mock.MagicMock()
-        with mock.patch.object(discover, "discover_saved_target", side_effect=fake_discover), mock.patch.object(
+        with mock.patch.object(discover, "ProcessPoolExecutor", discover.ThreadPoolExecutor), mock.patch.object(
+            discover, "discover_saved_target", side_effect=fake_discover
+        ), mock.patch.object(
             discover, "scan_saved_source", side_effect=fake_scan
         ), mock.patch.object(discover, "write_live_progress"):
             result = discover.collect_saved_targets_parallel(

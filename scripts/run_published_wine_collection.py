@@ -101,7 +101,7 @@ def main():
     parser.add_argument("--max-links", type=int, default=60)
     parser.add_argument("--max-targets", type=int, default=0)
     parser.add_argument("--sleep", default="0.08")
-    parser.add_argument("--workers", type=int, default=512)
+    parser.add_argument("--workers", type=int, default=96)
     parser.add_argument("--source-workers", type=int, default=256)
     parser.add_argument("--pdf-workers", type=int, default=8)
     args = parser.parse_args()

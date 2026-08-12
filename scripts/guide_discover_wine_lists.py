@@ -5,7 +5,7 @@ import os
 import sqlite3
 import time
 from collections import deque
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, ThreadPoolExecutor, wait
 from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import urlencode, urljoin, urlparse
@@ -418,7 +418,7 @@ def collect_saved_targets_parallel(
 
     # Crawl, HTML validation, and PDF extraction overlap. This keeps the CPU
     # busy while other workers wait for remote websites.
-    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="wine-site") as discovery_pool, \
+    with ProcessPoolExecutor(max_workers=workers) as discovery_pool, \
          ThreadPoolExecutor(max_workers=source_workers, thread_name_prefix="wine-html") as html_pool, \
          ThreadPoolExecutor(max_workers=pdf_workers, thread_name_prefix="wine-pdf") as pdf_pool:
         while not discovery_exhausted or discovery_pending or html_jobs or html_pending or pdf_jobs or pdf_pending:
