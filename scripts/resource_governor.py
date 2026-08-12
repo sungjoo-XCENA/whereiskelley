@@ -10,8 +10,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 NETWORK_PRESSURE_RE = re.compile(
-    r"(?:HTTP Error (?:403|408|429|503)|\b(?:403|408|429|503)\b|timed? out|timeout|"
-    r"WinError 10060|connection reset|temporarily unavailable|too many requests)",
+    r"(?:HTTP Error (?:408|429|503)|\b(?:408|429|503)\b|"
+    r"connection reset|temporarily unavailable|too many requests)",
     re.I,
 )
 
@@ -65,6 +65,7 @@ class AdaptiveResourceGovernor:
         max_disk_percent=85,
         min_free_memory_gb=4,
         sample_seconds=0.5,
+        control_seconds=5,
         history_size=60,
     ):
         self.target_cpu_percent = float(target_cpu_percent)
@@ -72,6 +73,9 @@ class AdaptiveResourceGovernor:
         self.max_disk_percent = float(max_disk_percent)
         self.min_free_memory_bytes = int(float(min_free_memory_gb) * 1024**3)
         self.sample_seconds = max(0.05, float(sample_seconds))
+        self.control_seconds = max(self.sample_seconds, float(control_seconds))
+        self.dispatch_fraction = 0.5
+        self.last_control_at = 0.0
         self.previous_cpu = read_cpu_totals()
         self.last_sample_at = 0.0
         self.snapshot = {
@@ -93,6 +97,7 @@ class AdaptiveResourceGovernor:
             max_disk_percent=os.environ.get("WHEREISKELLEY_MAX_DISK_PERCENT", "85"),
             min_free_memory_gb=os.environ.get("WHEREISKELLEY_MIN_FREE_MEMORY_GB", "4"),
             sample_seconds=os.environ.get("WHEREISKELLEY_RESOURCE_GOVERNOR_SAMPLE_SECONDS", "0.5"),
+            control_seconds=os.environ.get("WHEREISKELLEY_RESOURCE_GOVERNOR_CONTROL_SECONDS", "5"),
         )
 
     def sample(self, force=False):
@@ -131,26 +136,40 @@ class AdaptiveResourceGovernor:
         cpu = snapshot.get("cpuPercent")
         memory = snapshot.get("memoryPercent")
         pressure = snapshot.get("networkPressurePercent") or 0
-        limit = workers * 2
         reason = ""
-        if pressure >= 25:
-            limit = max(1, workers // 2)
+        now = time.monotonic()
+        if now - self.last_control_at >= self.control_seconds:
+            if cpu is not None and cpu < self.target_cpu_percent - 8:
+                self.dispatch_fraction = min(1.0, self.dispatch_fraction + 0.1)
+            elif cpu is not None and cpu > self.target_cpu_percent + 5:
+                self.dispatch_fraction = max(0.1, self.dispatch_fraction * 0.75)
+            elif cpu is not None and cpu > self.target_cpu_percent:
+                self.dispatch_fraction = max(0.1, self.dispatch_fraction - 0.05)
+            self.last_control_at = now
+
+        limit = max(1, int(workers * self.dispatch_fraction))
+        if pressure >= 40:
+            limit = min(limit, max(1, workers // 2))
             reason = "remote sites are throttling or timing out"
-        elif pressure >= 12:
-            limit = max(1, int(workers * 0.75))
+        elif pressure >= 25:
+            limit = min(limit, max(1, int(workers * 0.75)))
             reason = "remote-site errors are elevated"
         if memory is not None and memory >= self.max_memory_percent:
             limit = 1
             reason = "memory reached its safety limit"
+        elif memory is not None and memory >= self.max_memory_percent - 3:
+            limit = min(limit, max(1, workers // 2))
+            reason = "memory is near the target range"
         elif cpu is not None and cpu >= self.target_cpu_percent + 8:
-            limit = min(limit, max(1, int(workers * 0.75)))
+            limit = min(limit, max(1, workers // 2))
             reason = "CPU is above the target range"
         elif cpu is not None and cpu >= self.target_cpu_percent:
-            limit = min(limit, max(1, int(workers * 0.9)))
+            limit = min(limit, max(1, int(workers * 0.8)))
             reason = "CPU is at the target range"
         self.snapshot["throttled"] = bool(reason)
         self.snapshot["reason"] = reason
         self.snapshot["pendingLimit"] = limit
+        self.snapshot["dispatchPercent"] = round(self.dispatch_fraction * 100, 1)
         return limit
 
     def capacity_available(self, force=False):

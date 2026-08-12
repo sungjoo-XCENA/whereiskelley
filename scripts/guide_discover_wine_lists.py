@@ -5,14 +5,14 @@ import os
 import sqlite3
 import time
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import urlencode, urljoin, urlparse
 
 import guide_collect as guide
 import firebase_sync
-from resource_governor import AdaptiveResourceGovernor, bounded_futures
+from resource_governor import AdaptiveResourceGovernor
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -368,8 +368,8 @@ def collect_saved_targets_parallel(
         con.commit()
 
     states = {}
-    html_jobs = []
-    pdf_jobs = []
+    html_jobs = deque()
+    pdf_jobs = deque()
     finalized = 0
     error_targets = set()
     governor = governor or AdaptiveResourceGovernor.from_env()
@@ -382,85 +382,13 @@ def collect_saved_targets_parallel(
         "maxDiskPercent": governor.max_disk_percent,
     }
 
-    # Phase 1: use the large network pool only for crawling restaurant sites.
-    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="wine-site") as executor:
-        completed_futures = bounded_futures(
-            executor,
-            targets,
-            lambda pool, target: pool.submit(discover_saved_target, target, max_links),
-            workers,
-            governor,
-        )
-        for completed, (future, _submitted_target) in enumerate(completed_futures, start=1):
-            result = future.result()
-            target = result["target"]
-            governor.report(result.get("error"))
-            websites_checked += 1
-            state = {
-                "target": target,
-                "sources": 0,
-                "lines": 0,
-                "remaining": len(result["candidates"]),
-                "needs_review": result["crawl_limit_reached"],
-                "review_reasons": [],
-            }
-            states[target["id"]] = state
-            if result["failed"]:
-                state["needs_review"] = True
-                state["review_reasons"].append(result["error"])
-                error_targets.add(target["id"])
-            for link in result["candidates"]:
-                job = (target, link)
-                (pdf_jobs if candidate_is_pdf(link) else html_jobs).append(job)
-            if not result["candidates"]:
-                status = "error" if result["failed"] else (
-                    "review" if state["needs_review"] else "no_wine_list"
-                )
-                con.execute(
-                    "update restaurant_targets set status=?, last_error=?, last_checked_at=current_timestamp where id=?",
-                    (status, result["error"] or None, target["id"]),
-                )
-                finalized += 1
-                con.commit()
-            timing = timing_payload(started_at, completed, total)
-            timing.update(
-                phase_timing_payload(
-                    time.time() - max(0, timing["elapsedSeconds"]),
-                    completed,
-                    total,
-                )
-            )
-            write_live_progress(
-                con,
-                runId=run_id,
-                phase="discovering_wine_sources",
-                currentTarget=target.get("name", ""),
-                currentUrl=target.get("website_url") or "",
-                targetsCollected=targets_total,
-                processedTargets=finalized,
-                websitesChecked=websites_checked,
-                totalWebsites=total,
-                wineListsFound=wine_lists_found,
-                wineLinesFound=wine_lines_found,
-                errors=len(error_targets),
-                discoveryProcessed=completed,
-                discoveryTotal=total,
-                sourceCandidatesProcessed=0,
-                sourceCandidatesTotal=0,
-                workerConfig=worker_config,
-                resourceGovernor=governor.progress_payload(workers),
-                message=(
-                    f"Discovering wine-list links with {workers} parallel workers. "
-                    "PDF extraction is deferred."
-                ),
-                **timing,
-            )
-
-    source_total = len(html_jobs) + len(pdf_jobs)
+    source_total = 0
     source_completed = 0
 
     def finalize_target(state):
         nonlocal finalized
+        if state.get("finalized"):
+            return
         status = "found" if state["sources"] else (
             "review" if state["needs_review"] else "no_wine_list"
         )
@@ -471,89 +399,153 @@ def collect_saved_targets_parallel(
             "update restaurant_targets set status=?, last_error=?, last_checked_at=current_timestamp where id=?",
             (status, last_error, state["target"]["id"]),
         )
+        state["finalized"] = True
         finalized += 1
 
-    def run_source_phase(jobs, phase_workers, phase, label):
-        nonlocal source_completed, wine_lists_found, wine_lines_found
-        if not jobs:
-            return
-        phase_started_epoch = time.time()
-        phase_completed = 0
-        phase_samples = deque(maxlen=500)
-        with ThreadPoolExecutor(max_workers=phase_workers, thread_name_prefix=phase) as executor:
-            completed_futures = bounded_futures(
-                executor,
-                jobs,
-                lambda pool, job: pool.submit(scan_saved_source, job[0], job[1], watches),
-                phase_workers,
-                governor,
-            )
-            for future, (target, link) in completed_futures:
+    target_iterator = iter(targets)
+    discovery_exhausted = False
+    discovery_pending = {}
+    html_pending = {}
+    pdf_pending = {}
+    started_epoch = time.time()
+    recent_samples = deque(maxlen=500)
+
+    def fill_pool(pool, queue, pending, phase_workers):
+        limit = governor.pending_limit(phase_workers)
+        while queue and len(pending) < limit and governor.capacity_available():
+            job = queue.popleft()
+            pending[pool.submit(scan_saved_source, job[0], job[1], watches)] = job
+
+    # Crawl, HTML validation, and PDF extraction overlap. This keeps the CPU
+    # busy while other workers wait for remote websites.
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="wine-site") as discovery_pool, \
+         ThreadPoolExecutor(max_workers=source_workers, thread_name_prefix="wine-html") as html_pool, \
+         ThreadPoolExecutor(max_workers=pdf_workers, thread_name_prefix="wine-pdf") as pdf_pool:
+        while not discovery_exhausted or discovery_pending or html_jobs or html_pending or pdf_jobs or pdf_pending:
+            discovery_limit = governor.pending_limit(workers)
+            while not discovery_exhausted and len(discovery_pending) < discovery_limit and governor.capacity_available():
                 try:
-                    result = future.result()
-                except Exception as exc:
-                    result = {
+                    target = next(target_iterator)
+                except StopIteration:
+                    discovery_exhausted = True
+                    break
+                discovery_pending[discovery_pool.submit(discover_saved_target, target, max_links)] = target
+
+            fill_pool(html_pool, html_jobs, html_pending, source_workers)
+            fill_pool(pdf_pool, pdf_jobs, pdf_pending, pdf_workers)
+            all_pending = set(discovery_pending) | set(html_pending) | set(pdf_pending)
+            if not all_pending:
+                governor.wait_for_capacity()
+                continue
+            completed, _remaining = wait(all_pending, return_when=FIRST_COMPLETED)
+            current_target = {}
+            current_url = ""
+            for future in completed:
+                if future in discovery_pending:
+                    submitted_target = discovery_pending.pop(future)
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        result = {
+                            "target": submitted_target,
+                            "candidates": [],
+                            "crawl_limit_reached": False,
+                            "error": str(exc),
+                            "failed": True,
+                        }
+                    target = result["target"]
+                    current_target = target
+                    current_url = target.get("website_url") or ""
+                    governor.report(result.get("error"))
+                    websites_checked += 1
+                    state = {
                         "target": target,
-                        "link": link,
                         "sources": 0,
                         "lines": 0,
-                        "error": str(exc),
-                        "needs_review": True,
+                        "remaining": len(result["candidates"]),
+                        "needs_review": result["crawl_limit_reached"],
+                        "review_reasons": [],
+                        "finalized": False,
                     }
-                governor.report(result.get("error"))
-                state = states[target["id"]]
-                state["sources"] += result["sources"]
-                state["lines"] += result["lines"]
-                state["remaining"] -= 1
-                state["needs_review"] = state["needs_review"] or result["needs_review"]
-                if result["error"] and result["needs_review"]:
-                    state["review_reasons"].append(result["error"])
-                    error_targets.add(target["id"])
-                wine_lists_found += result["sources"]
-                wine_lines_found += result["lines"]
-                source_completed += 1
-                phase_completed += 1
-                phase_samples.append((time.time(), phase_completed))
-                if state["remaining"] == 0:
-                    finalize_target(state)
-                con.commit()
-                pipeline_total = total + source_total
-                timing = timing_payload(started_at, total + source_completed, pipeline_total)
-                timing.update(
-                    phase_timing_payload(
-                        phase_started_epoch,
-                        phase_completed,
-                        len(jobs),
-                        phase_samples,
-                    )
-                )
-                write_live_progress(
-                    con,
-                    runId=run_id,
-                    phase=phase,
-                    currentTarget=target.get("name", ""),
-                    currentUrl=link.get("url") or "",
-                    targetsCollected=targets_total,
-                    processedTargets=finalized,
-                    websitesChecked=websites_checked,
-                    totalWebsites=total,
-                    wineListsFound=wine_lists_found,
-                    wineLinesFound=wine_lines_found,
-                    errors=len(error_targets),
-                    discoveryProcessed=total,
-                    discoveryTotal=total,
-                    sourceCandidatesProcessed=source_completed,
-                    sourceCandidatesTotal=source_total,
-                    workerConfig=worker_config,
-                    resourceGovernor=governor.progress_payload(phase_workers),
-                    message=f"{label} with {phase_workers} parallel workers.",
-                    **timing,
-                )
+                    states[target["id"]] = state
+                    if result["failed"]:
+                        state["needs_review"] = True
+                        state["review_reasons"].append(result["error"])
+                        error_targets.add(target["id"])
+                    for link in result["candidates"]:
+                        job = (target, link)
+                        (pdf_jobs if candidate_is_pdf(link) else html_jobs).append(job)
+                        source_total += 1
+                    if not result["candidates"]:
+                        status = "error" if result["failed"] else (
+                            "review" if state["needs_review"] else "no_wine_list"
+                        )
+                        con.execute(
+                            "update restaurant_targets set status=?, last_error=?, last_checked_at=current_timestamp where id=?",
+                            (status, result["error"] or None, target["id"]),
+                        )
+                        state["finalized"] = True
+                        finalized += 1
+                else:
+                    pending = html_pending if future in html_pending else pdf_pending
+                    target, link = pending.pop(future)
+                    current_target = target
+                    current_url = link.get("url") or ""
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        result = {
+                            "sources": 0,
+                            "lines": 0,
+                            "error": str(exc),
+                            "needs_review": True,
+                        }
+                    governor.report(result.get("error"))
+                    state = states[target["id"]]
+                    state["sources"] += result["sources"]
+                    state["lines"] += result["lines"]
+                    state["remaining"] -= 1
+                    state["needs_review"] = state["needs_review"] or result["needs_review"]
+                    if result["error"] and result["needs_review"]:
+                        state["review_reasons"].append(result["error"])
+                        error_targets.add(target["id"])
+                    wine_lists_found += result["sources"]
+                    wine_lines_found += result["lines"]
+                    source_completed += 1
+                    if state["remaining"] == 0:
+                        finalize_target(state)
 
-    # Phase 2 handles ordinary HTML candidates. Phase 3 performs the expensive
-    # PDF downloads and text extraction only after website discovery is done.
-    run_source_phase(html_jobs, source_workers, "validating_html_sources", "Validating HTML wine-list candidates")
-    run_source_phase(pdf_jobs, pdf_workers, "extracting_pdf_sources", "Extracting PDF wine-list candidates")
+            con.commit()
+            recent_samples.append((time.time(), finalized))
+            timing = timing_payload(started_at, finalized, total)
+            timing.update(phase_timing_payload(started_epoch, finalized, total, recent_samples))
+            active_workers = workers + source_workers + pdf_workers
+            write_live_progress(
+                con,
+                runId=run_id,
+                phase="collecting_wine_pipeline",
+                currentTarget=current_target.get("name", ""),
+                currentUrl=current_url,
+                targetsCollected=targets_total,
+                processedTargets=finalized,
+                websitesChecked=websites_checked,
+                totalWebsites=total,
+                wineListsFound=wine_lists_found,
+                wineLinesFound=wine_lines_found,
+                errors=len(error_targets),
+                discoveryProcessed=websites_checked,
+                discoveryTotal=total,
+                sourceCandidatesProcessed=source_completed,
+                sourceCandidatesTotal=source_total,
+                workerConfig=worker_config,
+                resourceGovernor=governor.progress_payload(active_workers),
+                message=(
+                    f"Pipelined crawl: {workers} discovery / {source_workers} HTML / "
+                    f"{pdf_workers} PDF workers."
+                ),
+                **timing,
+            )
+
     return websites_checked, wine_lists_found, wine_lines_found, len(error_targets)
 
 
@@ -855,19 +847,19 @@ def main():
     parser.add_argument(
         "--workers",
         type=int,
-        default=max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "192"))),
+        default=max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "512"))),
         help="Restaurant websites crawled concurrently when Google Places is disabled.",
     )
     parser.add_argument(
         "--source-workers",
         type=int,
-        default=max(1, int(os.environ.get("WHEREISKELLEY_SOURCE_WORKERS", "128"))),
+        default=max(1, int(os.environ.get("WHEREISKELLEY_SOURCE_WORKERS", "256"))),
         help="HTML wine-list candidates validated concurrently after discovery.",
     )
     parser.add_argument(
         "--pdf-workers",
         type=int,
-        default=max(1, int(os.environ.get("WHEREISKELLEY_PDF_WORKERS", "6"))),
+        default=max(1, int(os.environ.get("WHEREISKELLEY_PDF_WORKERS", "8"))),
         help="PDF candidates extracted concurrently after HTML validation.",
     )
     args = parser.parse_args()

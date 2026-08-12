@@ -164,11 +164,11 @@ def start_wine_collection(payload):
         "--sleep",
         sleep_seconds,
         "--workers",
-        str(max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "192")))),
+        str(max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "512")))),
         "--source-workers",
-        str(max(1, int(os.environ.get("WHEREISKELLEY_SOURCE_WORKERS", "128")))),
+        str(max(1, int(os.environ.get("WHEREISKELLEY_SOURCE_WORKERS", "256")))),
         "--pdf-workers",
-        str(max(1, int(os.environ.get("WHEREISKELLEY_PDF_WORKERS", "6")))),
+        str(max(1, int(os.environ.get("WHEREISKELLEY_PDF_WORKERS", "8")))),
     ]
     if max_targets > 0:
         command.extend(["--max-targets", str(max_targets)])

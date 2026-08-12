@@ -14,8 +14,8 @@ import resource_governor
 
 
 class ParallelCollectionTests(unittest.TestCase):
-    def test_discovery_finishes_before_deferred_pdf_extraction(self):
-        state = {"active": 0, "peak": 0, "discovered": 0, "html_scanned": 0, "pdf_started_after_html": False}
+    def test_discovery_and_source_validation_overlap(self):
+        state = {"active": 0, "peak": 0, "discovered": 0, "source_started_before_discovery_done": False}
         lock = threading.Lock()
 
         def fake_discover(target, _max_links):
@@ -38,11 +38,9 @@ class ParallelCollectionTests(unittest.TestCase):
 
         def fake_scan(target, link, _watches):
             with lock:
-                self.assertEqual(state["discovered"], 24)
-                if link["url"].endswith(".pdf"):
-                    state["pdf_started_after_html"] = state["html_scanned"] == 12
-                else:
-                    state["html_scanned"] += 1
+                state["source_started_before_discovery_done"] = (
+                    state["source_started_before_discovery_done"] or state["discovered"] < 24
+                )
             return {
                 "target": target,
                 "link": link,
@@ -65,9 +63,9 @@ class ParallelCollectionTests(unittest.TestCase):
             )
 
         self.assertEqual(result, (24, 24, 48, 0))
-        self.assertGreaterEqual(state["peak"], 8)
+        self.assertGreaterEqual(state["peak"], 4)
         self.assertLessEqual(state["peak"], 12)
-        self.assertTrue(state["pdf_started_after_html"])
+        self.assertTrue(state["source_started_before_discovery_done"])
 
     def test_bounded_futures_never_queues_the_whole_collection(self):
         state = {"peak": 0}
@@ -90,12 +88,22 @@ class ParallelCollectionTests(unittest.TestCase):
         self.assertGreater(governor.pending_limit.call_count, 1)
 
     def test_resource_governor_reduces_concurrency_at_cpu_target(self):
-        governor = resource_governor.AdaptiveResourceGovernor(sample_seconds=60)
+        governor = resource_governor.AdaptiveResourceGovernor(sample_seconds=60, control_seconds=60)
         governor.snapshot.update(cpuPercent=82, memoryPercent=40, networkPressurePercent=0)
         governor.last_sample_at = time.monotonic()
-        self.assertEqual(governor.pending_limit(100), 90)
+        governor.last_control_at = time.monotonic()
+        governor.dispatch_fraction = 1.0
+        self.assertEqual(governor.pending_limit(100), 80)
         governor.snapshot["cpuPercent"] = 92
-        self.assertEqual(governor.pending_limit(100), 75)
+        self.assertEqual(governor.pending_limit(100), 50)
+
+    def test_resource_governor_increases_concurrency_below_cpu_target(self):
+        governor = resource_governor.AdaptiveResourceGovernor(sample_seconds=60, control_seconds=0.01)
+        governor.snapshot.update(cpuPercent=30, memoryPercent=20, networkPressurePercent=0)
+        governor.last_sample_at = time.monotonic()
+        governor.last_control_at = 0
+        self.assertEqual(governor.pending_limit(100), 60)
+        self.assertEqual(governor.snapshot["dispatchPercent"], 60.0)
 
     def test_resource_governor_stops_new_work_at_memory_limit(self):
         governor = resource_governor.AdaptiveResourceGovernor(sample_seconds=60)

@@ -1221,6 +1221,7 @@
       discovering_wine_sources: "Discovering wine-list links",
       validating_html_sources: "Validating HTML wine-list sources",
       extracting_pdf_sources: "Extracting PDF wine-list sources",
+      collecting_wine_pipeline: "Crawling and validating wine lists",
       publishing: "Publishing completed database"
     };
     return labels[value] || "Collecting restaurant wine lists";

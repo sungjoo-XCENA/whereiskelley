@@ -32,9 +32,9 @@ if [[ -f "$LAST_START_FILE" ]]; then
 fi
 if "$PYTHON_BIN" scripts/run_published_wine_collection.py \
     --max-links "${WHEREISKELLEY_DISCOVERY_MAX_LINKS:-60}" \
-    --workers "${WHEREISKELLEY_DISCOVERY_WORKERS:-192}" \
-    --source-workers "${WHEREISKELLEY_SOURCE_WORKERS:-128}" \
-    --pdf-workers "${WHEREISKELLEY_PDF_WORKERS:-6}" \
+    --workers "${WHEREISKELLEY_DISCOVERY_WORKERS:-512}" \
+    --source-workers "${WHEREISKELLEY_SOURCE_WORKERS:-256}" \
+    --pdf-workers "${WHEREISKELLEY_PDF_WORKERS:-8}" \
     --sleep "${WHEREISKELLEY_DISCOVERY_SLEEP:-0.08}"; then
   printf '%s\n' "$(date +%s)" > "$LAST_START_FILE"
   exit 0
