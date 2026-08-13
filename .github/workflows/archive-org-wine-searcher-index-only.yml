@@ -1,0 +1,32 @@
+name: Export 1000 Wayback Wine-Searcher merchant IDs
+
+on:
+  push:
+    branches:
+      - poc/wine-searcher-1000-20260813
+    paths:
+      - "poc/archive_org_wine_searcher_index_only.py"
+      - ".github/workflows/archive-org-wine-searcher-index-only.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check requests
+      - run: python poc/archive_org_wine_searcher_index_only.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wine-searcher-wayback-index-1000
+          path: artifacts/wine-searcher-wayback-index/
+          if-no-files-found: warn
+          retention-days: 7
