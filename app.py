@@ -1,4 +1,6 @@
 import io
+import hashlib
+import hmac
 import json
 import mimetypes
 import os
@@ -6,7 +8,9 @@ import subprocess
 import sqlite3
 import sys
 import threading
+import time
 import unicodedata
+import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -70,7 +74,9 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import sync_search_api
-from wine_shop_db import search_shop_products, shop_collection_status
+from wine_shop_db import connect_shop, ensure_shop_db, search_shop_products, shop_collection_status
+from wine_shop_collect import atomic_progress as shop_atomic_progress
+from wine_shop_collect import parse_merchant_profile, save_profile_result
 
 
 COLLECTOR_PROCESS = None
@@ -105,8 +111,11 @@ def json_response(handler, payload, status=200):
     handler.send_header("content-type", "application/json; charset=utf-8")
     handler.send_header("cache-control", "no-store")
     handler.send_header("access-control-allow-origin", ALLOWED_ORIGIN)
-    handler.send_header("access-control-allow-headers", "content-type, x-whereiskelley-token")
-    handler.send_header("access-control-allow-methods", "GET, OPTIONS")
+    handler.send_header(
+        "access-control-allow-headers",
+        "content-type, x-whereiskelley-token, x-whereiskelley-timestamp, x-whereiskelley-signature",
+    )
+    handler.send_header("access-control-allow-methods", "GET, POST, OPTIONS")
     handler.send_header("access-control-allow-private-network", "true")
     handler.send_header("content-length", str(len(body)))
     handler.end_headers()
@@ -234,6 +243,98 @@ def running_shop_collector(phase=""):
     return None
 
 
+def shop_browser_signature(timestamp, merchant_id, html, secret=None):
+    secret_value = ADMIN_PASSWORD if secret is None else str(secret)
+    html_hash = hashlib.sha256(str(html or "").encode("utf-8", errors="ignore")).hexdigest()
+    message = f"{timestamp}\n{int(merchant_id)}\n{html_hash}".encode("utf-8")
+    return hmac.new(secret_value.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def import_browser_merchant(payload, headers, db_path=None):
+    if not ADMIN_PASSWORD:
+        return {"ok": False, "error": "Admin password is not configured on this server."}, 503
+    if not isinstance(payload, dict):
+        return {"ok": False, "error": "Invalid JSON body."}, 400
+    try:
+        merchant_id = int(payload.get("merchantId"))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "merchantId must be an integer."}, 400
+    if not 2 <= merchant_id <= 239995:
+        return {"ok": False, "error": "merchantId must be between 2 and 239995."}, 400
+
+    html = str(payload.get("html") or "")
+    if not html:
+        return {"ok": False, "error": "The rendered merchant page HTML is empty."}, 400
+    if len(html.encode("utf-8", errors="ignore")) > 6 * 1024 * 1024:
+        return {"ok": False, "error": "The rendered merchant page is larger than 6 MB."}, 413
+
+    timestamp = str(headers.get("x-whereiskelley-timestamp") or "").strip()
+    supplied = str(headers.get("x-whereiskelley-signature") or "").strip().lower()
+    try:
+        timestamp_value = int(timestamp)
+    except ValueError:
+        return {"ok": False, "error": "Missing or invalid request timestamp."}, 401
+    if abs(int(time.time()) - timestamp_value) > 300:
+        return {"ok": False, "error": "The signed request has expired."}, 401
+    expected = shop_browser_signature(timestamp, merchant_id, html)
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        return {"ok": False, "error": "Invalid browser collector signature."}, 401
+
+    requested_url = f"https://www.wine-searcher.com/merchant/{merchant_id}"
+    final_url = str(payload.get("finalUrl") or requested_url).strip()
+    response = {"status": int(payload.get("httpStatus") or 200), "url": final_url, "error": ""}
+    try:
+        profile = parse_merchant_profile(html, requested_url, final_url)
+        result = (merchant_id, "found", response, profile)
+    except RuntimeError as exc:
+        if "blocking/interstitial" in str(exc):
+            return {
+                "ok": False,
+                "status": "verification_required",
+                "error": "Human verification is still visible. Complete it in Chrome, then resume.",
+            }, 409
+        response["error"] = str(exc)
+        result = (merchant_id, "error", response, None)
+    except LookupError as exc:
+        response["error"] = str(exc)
+        result = (merchant_id, "missing", response, None)
+    except Exception as exc:
+        response["error"] = str(exc)
+        result = (merchant_id, "error", response, None)
+
+    ensure_shop_db(db_path)
+    con = connect_shop(db_path)
+    try:
+        saved = save_profile_result(con, result)
+        con.commit()
+    finally:
+        con.close()
+
+    client = payload.get("progress") if isinstance(payload.get("progress"), dict) else {}
+    checked = max(0, int(client.get("checked") or 0))
+    total = max(0, int(client.get("total") or 0))
+    status = result[1]
+    completed = bool(client.get("complete"))
+    shop_atomic_progress({
+        "status": "complete" if completed else "running",
+        "phase": "browser_merchant_scan",
+        "message": "Chrome merchant registry collection completed." if completed else "Chrome merchant registry collection is running.",
+        "currentMerchantId": merchant_id,
+        "checked": checked,
+        "total": total,
+        "found": max(0, int(client.get("saved") or 0)) + (1 if saved else 0),
+        "errors": max(0, int(client.get("errors") or 0)) + (1 if status == "error" else 0),
+    })
+    return {
+        "ok": True,
+        "merchantId": merchant_id,
+        "status": status,
+        "saved": bool(saved),
+        "name": profile.get("name") if profile else "",
+        "websiteUrl": profile.get("website_url") if profile else "",
+    }, 200
+
+
 def start_shop_collection(payload):
     if not ADMIN_PASSWORD:
         return {"ok": False, "error": "Admin password is not configured on this server."}, 503
@@ -316,6 +417,25 @@ def javascript_response(handler, text, status=200):
     handler.send_header("access-control-allow-headers", "content-type, x-whereiskelley-token")
     handler.send_header("access-control-allow-methods", "GET, OPTIONS")
     handler.send_header("access-control-allow-private-network", "true")
+    handler.send_header("content-length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def shop_browser_extension_response(handler):
+    extension_dir = ROOT / "tools" / "wine-searcher-browser-collector"
+    if not extension_dir.exists():
+        return text_response(handler, "Chrome collector files are not installed.", status=404)
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+        for path in sorted(extension_dir.iterdir()):
+            if path.is_file():
+                bundle.write(path, arcname=f"wine-searcher-browser-collector/{path.name}")
+    body = archive.getvalue()
+    handler.send_response(200)
+    handler.send_header("content-type", "application/zip")
+    handler.send_header("content-disposition", 'attachment; filename="whereiskelley-merchant-collector.zip"')
+    handler.send_header("cache-control", "no-store")
     handler.send_header("content-length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -1598,7 +1718,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("access-control-allow-origin", ALLOWED_ORIGIN)
-        self.send_header("access-control-allow-headers", "content-type, x-whereiskelley-token")
+        self.send_header(
+            "access-control-allow-headers",
+            "content-type, x-whereiskelley-token, x-whereiskelley-timestamp, x-whereiskelley-signature",
+        )
         self.send_header("access-control-allow-methods", "GET, POST, OPTIONS")
         self.send_header("access-control-allow-private-network", "true")
         self.end_headers()
@@ -1651,6 +1774,8 @@ class Handler(BaseHTTPRequestHandler):
                 return json_response(self, unparsed(params))
             if parsed.path in ("/config.js", "/api/config"):
                 return javascript_response(self, config_js())
+            if parsed.path == "/downloads/wine-searcher-browser-collector.zip":
+                return shop_browser_extension_response(self)
             if parsed.path.startswith("/api/") and not self.api_authorized(params):
                 return json_response(self, {"error": "Unauthorized"}, status=401)
             if parsed.path.startswith("/files/"):
@@ -1673,6 +1798,11 @@ class Handler(BaseHTTPRequestHandler):
                 return json_response(self, result, status=status)
             if parsed.path in ("/api/shop-collection", "/api/shop-collection/run"):
                 result, status = start_shop_collection(payload if isinstance(payload, dict) else {})
+                return json_response(self, result, status=status)
+            if parsed.path == "/api/shop-browser-import":
+                result, status = import_browser_merchant(
+                    payload if isinstance(payload, dict) else {}, self.headers
+                )
                 return json_response(self, result, status=status)
             return json_response(self, {"ok": False, "error": "Not found."}, status=404)
         except Exception as exc:

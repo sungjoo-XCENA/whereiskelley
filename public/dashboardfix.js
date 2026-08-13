@@ -1444,12 +1444,13 @@
         </div>
         <div class="selected-target-actions dashboard-progress-actions">
           <span class="dash-pill ${shopRunning ? "good" : ""}">${html(shopRunning ? "Collecting" : (shopProgress.status || "Ready"))}</span>
-          <button class="dashboard-refresh" type="button" data-start-shop-collection="merchant_scan" ${shopRunning || state.shopActionInFlight ? "disabled" : ""}>Scan merchant registry</button>
+          <a class="dashboard-refresh" href="/downloads/wine-searcher-browser-collector.zip">Download Chrome collector</a>
           <button class="dashboard-refresh" type="button" data-start-shop-collection="inventory" ${shopRunning || state.shopActionInFlight || !number(shopCounts.withWebsite) ? "disabled" : ""}>Refresh inventories</button>
           ${state.shopActionMessage ? `<span class="dashboard-action-note">${html(state.shopActionMessage)}</span>` : ""}
         </div>
       </div>
       ${shopStatusMessage ? `<div class="dashboard-action-note ${shopProgress.status === "blocked" ? "warn" : ""}">${html(shopStatusMessage)}</div>` : ""}
+      <div class="dashboard-action-note">Merchant profiles are collected in one normal Chrome tab. Human verification is completed manually and is never automated.</div>
       <div class="dash-progress" style="--dash-progress:${html(shopPercent)}%"><i></i></div>
       <div class="collection-metrics">
         <div class="metric-box"><span>Merchant IDs checked</span><b>${html(fmtInt(shopCounts.idsChecked))}</b></div>

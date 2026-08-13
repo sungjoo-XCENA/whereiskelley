@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Merchant collector</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <p class="eyebrow">WHERE IS KELLEY</p>
+    <h1>Merchant collector</h1>
+
+    <label>Server address
+      <input id="endpoint" type="url" value="http://168.107.35.204" spellcheck="false">
+    </label>
+    <label>Admin password
+      <input id="password" type="password" autocomplete="off">
+    </label>
+    <div class="range">
+      <label>Start ID<input id="start" type="number" min="2" max="239995" value="2"></label>
+      <label>End ID<input id="end" type="number" min="2" max="239995" value="239995"></label>
+    </div>
+    <label>Delay after each page (ms)
+      <input id="delay" type="number" min="1200" max="30000" step="100" value="2000">
+    </label>
+
+    <div class="actions">
+      <button id="startButton" class="primary" type="button">Start</button>
+      <button id="resumeButton" type="button" hidden>Resume after verification</button>
+      <button id="stopButton" type="button" disabled>Stop</button>
+    </div>
+
+    <section class="status" aria-live="polite">
+      <div><span>Status</span><b id="status">Ready</b></div>
+      <div><span>Current ID</span><b id="current">-</b></div>
+      <div><span>Checked</span><b id="checked">0</b></div>
+      <div><span>Saved</span><b id="saved">0</b></div>
+      <div><span>Missing</span><b id="missing">0</b></div>
+      <div><span>Errors</span><b id="errors">0</b></div>
+    </section>
+    <p id="message" class="message">Open Chrome and start a small range first.</p>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

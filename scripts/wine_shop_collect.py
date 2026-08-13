@@ -39,6 +39,8 @@ WINE_SEARCHER_ROOT = "https://www.wine-searcher.com"
 MAX_RESPONSE_BYTES = 25 * 1024 * 1024
 PROFILE_BLOCK_MARKERS = (
     "captcha", "access denied", "temporarily blocked", "too many requests", "verify you are human",
+    "press and hold", "prove you are human", "human verification", "px-captcha", "perimeterx",
+    "로봇이 아니라 사람", "길게 눌러",
 )
 SOCIAL_DOMAINS = (
     "facebook.com", "instagram.com", "twitter.com", "x.com", "linkedin.com", "youtube.com",
