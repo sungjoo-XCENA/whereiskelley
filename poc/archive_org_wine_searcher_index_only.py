@@ -32,13 +32,13 @@ def main():
         ("fl", "timestamp,original,statuscode,mimetype,digest"),
         ("filter", "statuscode:200"),
         ("filter", "mimetype:text/html"),
-        ("from", "2024"),
+        ("from", "2023"),
         ("to", "2026"),
         ("collapse", "urlkey"),
-        ("limit", "20000"),
+        ("limit", "30000"),
     ]
     url = ENDPOINT + "?" + urlencode(params)
-    r = requests.get(url, timeout=180, headers={"User-Agent": "whereiskelley-wayback-index-poc/0.1"})
+    r = requests.get(url, timeout=180, headers={"User-Agent": "whereiskelley-wayback-index-poc/0.2"})
     print("status", r.status_code, "bytes", len(r.content), flush=True)
     r.raise_for_status()
     raw = r.json()
@@ -62,6 +62,8 @@ def main():
         w.writerows(selected)
     summary = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "query_from_year": 2023,
+        "query_to_year": 2026,
         "cdx_records_received": len(rows),
         "unique_clean_merchant_ids": len(chosen),
         "exported_count": len(selected),
