@@ -1,0 +1,50 @@
+name: Wine-Searcher merchant 1000-page reader fallback
+
+on:
+  push:
+    branches:
+      - poc/wine-searcher-1000-20260813
+    paths:
+      - "poc/wine_searcher_jina_1000.py"
+      - ".github/workflows/wine-searcher-jina-poc.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  collect-reader:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check requests
+      - run: python -m py_compile poc/wine_searcher_jina_1000.py
+      - name: Collect 1000 public merchant IDs through reader fallback
+        run: |
+          python poc/wine_searcher_jina_1000.py \
+            --start 2 \
+            --count 1000 \
+            --pilot 12 \
+            --workers 3 \
+            --interval 0.55 \
+            --timeout 35 \
+            --retries 2 \
+            --output-dir artifacts/wine-searcher-jina-poc
+      - name: Show summary
+        if: always()
+        run: |
+          if [ -f artifacts/wine-searcher-jina-poc/summary_jina.json ]; then
+            cat artifacts/wine-searcher-jina-poc/summary_jina.json
+          fi
+      - name: Upload PoC outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wine-searcher-jina-poc
+          path: artifacts/wine-searcher-jina-poc/
+          if-no-files-found: warn
+          retention-days: 7
