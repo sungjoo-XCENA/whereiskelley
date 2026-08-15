@@ -205,11 +205,12 @@ def read_overture_file(
     output,
     stop_event,
     memory_limit,
+    reader_threads,
 ):
     connection = None
     try:
         connection = duckdb_module.connect()
-        configure_duck(connection, threads=1, memory_limit=memory_limit)
+        configure_duck(connection, threads=reader_threads, memory_limit=memory_limit)
         result = connection.execute(build_query(file_path, columns, country, bbox, 0))
         names = [column[0] for column in result.description]
         while not stop_event.is_set():
@@ -696,7 +697,8 @@ def run_import(args):
     config = {
         "release": release, "path": path, "scope": scope, "limit": args.limit,
         "batchSize": args.batch_size, "threads": args.threads,
-        "sourceWorkers": args.source_workers, "partial": partial,
+        "sourceWorkers": args.source_workers, "readerThreads": args.reader_threads,
+        "partial": partial,
     }
     ensure_shop_db(args.db)
     con = connect_shop(args.db)
@@ -729,6 +731,7 @@ def run_import(args):
             "message": message, "runId": run_id, "provider": "overture", "release": release,
             "scope": scope, "threads": args.threads, "memoryLimit": args.memory_limit,
             "batchSize": args.batch_size, "sourceWorkers": source_workers,
+            "readerThreads": args.reader_threads,
             "sourceFiles": source_files_total,
             "sourceFilesCompleted": source_files_completed,
             "elapsedSeconds": round(elapsed_seconds, 1),
@@ -821,6 +824,7 @@ def run_import(args):
                     args=(
                         duckdb, file_path, columns, args.country, args.bbox,
                         args.batch_size, output, stop_event, per_worker_memory,
+                        args.reader_threads,
                     ),
                     name="overture-reader-{}".format(len(reader_threads) + 1),
                     daemon=True,
@@ -923,10 +927,15 @@ def main():
         "--source-workers", type=int, default=0,
         help="Parallel Overture parquet readers; 0 uses four times the CPU thread count",
     )
+    parser.add_argument(
+        "--reader-threads", type=int, default=0,
+        help="DuckDB threads per parquet reader; 0 uses the available CPU count up to four",
+    )
     parser.add_argument("--memory-limit", default="", help="DuckDB limit such as 12GB")
     args = parser.parse_args()
     args.batch_size = max(100, min(args.batch_size, 10_000))
     args.source_workers = max(1, min(args.source_workers or args.threads * 4, 16))
+    args.reader_threads = max(1, min(args.reader_threads or (os.cpu_count() or 2), 4))
     summary = run_import(args)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

@@ -1,7 +1,10 @@
 import importlib.util
+import queue
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -199,6 +202,48 @@ class OvertureWineShopImportTests(unittest.TestCase):
             )
         finally:
             con.close()
+
+    def test_parquet_reader_uses_configured_duckdb_threads(self):
+        class EmptyResult:
+            description = [("id",)]
+
+            def fetchmany(self, _size):
+                return []
+
+        class FakeConnection:
+            def execute(self, _query):
+                return EmptyResult()
+
+            def close(self):
+                pass
+
+        class FakeDuckDB:
+            @staticmethod
+            def connect():
+                return FakeConnection()
+
+        output = queue.Queue()
+        stop_event = threading.Event()
+        with mock.patch.object(MODULE, "configure_duck") as configure:
+            MODULE.read_overture_file(
+                FakeDuckDB,
+                "source.parquet",
+                {"id"},
+                "",
+                "",
+                5000,
+                output,
+                stop_event,
+                "1152MB",
+                4,
+            )
+
+        configure.assert_called_once_with(
+            mock.ANY,
+            threads=4,
+            memory_limit="1152MB",
+        )
+        self.assertEqual(("done", "source.parquet", None, None), output.get_nowait())
 
 
 if __name__ == "__main__":

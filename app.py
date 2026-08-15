@@ -407,6 +407,10 @@ def start_shop_collection(payload):
                 payload.get("sourceWorkers")
                 or os.environ.get("WHEREISKELLEY_OVERTURE_SOURCE_WORKERS", "16")
             )))),
+            "--reader-threads", str(max(1, min(4, int(
+                payload.get("readerThreads")
+                or os.environ.get("WHEREISKELLEY_OVERTURE_READER_THREADS", "4")
+            )))),
             "--memory-limit", str(payload.get("memoryLimit") or os.environ.get("WHEREISKELLEY_OVERTURE_MEMORY", "18GB")),
             "--batch-size", str(max(500, int(payload.get("batchSize") or os.environ.get("WHEREISKELLEY_OVERTURE_BATCH_SIZE", "5000")))),
         ]
