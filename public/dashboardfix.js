@@ -340,6 +340,19 @@
       font-size: 12px;
       line-height: 1.35;
     }
+    .collection-job-step-action {
+      min-height: 32px;
+      margin-top: 12px;
+    }
+    .collection-job-step-action:empty {
+      min-height: 0;
+      margin-top: 0;
+    }
+    .collection-job-step-action .dashboard-refresh {
+      min-height: 30px;
+      padding: 0 10px;
+      font-size: 11px;
+    }
     .collection-stat-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2019,6 +2032,7 @@
         </div>
         <h3>${html(step.label)}</h3>
         <b>${html(step.value)}</b>
+        ${step.action ? `<div class="collection-job-step-action">${step.action}</div>` : ""}
       </article>`;
     }).join("");
     const stats = (config.stats || []).map((item) => `<div class="collection-stat"><span>${html(item.label)}</span><b>${html(item.value)}</b></div>`).join("");
@@ -2045,7 +2059,6 @@
       ${stats ? `<div class="collection-stat-grid">${stats}</div>` : ""}
       <div class="collection-job-footer">
         <div class="collection-updated"><span>Updated</span><b>${html(config.updated || "-")}</b></div>
-        <div class="collection-job-actions">${config.actions}</div>
       </div>
     </section>`;
   }
@@ -2118,12 +2131,14 @@
         {
           label: "Michelin · La Liste · 50 Best",
           value: directorySaved ? `${fmtInt(directorySaved)} restaurants` : "Waiting",
-          state: directoryRunning ? "active" : directorySaved ? "complete" : "pending"
+          state: directoryRunning ? "active" : directorySaved ? "complete" : "pending",
+          action: `<button class="dashboard-refresh" type="button" data-start-guide-directory ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(directoryRunning ? "Updating..." : "Update list")}</button>`
         },
         {
           label: "Official websites",
           value: websitesAvailable ? `${fmtInt(websitesAvailable)} URLs` : "Waiting",
-          state: websiteResolving ? "active" : websitesAvailable ? "complete" : "pending"
+          state: websiteResolving ? "active" : websitesAvailable ? "complete" : "pending",
+          action: `<button class="dashboard-refresh" type="button" data-start-guide-collection ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(inventoryRunning ? "Scanning..." : "Find & scan")}</button>`
         },
         {
           label: "Explore websites",
@@ -2136,9 +2151,7 @@
           state: publishing ? "active" : scanCompleted ? "complete" : "pending"
         }
       ],
-      updated: updatedAt ? formatTime(updatedAt) : "Not updated yet",
-      actions: `<button class="dashboard-refresh" type="button" data-start-guide-directory ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(directoryRunning ? "Updating..." : "Update list")}</button>
-        <button class="dashboard-refresh" type="button" data-start-guide-collection ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(inventoryRunning ? "Scanning..." : "Scan websites")}</button>`
+      updated: updatedAt ? formatTime(updatedAt) : "Not updated yet"
     });
   }
 
@@ -2227,7 +2240,8 @@
         {
           label: "Overture shop list",
           value: overtureCandidates ? `${fmtInt(overtureCandidates)} places` : "Waiting",
-          state: overturePreparing ? "active" : directoryCompleted || overtureSaving ? "complete" : "pending"
+          state: overturePreparing ? "active" : directoryCompleted || overtureSaving ? "complete" : "pending",
+          action: `<button class="dashboard-refresh" type="button" data-start-shop-collection="overture" ${anyRunning || state.shopActionInFlight ? "disabled" : ""}>${html(overtureRunning ? "Updating..." : "Update list")}</button>`
         },
         {
           label: "Shop and website DB",
@@ -2237,7 +2251,8 @@
         {
           label: "Explore websites",
           value: inventoryCompleted ? `${fmtInt(processed)} checked` : inventoryRunning ? `${fmtInt(processed)} / ${fmtInt(total)}` : "Waiting",
-          state: inventoryRunning ? "active" : inventoryCompleted ? "complete" : "pending"
+          state: inventoryRunning ? "active" : inventoryCompleted ? "complete" : "pending",
+          action: `<button class="dashboard-refresh" type="button" data-start-shop-collection="inventory" ${anyRunning || state.shopActionInFlight || !savedWebsites ? "disabled" : ""}>${html(inventoryRunning ? "Scanning..." : "Scan websites")}</button>`
         },
         {
           label: "Wine inventory index",
@@ -2245,9 +2260,7 @@
           state: inventoryCompleted ? "complete" : "pending"
         }
       ],
-      updated: updatedAt ? formatTime(updatedAt) : "Not updated yet",
-      actions: `<button class="dashboard-refresh" type="button" data-start-shop-collection="overture" ${anyRunning || state.shopActionInFlight ? "disabled" : ""}>${html(overtureRunning ? "Updating..." : "Update list")}</button>
-        <button class="dashboard-refresh" type="button" data-start-shop-collection="inventory" ${anyRunning || state.shopActionInFlight || !savedWebsites ? "disabled" : ""}>${html(inventoryRunning ? "Scanning..." : "Scan websites")}</button>`
+      updated: updatedAt ? formatTime(updatedAt) : "Not updated yet"
     });
   }
 
