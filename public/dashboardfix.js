@@ -169,6 +169,84 @@
       border-radius: inherit;
       background: var(--accent);
     }
+    .collection-pipeline {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 14px 0;
+    }
+    .pipeline-step {
+      min-height: 112px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+    .pipeline-step.active {
+      border-color: #b0123f;
+      background: #fff7f9;
+      box-shadow: inset 3px 0 0 #b0123f;
+    }
+    .pipeline-step.complete {
+      border-color: #a7d8c3;
+      background: #f0fdf7;
+    }
+    .pipeline-step.failed {
+      border-color: #fecaca;
+      background: #fff1f2;
+    }
+    .pipeline-step-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 9px;
+    }
+    .pipeline-step-number {
+      display: inline-grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #dfe4ea;
+      color: #475569;
+      font-size: 12px;
+      font-weight: 950;
+    }
+    .pipeline-step.active .pipeline-step-number {
+      background: #b0123f;
+      color: #fff;
+    }
+    .pipeline-step.complete .pipeline-step-number {
+      background: #059669;
+      color: #fff;
+    }
+    .pipeline-step-state {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .pipeline-step.active .pipeline-step-state { color: #b0123f; }
+    .pipeline-step.complete .pipeline-step-state { color: #047857; }
+    .pipeline-step h3 {
+      margin: 0 0 6px;
+      font-size: 15px;
+      line-height: 1.25;
+    }
+    .pipeline-step p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      line-height: 1.4;
+    }
+    .pipeline-step strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 13px;
+      line-height: 1.35;
+    }
     .collection-metrics,
     .db-health-grid {
       display: grid;
@@ -506,6 +584,7 @@
       .dashboard-grid,
       .dashboard-split,
       .collection-stage-grid,
+      .collection-pipeline,
       .resource-grid {
         grid-template-columns: 1fr;
       }
@@ -701,9 +780,9 @@
     const isShop = options.kind === "shops";
     const shopPhase = String(payload?.progress?.phase || "");
     const workerText = isShop
-      ? shopPhase === "overture_discovery"
+      ? shopPhase.startsWith("overture_")
         ? `${fmtInt(payload?.progress?.threads || 4)} Overture import threads`
-        : shopPhase === "inventory"
+        : shopPhase.startsWith("inventory")
           ? "Wine-shop inventory workers"
           : "Waiting for shop collection"
       : workers.discovery
@@ -1534,14 +1613,90 @@
     root.innerHTML = `${collectionSwitchMarkup()}${stagesHtml}${progressHtml}${resourcePanelMarkup(payload)}`;
   }
 
+  function shopPipelineMarkup(shop, flags) {
+    const progress = shop.progress || {};
+    const counts = shop.counts || {};
+    const discoveryRun = flags.discoveryRun || {};
+    const inventoryRun = flags.inventoryRun || {};
+    const phase = String(progress.phase || "");
+    const finishedStatuses = new Set(["complete", "completed", "done"]);
+    const discoveryComplete = finishedStatuses.has(String(discoveryRun.status || "").toLowerCase())
+      || phase === "overture_complete";
+    const inventoryComplete = Boolean(inventoryRun.finished_at)
+      && finishedStatuses.has(String(inventoryRun.status || "").toLowerCase());
+    let activeStage = number(progress.stageIndex);
+    if (!activeStage && flags.overtureRunning) {
+      activeStage = phase === "overture_preparing" ? 1 : phase === "overture_reconciling" ? 3 : 2;
+    }
+    if (!activeStage && flags.inventoryRunning) activeStage = 4;
+
+    const sourceRows = number(progress.source_rows);
+    const candidates = number(progress.candidates || counts.overturePlaces);
+    const websites = number(counts.overtureWebsites);
+    const checked = number(progress.checked || inventoryRun.checked || inventoryRun.processed);
+    const inventoryTotal = number(progress.total || inventoryRun.total || counts.withWebsite);
+    const found = number(progress.found || counts.inventoryFound);
+    const products = number(progress.products || counts.products);
+    const failed = String(progress.status || "").toLowerCase() === "failed";
+
+    const steps = [
+      {
+        index: 1,
+        title: "Prepare Overture release",
+        detail: "Select and connect to the latest global Places release.",
+        value: progress.release || discoveryRun.provider_release || "Waiting for release",
+        complete: activeStage > 1 || discoveryComplete || Boolean(discoveryRun.provider_release),
+      },
+      {
+        index: 2,
+        title: "Import and merge shops",
+        detail: "Read places, keep wine retailers, and merge duplicate businesses.",
+        value: `${fmtInt(sourceRows)} read / ${fmtInt(candidates)} candidates saved`,
+        complete: discoveryComplete || activeStage > 2,
+      },
+      {
+        index: 3,
+        title: "Finalize website queue",
+        detail: "Save official website URLs and reconcile shops missing from the new release.",
+        value: `${fmtInt(websites)} website URLs ready`,
+        complete: discoveryComplete,
+      },
+      {
+        index: 4,
+        title: "Scan and save inventories",
+        detail: "Visit shop websites, verify catalogues or files, and save searchable wine text.",
+        value: `${fmtInt(checked)} / ${fmtInt(inventoryTotal)} checked / ${fmtInt(found)} inventories / ${fmtInt(products)} products`,
+        complete: inventoryComplete,
+      },
+    ];
+
+    return `<div class="collection-pipeline" aria-label="Wine-shop collection pipeline">${steps.map((step) => {
+      const active = activeStage === step.index && (flags.anyRunning || failed);
+      const status = failed && active
+        ? "failed"
+        : active
+          ? "active"
+          : step.complete
+            ? "complete"
+            : "waiting";
+      const label = status === "complete" ? "Done" : status === "active" ? "In progress" : status === "failed" ? "Failed" : "Waiting";
+      return `<article class="pipeline-step ${status}">
+        <div class="pipeline-step-head"><span class="pipeline-step-number">${step.index}</span><span class="pipeline-step-state">${html(label)}</span></div>
+        <h3>${html(step.title)}</h3>
+        <p>${html(step.detail)}</p>
+        <strong>${html(step.value)}</strong>
+      </article>`;
+    }).join("")}</div>`;
+  }
+
   function renderShopCollection(root) {
     const shop = state.shopPayload || {};
     const progress = shop.progress || {};
     const counts = shop.counts || {};
     const discoveryRun = (shop.latestDiscoveryRuns || [])[0] || {};
     const inventoryRun = (shop.latestRuns || []).find((run) => run.phase === "inventory") || {};
-    const overtureRunning = Boolean(shop.running?.overture || (progress.status === "running" && progress.phase === "overture_discovery"));
-    const inventoryRunning = Boolean(shop.running?.inventory || (progress.status === "running" && progress.phase === "inventory"));
+    const overtureRunning = Boolean(shop.running?.overture || (progress.status === "running" && String(progress.phase || "").startsWith("overture_")));
+    const inventoryRunning = Boolean(shop.running?.inventory || (progress.status === "running" && String(progress.phase || "").startsWith("inventory")));
     const anyRunning = overtureRunning || inventoryRunning || Boolean(shop.running?.merchantScan);
     const checked = number(inventoryRunning ? progress.checked : (inventoryRun.checked || inventoryRun.processed));
     const total = number(inventoryRunning ? progress.total : (inventoryRun.total || counts.withWebsite));
@@ -1576,6 +1731,17 @@
       </section>
     </div>`;
 
+    const activeStage = number(progress.stageIndex) || (overtureRunning ? 2 : inventoryRunning ? 4 : 0);
+    const activeStageLabel = progress.stageLabel || (overtureRunning ? "Import and merge shop directory" : inventoryRunning ? "Scan websites and save inventories" : "No collection is running");
+    const pipelinePercent = inventoryRunning && total
+      ? 75 + (percent * 0.25)
+      : activeStage
+        ? Math.max(0, (activeStage - 1) * 25)
+        : inventoryRun.finished_at
+          ? 100
+          : discoveryRun.finished_at
+            ? 75
+            : 0;
     const progressHtml = `<section class="dash-panel" data-dashboard-section="shop-collection">
       <div class="collection-head">
         <div><p class="dash-kicker">Current run</p><h2>${html(anyRunning ? (overtureRunning ? "Updating wine-shop candidates" : "Scanning wine-shop inventories") : "Wine-shop collection status")}</h2></div>
@@ -1585,8 +1751,10 @@
           ${state.shopActionMessage ? `<span class="dashboard-action-note">${html(state.shopActionMessage)}</span>` : ""}
         </div>
       </div>
+      <p class="dashboard-action-note"><strong>${html(anyRunning ? `Current step ${activeStage} of 4` : "Pipeline status")}</strong> / ${html(activeStageLabel)}</p>
       ${progress.message ? `<p class="dashboard-action-note">${html(progress.message)}</p>` : ""}
-      <div class="dash-progress" style="--dash-progress:${html(overtureRunning ? 0 : percent)}%"><i></i></div>
+      ${shopPipelineMarkup(shop, { discoveryRun, inventoryRun, overtureRunning, inventoryRunning, anyRunning })}
+      <div class="dash-progress" title="Completed pipeline stages" style="--dash-progress:${html(pipelinePercent)}%"><i></i></div>
       <div class="collection-metrics">
         <div class="metric-box"><span>${html(overtureRunning ? "Candidates saved" : "Websites checked")}</span><b>${html(fmtInt(overtureRunning ? progress.candidates : checked))}${overtureRunning || !total ? "" : ` / ${html(fmtInt(total))}`}</b></div>
         <div class="metric-box"><span>Shops saved</span><b>${html(fmtInt(counts.merchants))}</b></div>

@@ -1080,9 +1080,21 @@ def run_inventory(args):
     total = len(merchants)
     checked = found = errors = products = 0
     started = time.monotonic()
+    started_at = utc_now()
     domain_slots = DomainSlots(args.per_domain)
     robots = RobotsPolicy(domain_slots)
     try:
+        atomic_progress({
+            "generatedAt": utc_now(), "startedAt": started_at,
+            "status": "running", "phase": "inventory",
+            "stageIndex": 4, "stageCount": 4,
+            "stageLabel": "Scan websites and save inventories", "stageStatus": "running",
+            "stageProcessed": 0, "stageTotal": total,
+            "message": "Preparing the saved wine-shop website queue.",
+            "runId": run_id, "checked": 0, "total": total, "remaining": total,
+            "found": 0, "products": 0, "errors": 0,
+            "workers": args.workers, "maxPages": args.max_pages, "maxDepth": args.depth,
+        })
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
             futures = {
                 pool.submit(
@@ -1111,7 +1123,12 @@ def run_inventory(args):
                     con.commit()
                     elapsed = max(0.001, time.monotonic() - started)
                     atomic_progress({
-                        "status": "running", "phase": "inventory", "message": "Collecting merchant websites and price lists.",
+                        "generatedAt": utc_now(), "startedAt": started_at,
+                        "status": "running", "phase": "inventory",
+                        "stageIndex": 4, "stageCount": 4,
+                        "stageLabel": "Scan websites and save inventories", "stageStatus": "running",
+                        "stageProcessed": checked, "stageTotal": total,
+                        "message": "Scanning official websites and saving verified catalogues.",
                         "runId": run_id, "checked": checked, "total": total, "remaining": total - checked,
                         "found": found, "products": products, "errors": errors, "currentMerchant": merchant["name"],
                         "elapsedSeconds": int(elapsed),
@@ -1120,7 +1137,16 @@ def run_inventory(args):
                     })
         con.execute("update merchant_scan_runs set status='done',finished_at=?,checked=?,found=?,errors=? where id=?", (utc_now(), checked, found, errors, run_id))
         con.commit()
-        atomic_progress({"status": "done", "phase": "inventory", "runId": run_id, "checked": checked, "total": total, "found": found, "products": products, "errors": errors})
+        atomic_progress({
+            "generatedAt": utc_now(), "startedAt": started_at,
+            "status": "done", "phase": "inventory_complete",
+            "stageIndex": 4, "stageCount": 4,
+            "stageLabel": "Scan websites and save inventories", "stageStatus": "complete",
+            "stageProcessed": checked, "stageTotal": total,
+            "message": "Wine-shop inventory scan completed.",
+            "runId": run_id, "checked": checked, "total": total,
+            "remaining": 0, "found": found, "products": products, "errors": errors,
+        })
     finally:
         con.close()
 

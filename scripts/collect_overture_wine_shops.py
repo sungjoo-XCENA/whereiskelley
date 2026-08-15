@@ -520,13 +520,25 @@ def run_import(args):
     counts = {"source_rows": 0, "candidates": 0, "inserted": 0, "updated": 0, "unchanged": 0, "errors": 0}
     started_at = utc_now()
 
-    def write_progress(status="running", message="Reading Overture Places"):
+    def write_progress(
+        status="running",
+        message="Reading Overture Places",
+        phase="overture_preparing",
+        stage_index=1,
+        stage_label="Prepare Overture release",
+        stage_status="running",
+    ):
         atomic_write_json(args.progress, {
             "generatedAt": utc_now(), "startedAt": started_at,
-            "status": status, "phase": "overture_discovery",
+            "status": status, "phase": phase,
             "message": message, "runId": run_id, "provider": "overture", "release": release,
             "scope": scope, "threads": args.threads, "memoryLimit": args.memory_limit,
-            "batchSize": args.batch_size, **counts,
+            "batchSize": args.batch_size,
+            "stageIndex": stage_index, "stageCount": 4,
+            "stageLabel": stage_label, "stageStatus": stage_status,
+            "stageProcessed": counts["source_rows"] if stage_index == 2 else None,
+            "stageTotal": None,
+            **counts,
         })
 
     write_progress()
@@ -542,6 +554,12 @@ def run_import(args):
         query = build_query(path, columns, args.country, args.bbox, args.limit)
         result = duck.execute(query)
         names = [column[0] for column in result.description]
+        write_progress(
+            message="Reading places, filtering wine shops, and merging duplicates.",
+            phase="overture_importing",
+            stage_index=2,
+            stage_label="Import and merge shop directory",
+        )
         while True:
             rows = result.fetchmany(args.batch_size)
             if not rows:
@@ -567,7 +585,14 @@ def run_import(args):
                  counts["unchanged"], counts["errors"], run_id),
             )
             con.commit()
-            write_progress(message="Saved {:,} global wine-shop candidates".format(counts["candidates"]))
+            write_progress(
+                message="Read {:,} places and saved {:,} wine-shop candidates.".format(
+                    counts["source_rows"], counts["candidates"]
+                ),
+                phase="overture_importing",
+                stage_index=2,
+                stage_label="Import and merge shop directory",
+            )
             print(
                 "Saved {:,} candidates ({} new, {} updated, {} unchanged, {} errors)".format(
                     counts["candidates"], counts["inserted"], counts["updated"],
@@ -575,6 +600,12 @@ def run_import(args):
                 ),
                 flush=True,
             )
+        write_progress(
+            message="Finalizing website URLs and reconciling the previous directory.",
+            phase="overture_reconciling",
+            stage_index=3,
+            stage_label="Finalize website queue",
+        )
         deactivated = finalize_full_run(con, run_id) if not partial else 0
         con.execute(
             """
@@ -586,7 +617,14 @@ def run_import(args):
         )
         con.commit()
         counts["deactivated"] = deactivated
-        write_progress("complete", "Overture wine-shop discovery completed")
+        write_progress(
+            "complete",
+            "Wine-shop directory update completed. Website inventory scan is ready.",
+            phase="overture_complete",
+            stage_index=3,
+            stage_label="Finalize website queue",
+            stage_status="complete",
+        )
         return {"runId": run_id, "startedAt": started_at, "finishedAt": utc_now(), "release": release, **counts}
     except Exception as error:
         con.rollback()
@@ -596,7 +634,14 @@ def run_import(args):
         )
         con.commit()
         counts["errors"] += 1
-        write_progress("failed", "Overture import failed: {}".format(error))
+        write_progress(
+            "failed",
+            "Overture import failed: {}".format(error),
+            phase="overture_failed",
+            stage_index=2,
+            stage_label="Import and merge shop directory",
+            stage_status="failed",
+        )
         raise
     finally:
         if duck is not None:
