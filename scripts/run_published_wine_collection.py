@@ -114,6 +114,10 @@ def main():
     update_progress(
         status="preparing",
         phase="preparing_staging",
+        stageIndex=2,
+        stageCount=4,
+        stageLabel="Prepare safe scan database",
+        stageStatus="running",
         message="Preparing a separate collection database. Current search data remains available.",
         workerConfig={
             "discovery": args.workers,
@@ -157,6 +161,8 @@ def main():
         update_progress(
             status="failed",
             phase="collection_failed",
+            stageCount=4,
+            stageStatus="failed",
             message=collection_failure_message(return_code),
         )
         return return_code
@@ -175,6 +181,10 @@ def main():
     update_progress(
         status="publishing",
         phase="publishing",
+        stageIndex=4,
+        stageCount=4,
+        stageLabel="Publish completed database",
+        stageStatus="running",
         message="Collection finished. Publishing the completed snapshot.",
     )
     publish_guide_snapshot(staging_path, live_path)
@@ -191,6 +201,10 @@ def main():
     update_progress(
         status="completed",
         phase="completed",
+        stageIndex=4,
+        stageCount=4,
+        stageLabel="Publish completed database",
+        stageStatus="completed",
         message="Collection completed and the new database snapshot is live.",
         currentTarget="",
         currentUrl="",

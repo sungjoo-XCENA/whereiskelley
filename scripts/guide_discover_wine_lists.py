@@ -722,6 +722,24 @@ def dashboard_payload(con, progress_payload):
 
 
 def write_live_progress(con, **payload):
+    phase = str(payload.get("phase") or "")
+    if "stageIndex" not in payload:
+        if phase in {"reading_guides", "saving_targets"}:
+            payload.update(stageIndex=1, stageCount=4, stageLabel="Maintain restaurant directory")
+        elif phase == "preparing_staging":
+            payload.update(stageIndex=2, stageCount=4, stageLabel="Prepare safe scan database")
+        elif phase in {
+            "resolving_websites",
+            "checking_saved_websites",
+            "checking_wine_lists",
+            "collecting_wine_pipeline",
+            "discovering_wine_sources",
+            "validating_html_sources",
+            "extracting_pdf_sources",
+        }:
+            payload.update(stageIndex=3, stageCount=4, stageLabel="Crawl websites and verify wine-list sources")
+        elif phase in {"publishing", "completed"}:
+            payload.update(stageIndex=4, stageCount=4, stageLabel="Publish completed database")
     payload["dbCounts"] = db_counts(con)
     guide.write_progress(**payload)
     firebase_sync.publish_progress(dashboard_payload(con, payload))

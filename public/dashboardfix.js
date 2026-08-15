@@ -1000,10 +1000,32 @@
   }
 
   function progressValues(payload) {
-    const progress = payload?.progress || {};
+    const savedProgress = payload?.progress || {};
     const counts = payload?.counts || {};
-    const latestRun = payload?.latestRuns?.[0] || {};
+    const latestRun = payload?.lastInventoryCollection || payload?.latestRuns?.[0] || {};
     const summary = payload?.collectionSummary || {};
+    const progressTime = Date.parse(savedProgress.generatedAt || savedProgress.finishedAt || savedProgress.startedAt || "") || 0;
+    const latestFinishTime = Date.parse(latestRun.finished_at || "") || 0;
+    const progressSuperseded = Boolean(latestFinishTime && latestFinishTime > progressTime && savedProgress.status !== "running");
+    const progress = progressSuperseded
+      ? {
+          ...savedProgress,
+          status: "completed",
+          phase: "completed",
+          stale: false,
+          staleSeconds: 0,
+          runId: latestRun.id,
+          startedAt: latestRun.started_at,
+          finishedAt: latestRun.finished_at,
+          processedTargets: latestRun.websites_checked,
+          websitesChecked: latestRun.websites_checked,
+          totalWebsites: latestRun.target_count,
+          wineListsFound: latestRun.wine_lists_found,
+          wineLinesFound: latestRun.wine_lines_found,
+          errors: latestRun.errors,
+          progressPercent: 100,
+        }
+      : savedProgress;
     const running = progress.status === "running" && !progress.stale;
     const stopped = progress.status === "stalled" || Boolean(progress.stale);
     const completed = !running && (progress.status === "completed" || latestRun.status === "completed");
@@ -1031,6 +1053,7 @@
       counts,
       latestRun,
       summary,
+      progressSuperseded,
       running,
       stopped,
       processed,
@@ -1599,6 +1622,7 @@
           ${state.lastRefreshAt ? `<span class="dashboard-action-note">Last refreshed ${html(state.lastRefreshAt)}</span>` : ""}
         </div>
       </div>
+      ${restaurantPipelineMarkup(payload, metrics, { directoryRun, inventoryRun, directoryRunning, inventoryRunning })}
       <div class="dash-progress" style="--dash-progress:${html(values.percent)}%"><i></i></div>
       <div class="collection-metrics">
         <div class="metric-box"><span>${html(values.workLabel)}</span><b>${html(fmtInt(values.processed))} / ${html(fmtInt(values.total))}</b></div>
@@ -1611,6 +1635,84 @@
       <p class="dashboard-action-note">${html(fmtInt(parsedSources))} exact sources verified; ${html(fmtInt(reviewSources))} inconclusive sources remain.</p>
     </section>`;
     root.innerHTML = `${collectionSwitchMarkup()}${stagesHtml}${progressHtml}${resourcePanelMarkup(payload)}`;
+  }
+
+  function restaurantPipelineMarkup(payload, metrics, flags) {
+    const { values, progress, summary, savedLines, parsedSources, lastCollectionText } = metrics;
+    const phase = String(progress.phase || "");
+    const failed = ["failed", "error"].includes(String(progress.status || "").toLowerCase())
+      || phase === "collection_failed";
+    const inventoryComplete = String(flags.inventoryRun?.status || "").toLowerCase() === "completed"
+      && Boolean(flags.inventoryRun?.finished_at);
+    let activeStage = (values.running || failed) ? number(progress.stageIndex) : 0;
+    if (!activeStage && flags.directoryRunning) activeStage = 1;
+    if (!activeStage && values.running) {
+      if (phase === "preparing_staging") activeStage = 2;
+      else if (phase === "publishing") activeStage = 4;
+      else activeStage = 3;
+    }
+
+    const targets = number(payload.counts?.targets || summary.totalTargets);
+    const websites = number(payload.counts?.withWebsite);
+    const crawled = number(progress.discoveryProcessed ?? progress.websitesChecked ?? flags.inventoryRun?.websites_checked);
+    const crawlTotal = number(progress.discoveryTotal ?? progress.totalWebsites ?? flags.inventoryRun?.target_count ?? websites);
+    const sourcesChecked = number(progress.sourceCandidatesProcessed ?? summary.totalSources);
+    const sourceTotal = number(progress.sourceCandidatesTotal ?? summary.totalSources);
+    const pipelineFinished = inventoryComplete && !values.running;
+    const stageLabel = progress.stageLabel || (
+      activeStage === 1 ? "Update restaurant directory"
+        : activeStage === 2 ? "Prepare safe scan database"
+          : activeStage === 3 ? "Crawl websites and verify wine-list sources"
+            : activeStage === 4 ? "Publish completed database"
+              : pipelineFinished ? `Last scan published ${lastCollectionText}`
+                : "No restaurant collection is running"
+    );
+
+    const steps = [
+      {
+        index: 1,
+        title: "Maintain restaurant directory",
+        detail: "Save and merge Michelin, La Liste, and World's 50 Best restaurant candidates.",
+        value: `${fmtInt(targets)} restaurants / ${fmtInt(websites)} website URLs`,
+        complete: targets > 0 && activeStage !== 1,
+      },
+      {
+        index: 2,
+        title: "Prepare safe scan database",
+        detail: "Copy the live database to staging so the published search stays available during collection.",
+        value: activeStage === 2 ? "Preparing staging database" : pipelineFinished || activeStage > 2 ? "Staging database prepared" : "Waiting for a scan",
+        complete: pipelineFinished || activeStage > 2,
+      },
+      {
+        index: 3,
+        title: "Crawl and verify wine lists",
+        detail: "Crawl official websites while HTML and PDF candidates are verified and saved in parallel.",
+        value: `${fmtInt(crawled)} / ${fmtInt(crawlTotal)} websites / ${fmtInt(sourcesChecked)} / ${fmtInt(sourceTotal)} sources`,
+        complete: pipelineFinished || activeStage > 3,
+      },
+      {
+        index: 4,
+        title: "Publish completed database",
+        detail: "Replace the live database only after the full scan succeeds, then expose it to search.",
+        value: pipelineFinished ? `${fmtInt(parsedSources)} verified sources / ${fmtInt(savedLines)} searchable lines` : activeStage === 4 ? "Publishing verified snapshot" : "Waiting for completed scan",
+        complete: pipelineFinished,
+      },
+    ];
+
+    const cards = steps.map((step) => {
+      const active = activeStage === step.index && (values.running || failed);
+      const status = failed && active ? "failed" : active ? "active" : step.complete ? "complete" : "waiting";
+      const label = status === "complete" ? "Done" : status === "active" ? "In progress" : status === "failed" ? "Failed" : "Waiting";
+      return `<article class="pipeline-step ${status}">
+        <div class="pipeline-step-head"><span class="pipeline-step-number">${step.index}</span><span class="pipeline-step-state">${html(label)}</span></div>
+        <h3>${html(step.title)}</h3>
+        <p>${html(step.detail)}</p>
+        <strong>${html(step.value)}</strong>
+      </article>`;
+    }).join("");
+
+    return `<p class="dashboard-action-note"><strong>${html(activeStage ? `Current step ${activeStage} of 4` : pipelineFinished ? "Pipeline complete" : "Pipeline status")}</strong> / ${html(stageLabel)}</p>
+      <div class="collection-pipeline" aria-label="Restaurant collection pipeline">${cards}</div>`;
   }
 
   function shopPipelineMarkup(shop, flags) {

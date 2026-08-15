@@ -161,6 +161,11 @@ def collect_michelin_browser_places(max_source_items, run_id):
 
 
 def write_progress(**payload):
+    phase = str(payload.get("phase") or "")
+    if phase in {"reading_guides", "saving_targets", "completed"}:
+        payload.setdefault("stageIndex", 1)
+        payload.setdefault("stageCount", 4)
+        payload.setdefault("stageLabel", "Maintain restaurant directory")
     PUBLIC_DATA_DIR.mkdir(parents=True, exist_ok=True)
     current = {
         "generatedAt": now_sql(),

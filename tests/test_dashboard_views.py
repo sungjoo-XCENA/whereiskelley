@@ -48,6 +48,17 @@ class DashboardViewTests(unittest.TestCase):
         self.assertIn("Safety limits", self.script)
         self.assertIn("Controller", self.script)
 
+    def test_restaurant_collection_shows_real_pipeline_steps(self):
+        self.assertIn('aria-label="Restaurant collection pipeline"', self.script)
+        self.assertIn("Maintain restaurant directory", self.script)
+        self.assertIn("Prepare safe scan database", self.script)
+        self.assertIn("Crawl and verify wine lists", self.script)
+        self.assertIn("Publish completed database", self.script)
+
+    def test_completed_inventory_supersedes_old_stale_progress(self):
+        self.assertIn("progressSuperseded", self.script)
+        self.assertIn("latestFinishTime > progressTime", self.script)
+
 
 if __name__ == "__main__":
     unittest.main()
