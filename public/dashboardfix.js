@@ -1529,7 +1529,7 @@
     const progress = shop.progress || {};
     const counts = shop.counts || {};
     const discoveryRun = (shop.latestDiscoveryRuns || [])[0] || {};
-    const inventoryRun = (shop.latestRuns || []).find((run) => run.phase === "inventory") || (shop.latestRuns || [])[0] || {};
+    const inventoryRun = (shop.latestRuns || []).find((run) => run.phase === "inventory") || {};
     const overtureRunning = Boolean(shop.running?.overture || (progress.status === "running" && progress.phase === "overture_discovery"));
     const inventoryRunning = Boolean(shop.running?.inventory || (progress.status === "running" && progress.phase === "inventory"));
     const anyRunning = overtureRunning || inventoryRunning || Boolean(shop.running?.merchantScan);
