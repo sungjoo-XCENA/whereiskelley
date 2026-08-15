@@ -1023,6 +1023,10 @@
           wineListsFound: latestRun.wine_lists_found,
           wineLinesFound: latestRun.wine_lines_found,
           errors: latestRun.errors,
+          currentTarget: "",
+          currentUrl: "",
+          elapsedSeconds: secondsBetween(latestRun.started_at, latestRun.finished_at),
+          durationSeconds: secondsBetween(latestRun.started_at, latestRun.finished_at),
           progressPercent: 100,
         }
       : savedProgress;
@@ -1654,11 +1658,11 @@
 
     const targets = number(payload.counts?.targets || summary.totalTargets);
     const websites = number(payload.counts?.withWebsite);
+    const pipelineFinished = inventoryComplete && !values.running;
     const crawled = number(progress.discoveryProcessed ?? progress.websitesChecked ?? flags.inventoryRun?.websites_checked);
-    const crawlTotal = number(progress.discoveryTotal ?? progress.totalWebsites ?? flags.inventoryRun?.target_count ?? websites);
+    const crawlTotal = number(progress.discoveryTotal ?? (pipelineFinished ? websites : progress.totalWebsites) ?? flags.inventoryRun?.target_count ?? websites);
     const sourcesChecked = number(progress.sourceCandidatesProcessed ?? summary.totalSources);
     const sourceTotal = number(progress.sourceCandidatesTotal ?? summary.totalSources);
-    const pipelineFinished = inventoryComplete && !values.running;
     const stageLabel = progress.stageLabel || (
       activeStage === 1 ? "Update restaurant directory"
         : activeStage === 2 ? "Prepare safe scan database"
