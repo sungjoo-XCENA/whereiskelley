@@ -24,6 +24,8 @@ PUBLIC_DIR = ROOT / "public"
 SNAPSHOT_STATUS_PATH = PUBLIC_DIR / "data" / "collection-status.json"
 GUIDE_PROGRESS_PATH = PUBLIC_DIR / "data" / "guide-progress.json"
 GUIDE_STATUS_PATH = PUBLIC_DIR / "data" / "guide-status.json"
+SHOP_PROGRESS_PATH = PUBLIC_DIR / "data" / "shop-progress.json"
+SHOP_RESOURCE_HISTORY_PATH = PUBLIC_DIR / "data" / "shop-resource-history.json"
 
 
 def load_local_env():
@@ -263,6 +265,33 @@ def running_shop_collector(phase=""):
     return None
 
 
+def start_shop_resource_monitor(process):
+    command = [
+        sys.executable,
+        str(SCRIPTS_DIR / "resource_monitor.py"),
+        "--pid", str(process.pid),
+        "--history", str(SHOP_RESOURCE_HISTORY_PATH),
+        "--progress", str(SHOP_PROGRESS_PATH),
+    ]
+    log_dir = ROOT / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    monitor_log = open(log_dir / "wine-shop-resource-monitor.log", "ab")
+    kwargs = {
+        "cwd": str(ROOT),
+        "stdout": monitor_log,
+        "stderr": monitor_log,
+        "env": {**os.environ, "PYTHONIOENCODING": "utf-8"},
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+    try:
+        subprocess.Popen(command, **kwargs)
+    finally:
+        monitor_log.close()
+
+
 def shop_browser_signature(timestamp, merchant_id, html, secret=None):
     secret_value = ADMIN_PASSWORD if secret is None else str(secret)
     html_hash = hashlib.sha256(str(html or "").encode("utf-8", errors="ignore")).hexdigest()
@@ -415,6 +444,10 @@ def start_shop_collection(payload):
     try:
         process = subprocess.Popen(command, **kwargs)
         SHOP_COLLECTOR_PROCESSES[phase] = process
+        try:
+            start_shop_resource_monitor(process)
+        except OSError:
+            pass
     finally:
         stdout.close()
         stderr.close()
@@ -1824,6 +1857,8 @@ class Handler(BaseHTTPRequestHandler):
                 return json_response(self, guide_collection_status())
             if parsed.path == "/api/shop-collection":
                 payload = shop_collection_status()
+                payload["collectionKind"] = "shops"
+                payload["resourceHistory"] = read_json_file(SHOP_RESOURCE_HISTORY_PATH, {})
                 payload["running"] = {
                     "merchantScan": running_shop_collector("merchant_scan"),
                     "inventory": running_shop_collector("inventory"),

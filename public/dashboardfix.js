@@ -686,7 +686,7 @@
     </svg>`;
   }
 
-  function resourcePanelMarkup(payload) {
+  function resourcePanelMarkup(payload, options = {}) {
     const samples = chartSamples(payload);
     const latest = latestSample(samples);
     const cpu = Number.isFinite(Number(latest.cpuPercent)) ? `${number(latest.cpuPercent).toFixed(1)}%` : "-";
@@ -698,12 +698,22 @@
     const interval = number(payload?.resourceHistory?.intervalSeconds) || 30;
     const workers = payload?.progress?.workerConfig || {};
     const governor = payload?.progress?.resourceGovernor || {};
-    const workerText = workers.discovery
-      ? `${fmtInt(workers.discovery)} discovery / ${fmtInt(workers.html)} HTML / ${fmtInt(workers.pdf)} PDF`
-      : "Waiting for collection";
-    const limitText = workers.targetCpuPercent
-      ? `CPU ${fmtInt(workers.targetCpuPercent)}% / Memory ${fmtInt(workers.maxMemoryPercent)}% / Disk ${fmtInt(workers.maxDiskPercent)}%`
-      : "CPU 80% / Memory 80% / Disk 85%";
+    const isShop = options.kind === "shops";
+    const shopPhase = String(payload?.progress?.phase || "");
+    const workerText = isShop
+      ? shopPhase === "overture_discovery"
+        ? `${fmtInt(payload?.progress?.threads || 4)} Overture import threads`
+        : shopPhase === "inventory"
+          ? "Wine-shop inventory workers"
+          : "Waiting for shop collection"
+      : workers.discovery
+        ? `${fmtInt(workers.discovery)} discovery / ${fmtInt(workers.html)} HTML / ${fmtInt(workers.pdf)} PDF`
+        : "Waiting for collection";
+    const limitText = isShop
+      ? `Memory limit ${payload?.progress?.memoryLimit || "18GB"} / Disk 85%`
+      : workers.targetCpuPercent
+        ? `CPU ${fmtInt(workers.targetCpuPercent)}% / Memory ${fmtInt(workers.maxMemoryPercent)}% / Disk ${fmtInt(workers.maxDiskPercent)}%`
+        : "CPU 80% / Memory 80% / Disk 85%";
     const controllerText = governor.throttled
       ? `${governor.reason || "Resource limit active"} / dispatch ${fmtInt(governor.pendingLimit)}`
       : governor.configuredWorkers
@@ -715,7 +725,7 @@
           <p class="dash-kicker">Server resources</p>
           <h2>Collection resource usage</h2>
         </div>
-        <span class="dash-pill">${html(fmtInt(samples.length))} samples · every ${html(fmtInt(interval))}s</span>
+        <span class="dash-pill">${html(fmtInt(samples.length))} samples / every ${html(fmtInt(interval))}s</span>
       </div>
       <div class="resource-policy">
         <span><b>Workers</b>${html(workerText)}</span>
@@ -729,7 +739,7 @@
             { key: "cpuPercent", color: "#b0123f" },
             { key: "collectorCpuPercent", color: "#2563eb" }
           ])}
-          <div class="resource-legend"><span><i style="--series:#b0123f"></i>Server</span><span><i style="--series:#2563eb"></i>Collector + PDF workers</span></div>
+          <div class="resource-legend"><span><i style="--series:#b0123f"></i>Server</span><span><i style="--series:#2563eb"></i>${html(isShop ? "Wine-shop collector" : "Collector + PDF workers")}</span></div>
         </article>
         <article class="resource-card">
           <div class="resource-card-head"><div><span>Memory</span><b>${html(memory)}</b></div><small>${html(formatBytes(latest.memoryUsedBytes))} / ${html(formatBytes(latest.memoryTotalBytes))}<br>Collector ${html(formatBytes(latest.collectorMemoryBytes))}</small></div>
@@ -1584,7 +1594,7 @@
         <div class="metric-box"><span>Needs review</span><b>${html(fmtInt(counts.openReviews))}</b></div>
       </div>
     </section>`;
-    root.innerHTML = `${collectionSwitchMarkup()}${stagesHtml}${progressHtml}`;
+    root.innerHTML = `${collectionSwitchMarkup()}${stagesHtml}${progressHtml}${resourcePanelMarkup(shop, { kind: "shops" })}`;
   }
 
   function renderActiveGuideView() {

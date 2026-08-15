@@ -214,8 +214,15 @@ def main():
     parser = argparse.ArgumentParser(description="Record server resource usage while a collection process runs.")
     parser.add_argument("--pid", type=int, required=True)
     parser.add_argument("--interval", type=int, default=DEFAULT_INTERVAL)
+    parser.add_argument("--history", type=Path, default=HISTORY_PATH)
+    parser.add_argument("--progress", type=Path, default=PROGRESS_PATH)
     args = parser.parse_args()
-    return monitor_process(ProcessHandle(args.pid), interval_seconds=max(5, args.interval))
+    return monitor_process(
+        ProcessHandle(args.pid),
+        history_path=args.history,
+        progress_path=args.progress,
+        interval_seconds=max(5, args.interval),
+    )
 
 
 if __name__ == "__main__":

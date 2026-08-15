@@ -522,9 +522,11 @@ def run_import(args):
 
     def write_progress(status="running", message="Reading Overture Places"):
         atomic_write_json(args.progress, {
-            "generatedAt": utc_now(), "status": status, "phase": "overture_discovery",
+            "generatedAt": utc_now(), "startedAt": started_at,
+            "status": status, "phase": "overture_discovery",
             "message": message, "runId": run_id, "provider": "overture", "release": release,
-            "scope": scope, **counts,
+            "scope": scope, "threads": args.threads, "memoryLimit": args.memory_limit,
+            "batchSize": args.batch_size, **counts,
         })
 
     write_progress()
