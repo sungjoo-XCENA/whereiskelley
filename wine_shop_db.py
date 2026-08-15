@@ -97,13 +97,21 @@ def shop_collection_status(path=None, map_limit=6000):
               (select count(*) from merchants where inventory_status='review' and active=1) as review,
               (select count(*) from merchant_sources where status='found') as sources,
               (select count(*) from merchant_products where active=1) as products,
-              (select count(*) from merchant_reviews where status='open') as openReviews
+              (select count(*) from merchant_reviews where status='open') as openReviews,
+              (select count(*) from merchant_place_sources where provider='overture' and active=1) as overturePlaces,
+              (select count(*) from merchant_websites where provider='overture' and active=1) as overtureWebsites
             """
         ).fetchone())
         latest_runs = [
             _row_dict(row)
             for row in con.execute(
                 "select * from merchant_scan_runs order by id desc limit 8"
+            ).fetchall()
+        ]
+        discovery_runs = [
+            _row_dict(row)
+            for row in con.execute(
+                "select * from merchant_discovery_runs order by id desc limit 8"
             ).fetchall()
         ]
         map_merchants = [
@@ -132,6 +140,7 @@ def shop_collection_status(path=None, map_limit=6000):
             "progress": progress,
             "counts": {key: int(value or 0) for key, value in counts.items()},
             "latestRuns": latest_runs,
+            "latestDiscoveryRuns": discovery_runs,
             "mapMerchants": map_merchants,
             "databasePath": str(Path(path or SHOP_DB_PATH)),
         }

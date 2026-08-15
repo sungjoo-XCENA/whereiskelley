@@ -132,7 +132,7 @@ def running_collector_pid():
         return None
     try:
         output = subprocess.check_output(
-            ["pgrep", "-f", "run_published_wine_collection.py|guide_discover_wine_lists.py"],
+            ["pgrep", "-f", "run_published_wine_collection.py|guide_discover_wine_lists.py|guide_collect_targets.py"],
             text=True,
             stderr=subprocess.DEVNULL,
         )
@@ -164,30 +164,44 @@ def start_wine_collection(payload):
     if running_pid is not None:
         return {"ok": True, "running": True, "message": "Collection is already running.", "pid": running_pid}, 200
 
+    phase = str(payload.get("phase") or "inventory").strip()
+    if phase not in {"directory", "inventory"}:
+        return {"ok": False, "error": "phase must be directory or inventory."}, 400
     max_links = int(payload.get("maxLinks") or os.environ.get("WHEREISKELLEY_COLLECT_MAX_LINKS", "60"))
     max_targets = int(payload.get("maxTargets") or 0)
     sleep_seconds = str(payload.get("sleep") or os.environ.get("WHEREISKELLEY_COLLECT_SLEEP", "0.08"))
-    command = [
-        sys.executable,
-        str(SCRIPTS_DIR / "run_published_wine_collection.py"),
-        "--max-links",
-        str(max_links),
-        "--sleep",
-        sleep_seconds,
-        "--workers",
-        str(max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "192")))),
-        "--source-workers",
-        str(max(1, int(os.environ.get("WHEREISKELLEY_SOURCE_WORKERS", "256")))),
-        "--pdf-workers",
-        str(max(1, int(os.environ.get("WHEREISKELLEY_PDF_WORKERS", "8")))),
-    ]
-    if max_targets > 0:
-        command.extend(["--max-targets", str(max_targets)])
+    if phase == "directory":
+        command = [
+            sys.executable,
+            str(SCRIPTS_DIR / "guide_collect_targets.py"),
+            "--sources",
+            "michelin,laliste,worlds50best",
+            "--max-source-items",
+            str(max(0, int(payload.get("maxSourceItems") or 0))),
+        ]
+    else:
+        command = [
+            sys.executable,
+            str(SCRIPTS_DIR / "run_published_wine_collection.py"),
+            "--max-links",
+            str(max_links),
+            "--sleep",
+            sleep_seconds,
+            "--workers",
+            str(max(1, int(os.environ.get("WHEREISKELLEY_DISCOVERY_WORKERS", "192")))),
+            "--source-workers",
+            str(max(1, int(os.environ.get("WHEREISKELLEY_SOURCE_WORKERS", "256")))),
+            "--pdf-workers",
+            str(max(1, int(os.environ.get("WHEREISKELLEY_PDF_WORKERS", "8")))),
+        ]
+        if max_targets > 0:
+            command.extend(["--max-targets", str(max_targets)])
 
     log_dir = ROOT / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    stdout = open(log_dir / "web-recollect.log", "ab")
-    stderr = open(log_dir / "web-recollect.err.log", "ab")
+    log_name = "web-directory-update" if phase == "directory" else "web-recollect"
+    stdout = open(log_dir / f"{log_name}.log", "ab")
+    stderr = open(log_dir / f"{log_name}.err.log", "ab")
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
     popen_kwargs = {
@@ -208,8 +222,13 @@ def start_wine_collection(payload):
     return {
         "ok": True,
         "running": True,
+        "phase": phase,
         "pid": COLLECTOR_PROCESS.pid,
-        "message": "Wine-list recollection started on the local PC.",
+        "message": (
+            "Restaurant candidate directory update started."
+            if phase == "directory"
+            else "Restaurant wine-list scan started."
+        ),
         "command": " ".join(command),
     }, 202
 
@@ -225,6 +244,7 @@ def running_shop_collector(phase=""):
     patterns = {
         "merchant_scan": "wine_shop_collect.py merchant-scan",
         "inventory": "wine_shop_collect.py inventory",
+        "overture": "collect_overture_wine_shops.py",
     }
     pattern = patterns.get(phase, "wine_shop_collect.py")
     try:
@@ -341,14 +361,23 @@ def start_shop_collection(payload):
     if str(payload.get("password") or "") != ADMIN_PASSWORD:
         return {"ok": False, "error": "Wrong password."}, 401
     phase = str(payload.get("phase") or "inventory").strip()
-    if phase not in {"merchant_scan", "inventory"}:
-        return {"ok": False, "error": "phase must be merchant_scan or inventory."}, 400
+    if phase not in {"merchant_scan", "inventory", "overture"}:
+        return {"ok": False, "error": "phase must be merchant_scan, overture, or inventory."}, 400
     running_pid = running_shop_collector(phase)
     if running_pid:
         return {"ok": True, "running": True, "phase": phase, "pid": running_pid, "message": "This wine-shop collection phase is already running."}, 200
 
     script = str(SCRIPTS_DIR / "wine_shop_collect.py")
-    if phase == "merchant_scan":
+    if phase == "overture":
+        script = str(SCRIPTS_DIR / "collect_overture_wine_shops.py")
+        command = [
+            sys.executable, script,
+            "--release", str(payload.get("release") or "latest"),
+            "--threads", str(max(1, int(payload.get("threads") or os.environ.get("WHEREISKELLEY_OVERTURE_THREADS", "4")))),
+            "--memory-limit", str(payload.get("memoryLimit") or os.environ.get("WHEREISKELLEY_OVERTURE_MEMORY", "18GB")),
+            "--batch-size", str(max(500, int(payload.get("batchSize") or os.environ.get("WHEREISKELLEY_OVERTURE_BATCH_SIZE", "5000")))),
+        ]
+    elif phase == "merchant_scan":
         command = [
             sys.executable, script, "merchant-scan",
             "--start", str(max(2, int(payload.get("start") or 2))),
@@ -391,7 +420,13 @@ def start_shop_collection(payload):
         stderr.close()
     return {
         "ok": True, "running": True, "phase": phase, "pid": process.pid,
-        "message": "Merchant registry scan started." if phase == "merchant_scan" else "Wine-shop inventory collection started.",
+        "message": (
+            "Global Overture wine-shop discovery started."
+            if phase == "overture"
+            else "Merchant registry scan started."
+            if phase == "merchant_scan"
+            else "Wine-shop inventory collection started."
+        ),
     }, 202
 
 
@@ -556,6 +591,8 @@ def guide_collection_status():
         "recentErrors": [],
         "latestRuns": [],
         "lastCollection": None,
+        "lastDirectoryUpdate": None,
+        "lastInventoryCollection": None,
     }
     if not DB_PATH.exists():
         return payload
@@ -724,8 +761,9 @@ def guide_collection_status():
             row_to_dict(row)
             for row in con.execute(
                 """
-                select id, status, started_at, finished_at, target_count, websites_checked,
-                       wine_lists_found, wine_lines_found, watch_hits, errors, notes
+                select id, status, started_at, finished_at, sources_requested,
+                       target_count, websites_checked, wine_lists_found,
+                       wine_lines_found, watch_hits, errors, notes
                 from guide_collection_runs
                 order by id desc
                 limit 5
@@ -734,8 +772,9 @@ def guide_collection_status():
         ]
         last_collection = con.execute(
             """
-            select id, status, started_at, finished_at, target_count, websites_checked,
-                   wine_lists_found, wine_lines_found, watch_hits, errors, notes
+            select id, status, started_at, finished_at, sources_requested,
+                   target_count, websites_checked, wine_lists_found,
+                   wine_lines_found, watch_hits, errors, notes
             from guide_collection_runs
             where status = 'completed' and finished_at is not null
             order by finished_at desc, id desc
@@ -744,6 +783,40 @@ def guide_collection_status():
         ).fetchone()
         if last_collection:
             payload["lastCollection"] = row_to_dict(last_collection)
+        last_directory_update = con.execute(
+            """
+            select id, status, started_at, finished_at, sources_requested,
+                   target_count, websites_checked, wine_lists_found,
+                   wine_lines_found, watch_hits, errors, notes
+            from guide_collection_runs
+            where status = 'completed'
+              and finished_at is not null
+              and (
+                lower(coalesce(sources_requested, '')) like '%michelin%'
+                or lower(coalesce(sources_requested, '')) like '%laliste%'
+                or lower(coalesce(sources_requested, '')) like '%worlds50best%'
+              )
+            order by finished_at desc, id desc
+            limit 1
+            """
+        ).fetchone()
+        if last_directory_update:
+            payload["lastDirectoryUpdate"] = row_to_dict(last_directory_update)
+        last_inventory_collection = con.execute(
+            """
+            select id, status, started_at, finished_at, sources_requested,
+                   target_count, websites_checked, wine_lists_found,
+                   wine_lines_found, watch_hits, errors, notes
+            from guide_collection_runs
+            where status = 'completed'
+              and finished_at is not null
+              and lower(coalesce(sources_requested, '')) like '%wine_list%'
+            order by finished_at desc, id desc
+            limit 1
+            """
+        ).fetchone()
+        if last_inventory_collection:
+            payload["lastInventoryCollection"] = row_to_dict(last_inventory_collection)
     payload["progress"]["dbCounts"] = {
         "targets": int(payload["counts"].get("targets") or 0),
         "withWebsite": int(payload["counts"].get("withWebsite") or 0),
@@ -1754,6 +1827,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload["running"] = {
                     "merchantScan": running_shop_collector("merchant_scan"),
                     "inventory": running_shop_collector("inventory"),
+                    "overture": running_shop_collector("overture"),
                 }
                 return json_response(self, payload)
             if parsed.path == "/api/stats":

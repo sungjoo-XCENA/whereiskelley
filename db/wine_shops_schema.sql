@@ -127,6 +127,79 @@ create table if not exists merchant_reviews (
   resolved_at text
 );
 
+-- Discovery data is deliberately separate from inventory sources. Overture,
+-- Google, and other place providers describe a shop; merchant_sources and
+-- merchant_products describe the shop's actual wine catalogue.
+create table if not exists merchant_discovery_runs (
+  id integer primary key,
+  provider text not null,
+  provider_release text,
+  scope text not null default 'global',
+  status text not null default 'running',
+  started_at text not null default current_timestamp,
+  finished_at text,
+  source_rows integer not null default 0,
+  candidates integer not null default 0,
+  inserted integer not null default 0,
+  updated integer not null default 0,
+  unchanged integer not null default 0,
+  deactivated integer not null default 0,
+  errors integer not null default 0,
+  config_json text,
+  error text
+);
+
+create table if not exists merchant_place_sources (
+  id integer primary key,
+  merchant_id integer not null references merchants(id) on delete cascade,
+  provider text not null,
+  provider_place_id text not null,
+  provider_release text,
+  candidate_reason text,
+  name text not null,
+  normalized_name text not null default '',
+  primary_category text,
+  categories_json text,
+  confidence real,
+  operating_status text,
+  country_code text,
+  country text,
+  region text,
+  city text,
+  postcode text,
+  address text,
+  latitude real,
+  longitude real,
+  websites_json text,
+  phones_json text,
+  socials_json text,
+  source_updated_at text,
+  raw_hash text not null,
+  first_seen_at text not null default current_timestamp,
+  last_seen_at text not null default current_timestamp,
+  first_seen_run_id integer references merchant_discovery_runs(id),
+  last_seen_run_id integer references merchant_discovery_runs(id),
+  active integer not null default 1,
+  unique(provider, provider_place_id)
+);
+
+create table if not exists merchant_websites (
+  id integer primary key,
+  merchant_id integer not null references merchants(id) on delete cascade,
+  place_source_id integer references merchant_place_sources(id) on delete cascade,
+  url text not null,
+  normalized_url text not null,
+  domain text,
+  role text not null default 'official_candidate',
+  provider text,
+  status text not null default 'unverified',
+  first_seen_at text not null default current_timestamp,
+  last_seen_at text not null default current_timestamp,
+  last_checked_at text,
+  active integer not null default 1,
+  unique(merchant_id, normalized_url)
+);
+
 create virtual table if not exists merchant_products_fts using fts5(
   raw_name,
   producer,
@@ -163,3 +236,10 @@ create index if not exists idx_merchant_products_merchant on merchant_products(m
 create index if not exists idx_merchant_products_vintage on merchant_products(vintage, active);
 create index if not exists idx_merchant_products_price on merchant_products(currency, price_value);
 create index if not exists idx_merchant_reviews_status on merchant_reviews(status, created_at);
+create index if not exists idx_merchant_discovery_runs_provider on merchant_discovery_runs(provider, id desc);
+create index if not exists idx_merchant_place_sources_run on merchant_place_sources(provider, last_seen_run_id, active);
+create index if not exists idx_merchant_place_sources_location on merchant_place_sources(country_code, city, active);
+create index if not exists idx_merchant_place_sources_merchant on merchant_place_sources(merchant_id, active);
+create index if not exists idx_merchant_place_sources_domain on merchant_place_sources(provider, provider_place_id);
+create index if not exists idx_merchant_websites_domain on merchant_websites(domain, active);
+create index if not exists idx_merchant_websites_merchant on merchant_websites(merchant_id, active);

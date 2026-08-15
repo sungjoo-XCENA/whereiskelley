@@ -3,6 +3,7 @@
     guidePayload: null,
     shopPayload: null,
     databaseMode: "restaurants",
+    collectionMode: "restaurants",
     dashboardMap: null,
     dashboardMapEl: null,
     dashboardInfoWindow: null,
@@ -99,6 +100,55 @@
       font-weight: 750;
       line-height: 1.4;
     }
+    .collection-switch-panel {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+    .collection-switch-panel h2,
+    .collection-stage h2 {
+      margin: 2px 0 0;
+    }
+    .collection-stage-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+    .collection-stage {
+      margin-top: 0;
+    }
+    .collection-stage-copy {
+      min-height: 42px;
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-weight: 750;
+      line-height: 1.4;
+    }
+    .collection-stage-number {
+      display: inline-grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      margin-right: 8px;
+      border-radius: 50%;
+      background: #111418;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .collection-stage-schedule {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
     .collection-head {
       display: flex;
       align-items: start;
@@ -124,6 +174,9 @@
       display: grid;
       grid-template-columns: repeat(6, minmax(0, 1fr));
       gap: 10px;
+    }
+    .collection-stage .collection-metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .metric-box {
       min-height: 74px;
@@ -452,6 +505,7 @@
     @media (max-width: 980px) {
       .dashboard-grid,
       .dashboard-split,
+      .collection-stage-grid,
       .resource-grid {
         grid-template-columns: 1fr;
       }
@@ -463,6 +517,10 @@
     @media (max-width: 640px) {
       .collection-head {
         display: grid;
+      }
+      .collection-switch-panel {
+        align-items: stretch;
+        flex-direction: column;
       }
       .dashboard-progress-actions {
         justify-content: flex-start;
@@ -717,7 +775,11 @@
 
   async function startShopCollection(phase) {
     if (state.shopActionInFlight) return;
-    const label = phase === "merchant_scan" ? "one-time merchant registry scan" : "wine-shop inventory refresh";
+    const label = phase === "overture"
+      ? "global Overture wine-shop discovery"
+      : phase === "merchant_scan"
+        ? "one-time merchant registry scan"
+        : "wine-shop inventory refresh";
     const password = window.prompt(`Enter the admin password to start the ${label}.`);
     if (!password) return;
     state.shopActionInFlight = true;
@@ -743,20 +805,22 @@
     }
   }
 
-  async function startGuideRecollection() {
+  async function startGuideRecollection(phase = "inventory") {
     if (state.guideActionInFlight) return;
-    const password = window.prompt("Enter the recollection password.");
+    const directory = phase === "directory";
+    const label = directory ? "restaurant directory update" : "restaurant wine-list scan";
+    const password = window.prompt(`Enter the admin password to start the ${label}.`);
     if (!password) return;
     state.guideActionInFlight = true;
     state.guideActionKind = "";
-    state.guideActionMessage = "Starting recollection...";
+    state.guideActionMessage = `Starting ${label}...`;
     renderCollection();
     try {
       const response = await fetch("/api/guide-collection", {
         method: "POST",
         headers: { "content-type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ password })
+        body: JSON.stringify({ password, phase })
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.ok === false) {
@@ -765,7 +829,7 @@
         return;
       }
       state.guideActionKind = "good";
-      state.guideActionMessage = payload.message || "Recollection started.";
+      state.guideActionMessage = payload.message || `${label} started.`;
       state.guideLoadedOnce = false;
       await loadGuideStats({ force: true });
       window.setTimeout(() => loadGuideStats({ force: true }), 2500);
@@ -1262,8 +1326,8 @@
     const none = number(summary.noWineList);
     const pending = number(summary.pending) + number(summary.missingWebsite);
     const errorCount = number(summary.errors || values.progress.errors);
-    const lastCollectionAt = payload.lastCollection?.finished_at || "";
-    const lastCollectionText = lastCollectionAt ? formatTime(lastCollectionAt) : "No completed collection yet";
+    const lastCollectionAt = payload.lastInventoryCollection?.finished_at || payload.lastCollection?.finished_at || "";
+    const lastCollectionText = lastCollectionAt ? formatTime(lastCollectionAt) : "Not scanned yet";
     const hasPhaseEta = progress.phaseEstimatedRemainingSeconds !== undefined
       && progress.phaseEstimatedRemainingSeconds !== null;
     const recentEta = hasPhaseEta ? null : recentPhaseEta(payload, progress);
@@ -1374,41 +1438,73 @@
 
   function renderCollection() {
     const root = ensureDataViews().collectionView;
+    if (state.collectionMode === "shops") renderShopCollection(root);
+    else renderRestaurantCollection(root);
+  }
+
+  function collectionSwitchMarkup() {
+    const restaurants = state.collectionMode === "restaurants";
+    return `<section class="dash-panel collection-switch-panel">
+      <div>
+        <p class="dash-kicker">Collection</p>
+        <h2>${html(restaurants ? "Restaurant wine lists" : "Wine-shop inventories")}</h2>
+        <p class="collection-stage-copy">First maintain the place directory, then scan the saved official websites for wine-list content.</p>
+      </div>
+      <div class="database-mode-control" aria-label="Collection type">
+        <button type="button" data-collection-mode="restaurants" class="${restaurants ? "active" : ""}">Restaurants</button>
+        <button type="button" data-collection-mode="shops" class="${restaurants ? "" : "active"}">Wine shops</button>
+      </div>
+    </section>`;
+  }
+
+  function renderRestaurantCollection(root) {
     const metrics = guideMetrics(state.guidePayload || {});
     const {
-      payload,
-      values,
-      summary,
-      progress,
-      savedLines,
-      parsedSources,
-      reviewSources,
-      found,
-      errorCount,
-      lastCollectionText,
-      etaText,
-      etaLabel,
-      collectionText,
-      progressTitle,
-      progressPillClass
+      payload, values, summary, progress, savedLines, parsedSources,
+      reviewSources, found, errorCount, lastCollectionText, etaText,
+      etaLabel, progressTitle, progressPillClass
     } = metrics;
+    const directoryRun = payload.lastDirectoryUpdate
+      || (payload.latestRuns || []).find((run) => String(run.sources_requested || "").includes("michelin"))
+      || {};
+    const inventoryRun = payload.lastInventoryCollection || {};
+    const directoryRunning = values.running && ["reading_guides", "saving_targets"].includes(progress.phase);
+    const inventoryRunning = values.running && !directoryRunning;
+    const directoryUpdated = directoryRun.finished_at ? formatTime(directoryRun.finished_at) : "Not updated yet";
+    const withWebsite = number(payload.counts?.withWebsite);
 
-    const cardsHtml = `<div class="dashboard-grid" data-dashboard-section="cards">
-      <div class="dashboard-card"><span>Collection</span><b>${html(values.status)}</b><small>${html(collectionText)}<br>DB updated ${html(lastCollectionText)}<br>Every other Monday 03:00 KST</small></div>
-      <div class="dashboard-card"><span>${html(values.running ? values.workLabel : "Progress")}</span><b>${html(values.percent.toFixed(1))}%</b><small>${html(values.workLabel)}: ${html(fmtInt(values.processed))} / ${html(fmtInt(values.total))}<br>${html(fmtInt(values.restaurantFinalized))} / ${html(fmtInt(values.restaurantTotal))} restaurants finalized</small></div>
-      <div class="dashboard-card"><span>Verified wine lists</span><b>${html(fmtInt(found))}</b><small>${html(fmtInt(parsedSources))} exact list sources, ${html(fmtInt(savedLines))} saved wine lines.</small></div>
-      <div class="dashboard-card"><span>Needs review</span><b>${html(fmtInt(number(summary.needsReview)))}</b><small>${html(fmtInt(reviewSources))} inconclusive sources / ${html(fmtInt(errorCount))} restaurant errors.</small></div>
+    const stagesHtml = `<div class="collection-stage-grid">
+      <section class="dash-panel collection-stage">
+        <p class="dash-kicker"><span class="collection-stage-number">1</span>Candidate directory</p>
+        <h2>Update restaurant candidates</h2>
+        <p class="collection-stage-copy">Save the current Michelin, La Liste, and World's 50 Best restaurants before scanning their websites.</p>
+        <div class="collection-metrics">
+          <div class="metric-box"><span>Restaurants saved</span><b>${html(fmtInt(payload.counts?.targets))}</b></div>
+          <div class="metric-box"><span>Website URLs</span><b>${html(fmtInt(withWebsite))}</b></div>
+          <div class="metric-box"><span>Guide sources</span><b>3</b></div>
+          <div class="metric-box"><span>Last update</span><b>${html(directoryUpdated)}</b></div>
+        </div>
+        <div class="collection-stage-schedule"><span>Recommended: once a year</span><button class="dashboard-refresh" type="button" data-start-guide-directory ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(directoryRunning ? "Updating..." : "Update candidates")}</button></div>
+      </section>
+      <section class="dash-panel collection-stage">
+        <p class="dash-kicker"><span class="collection-stage-number">2</span>Wine-list scan</p>
+        <h2>Scan restaurant websites</h2>
+        <p class="collection-stage-copy">Revisit saved websites, verify wine-list pages and files, and update searchable wine text.</p>
+        <div class="collection-metrics">
+          <div class="metric-box"><span>Restaurants scanned</span><b>${html(fmtInt(inventoryRunning ? values.processed : inventoryRun.websites_checked))} / ${html(fmtInt(inventoryRunning ? values.total : inventoryRun.target_count || payload.counts?.targets))}</b></div>
+          <div class="metric-box"><span>Verified lists</span><b>${html(fmtInt(found))}</b></div>
+          <div class="metric-box"><span>Saved wine lines</span><b>${html(fmtInt(savedLines))}</b></div>
+          <div class="metric-box"><span>Last scan</span><b>${html(lastCollectionText)}</b></div>
+        </div>
+        <div class="collection-stage-schedule"><span>Every 2 weeks</span><button class="dashboard-refresh" type="button" data-start-guide-collection ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(inventoryRunning ? "Scanning..." : "Scan wine lists")}</button></div>
+      </section>
     </div>`;
 
     const progressHtml = `<section class="dash-panel" data-dashboard-section="progress">
       <div class="collection-head">
-        <div>
-          <p class="dash-kicker">Collect progress</p>
-          <h2>${html(progressTitle)}</h2>
-        </div>
+        <div><p class="dash-kicker">Current run</p><h2>${html(progressTitle)}</h2></div>
         <div class="selected-target-actions dashboard-progress-actions">
           <span class="dash-pill ${progressPillClass}">${html(values.status)}</span>
-          <button class="dashboard-refresh" type="button" data-start-guide-collection ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(state.guideActionInFlight ? "Starting..." : "Start recollection")}</button>
           <button class="dashboard-refresh" type="button" data-refresh-collection ${state.guideLoadInFlight ? "disabled" : ""}>${html(state.guideLoadInFlight ? "Refreshing..." : "Refresh")}</button>
           ${state.guideActionMessage ? `<span class="dashboard-action-note ${html(state.guideActionKind)}">${html(state.guideActionMessage)}</span>` : ""}
           ${state.lastRefreshAt ? `<span class="dashboard-action-note">Last refreshed ${html(state.lastRefreshAt)}</span>` : ""}
@@ -1417,51 +1513,78 @@
       <div class="dash-progress" style="--dash-progress:${html(values.percent)}%"><i></i></div>
       <div class="collection-metrics">
         <div class="metric-box"><span>${html(values.workLabel)}</span><b>${html(fmtInt(values.processed))} / ${html(fmtInt(values.total))}</b></div>
-        <div class="metric-box"><span>Restaurants finalized</span><b>${html(fmtInt(values.restaurantFinalized))} / ${html(fmtInt(values.restaurantTotal))}</b></div>
         <div class="metric-box"><span>Elapsed</span><b>${html(formatDuration(values.elapsed))}</b></div>
         <div class="metric-box"><span>${values.running ? etaLabel : "Total time"}</span><b>${html(etaText)}</b></div>
         <div class="metric-box"><span>Current restaurant</span><b>${html(progress.currentTarget || "-")}</b></div>
+        <div class="metric-box"><span>Needs review</span><b>${html(fmtInt(number(summary.needsReview)))}</b></div>
         <div class="metric-box"><span>Errors</span><b>${html(fmtInt(errorCount))}</b></div>
       </div>
+      <p class="dashboard-action-note">${html(fmtInt(parsedSources))} exact sources verified; ${html(fmtInt(reviewSources))} inconclusive sources remain.</p>
     </section>`;
+    root.innerHTML = `${collectionSwitchMarkup()}${stagesHtml}${progressHtml}${resourcePanelMarkup(payload)}`;
+  }
 
-    const resourcesHtml = resourcePanelMarkup(payload);
+  function renderShopCollection(root) {
     const shop = state.shopPayload || {};
-    const shopProgress = shop.progress || {};
-    const shopCounts = shop.counts || {};
-    const shopRunning = Boolean(shop.running?.merchantScan || shop.running?.inventory || shopProgress.status === "running");
-    const shopChecked = number(shopProgress.checked || shopCounts.idsChecked);
-    const shopTotal = number(shopProgress.total || (shopProgress.rangeEnd && shopProgress.rangeStart
-      ? shopProgress.rangeEnd - shopProgress.rangeStart + 1
-      : 239994));
-    const shopPercent = shopTotal ? Math.min(100, (shopChecked / shopTotal) * 100) : 0;
-    const shopStatusMessage = String(shopProgress.message || "").trim();
-    const shopCollectionHtml = `<section class="dash-panel" data-dashboard-section="shop-collection">
-      <div class="collection-head">
-        <div>
-          <p class="dash-kicker">Wine shop database</p>
-          <h2>Merchant and inventory collection</h2>
+    const progress = shop.progress || {};
+    const counts = shop.counts || {};
+    const discoveryRun = (shop.latestDiscoveryRuns || [])[0] || {};
+    const inventoryRun = (shop.latestRuns || []).find((run) => run.phase === "inventory") || (shop.latestRuns || [])[0] || {};
+    const overtureRunning = Boolean(shop.running?.overture || (progress.status === "running" && progress.phase === "overture_discovery"));
+    const inventoryRunning = Boolean(shop.running?.inventory || (progress.status === "running" && progress.phase === "inventory"));
+    const anyRunning = overtureRunning || inventoryRunning || Boolean(shop.running?.merchantScan);
+    const checked = number(inventoryRunning ? progress.checked : (inventoryRun.checked || inventoryRun.processed));
+    const total = number(inventoryRunning ? progress.total : (inventoryRun.total || counts.withWebsite));
+    const percent = total ? Math.min(100, (checked / total) * 100) : 0;
+    const discoveryUpdated = discoveryRun.finished_at ? formatTime(discoveryRun.finished_at) : "Not imported yet";
+    const inventoryUpdated = inventoryRun.finished_at ? formatTime(inventoryRun.finished_at) : "Not scanned yet";
+
+    const stagesHtml = `<div class="collection-stage-grid">
+      <section class="dash-panel collection-stage">
+        <p class="dash-kicker"><span class="collection-stage-number">1</span>Candidate directory</p>
+        <h2>Update global wine shops</h2>
+        <p class="collection-stage-copy">Import global retail candidates and available website URLs from the latest Overture Places release.</p>
+        <div class="collection-metrics">
+          <div class="metric-box"><span>Shop candidates</span><b>${html(fmtInt(counts.overturePlaces))}</b></div>
+          <div class="metric-box"><span>Website candidates</span><b>${html(fmtInt(counts.overtureWebsites))}</b></div>
+          <div class="metric-box"><span>Overture release</span><b>${html(discoveryRun.provider_release || "-")}</b></div>
+          <div class="metric-box"><span>Last update</span><b>${html(discoveryUpdated)}</b></div>
         </div>
+        <div class="collection-stage-schedule"><span>When a new monthly release is available</span><button class="dashboard-refresh" type="button" data-start-shop-collection="overture" ${anyRunning || state.shopActionInFlight ? "disabled" : ""}>${html(overtureRunning ? "Importing..." : "Update shop directory")}</button></div>
+      </section>
+      <section class="dash-panel collection-stage">
+        <p class="dash-kicker"><span class="collection-stage-number">2</span>Inventory scan</p>
+        <h2>Scan wine-shop websites</h2>
+        <p class="collection-stage-copy">Visit saved shop websites, find catalogue pages or files, and save searchable product text.</p>
+        <div class="collection-metrics">
+          <div class="metric-box"><span>Websites ready</span><b>${html(fmtInt(counts.withWebsite))}</b></div>
+          <div class="metric-box"><span>Inventories found</span><b>${html(fmtInt(counts.inventoryFound))}</b></div>
+          <div class="metric-box"><span>Searchable products</span><b>${html(fmtInt(counts.products))}</b></div>
+          <div class="metric-box"><span>Last scan</span><b>${html(inventoryUpdated)}</b></div>
+        </div>
+        <div class="collection-stage-schedule"><span>Every 2 weeks</span><button class="dashboard-refresh" type="button" data-start-shop-collection="inventory" ${anyRunning || state.shopActionInFlight || !number(counts.withWebsite) ? "disabled" : ""}>${html(inventoryRunning ? "Scanning..." : "Scan shop inventories")}</button></div>
+      </section>
+    </div>`;
+
+    const progressHtml = `<section class="dash-panel" data-dashboard-section="shop-collection">
+      <div class="collection-head">
+        <div><p class="dash-kicker">Current run</p><h2>${html(anyRunning ? (overtureRunning ? "Updating wine-shop candidates" : "Scanning wine-shop inventories") : "Wine-shop collection status")}</h2></div>
         <div class="selected-target-actions dashboard-progress-actions">
-          <span class="dash-pill ${shopRunning ? "good" : ""}">${html(shopRunning ? "Collecting" : (shopProgress.status || "Ready"))}</span>
-          <a class="dashboard-refresh" href="/downloads/wine-searcher-browser-collector.zip">Download Chrome collector</a>
-          <button class="dashboard-refresh" type="button" data-start-shop-collection="inventory" ${shopRunning || state.shopActionInFlight || !number(shopCounts.withWebsite) ? "disabled" : ""}>Refresh inventories</button>
+          <span class="dash-pill ${anyRunning ? "good" : ""}">${html(anyRunning ? "Collecting" : (progress.status || "Ready"))}</span>
+          <button class="dashboard-refresh" type="button" data-refresh-collection ${state.guideLoadInFlight ? "disabled" : ""}>Refresh</button>
           ${state.shopActionMessage ? `<span class="dashboard-action-note">${html(state.shopActionMessage)}</span>` : ""}
         </div>
       </div>
-      ${shopStatusMessage ? `<div class="dashboard-action-note ${shopProgress.status === "blocked" ? "warn" : ""}">${html(shopStatusMessage)}</div>` : ""}
-      <div class="dashboard-action-note">Merchant profiles are collected in one normal Chrome tab. Human verification is completed manually and is never automated.</div>
-      <div class="dash-progress" style="--dash-progress:${html(shopPercent)}%"><i></i></div>
+      ${progress.message ? `<p class="dashboard-action-note">${html(progress.message)}</p>` : ""}
+      <div class="dash-progress" style="--dash-progress:${html(overtureRunning ? 0 : percent)}%"><i></i></div>
       <div class="collection-metrics">
-        <div class="metric-box"><span>Merchant IDs checked</span><b>${html(fmtInt(shopCounts.idsChecked))}</b></div>
-        <div class="metric-box"><span>Merchants saved</span><b>${html(fmtInt(shopCounts.merchants))}</b></div>
-        <div class="metric-box"><span>Official websites</span><b>${html(fmtInt(shopCounts.withWebsite))}</b></div>
-        <div class="metric-box"><span>Inventories found</span><b>${html(fmtInt(shopCounts.inventoryFound))}</b></div>
-        <div class="metric-box"><span>Products searchable</span><b>${html(fmtInt(shopCounts.products))}</b></div>
-        <div class="metric-box"><span>Needs review</span><b>${html(fmtInt(shopCounts.openReviews))}</b></div>
+        <div class="metric-box"><span>${html(overtureRunning ? "Candidates saved" : "Websites checked")}</span><b>${html(fmtInt(overtureRunning ? progress.candidates : checked))}${overtureRunning || !total ? "" : ` / ${html(fmtInt(total))}`}</b></div>
+        <div class="metric-box"><span>Shops saved</span><b>${html(fmtInt(counts.merchants))}</b></div>
+        <div class="metric-box"><span>Inventory sources</span><b>${html(fmtInt(counts.sources))}</b></div>
+        <div class="metric-box"><span>Needs review</span><b>${html(fmtInt(counts.openReviews))}</b></div>
       </div>
     </section>`;
-    root.innerHTML = `${cardsHtml}${progressHtml}${shopCollectionHtml}${resourcesHtml}`;
+    root.innerHTML = `${collectionSwitchMarkup()}${stagesHtml}${progressHtml}`;
   }
 
   function renderActiveGuideView() {
@@ -1519,13 +1642,25 @@
     document.body.addEventListener("click", (event) => {
       if (!event.target.closest("[data-start-guide-collection]")) return;
       event.preventDefault();
-      startGuideRecollection();
+      startGuideRecollection("inventory");
+    });
+    document.body.addEventListener("click", (event) => {
+      if (!event.target.closest("[data-start-guide-directory]")) return;
+      event.preventDefault();
+      startGuideRecollection("directory");
     });
     document.body.addEventListener("click", (event) => {
       const button = event.target.closest("[data-start-shop-collection]");
       if (!button) return;
       event.preventDefault();
       startShopCollection(button.dataset.startShopCollection);
+    });
+    document.body.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-collection-mode]");
+      if (!button || button.dataset.collectionMode === state.collectionMode) return;
+      event.preventDefault();
+      state.collectionMode = button.dataset.collectionMode;
+      renderCollection();
     });
     document.body.addEventListener("click", (event) => {
       const button = event.target.closest("[data-database-mode]");

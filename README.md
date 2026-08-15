@@ -359,3 +359,25 @@ Dashboard collection is already active. Check the schedule and recent logs with:
 systemctl list-timers whereiskelley-weekly.timer
 journalctl -u whereiskelley-weekly.service -n 100 --no-pager
 ```
+
+Restaurant collection has two independent stages in the Collection view:
+
+- **Candidate directory:** refresh Michelin, La Liste, and World's 50 Best restaurant candidates about once a year. This updates the restaurant set; it does not scan wine lists.
+- **Wine-list scan:** revisit the saved restaurant websites every 14 days and update verified HTML/PDF wine-list sources and searchable text.
+
+Wine-shop collection follows the same two-stage model:
+
+- **Candidate directory:** import global retail candidates and available website URLs from the latest Overture Places release. Run this when Overture publishes a new monthly release.
+- **Inventory scan:** revisit the saved wine-shop websites every 14 days. The scan verifies catalogue pages or files and updates searchable products without redownloading the Overture directory.
+
+Install the wine-shop inventory timer after deployment:
+
+```bash
+cd /home/opc/whereiskelley
+bash scripts/install-shop-inventory-timer.sh
+```
+
+The timer checks every Monday at 04:00 KST and runs only when 14 days have
+passed since the previous wine-shop inventory scan. Overture candidate imports
+remain a separate manual action in the Collection view so a monthly source
+release cannot overwrite a running inventory scan.

@@ -1,0 +1,114 @@
+import importlib.util
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "collect_overture_wine_shops.py"
+SPEC = importlib.util.spec_from_file_location("overture_wine_shops", SCRIPT)
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
+
+
+class OvertureWineShopImportTests(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tempdir.name) / "shops.sqlite"
+        MODULE.ensure_shop_db(self.db_path)
+
+    def tearDown(self):
+        self.tempdir.cleanup()
+
+    def candidate(self, place_id="place-1", name="Kelley Fine Wines"):
+        candidate = {
+            "provider_place_id": place_id,
+            "name": name,
+            "candidate_reason": "retail_category",
+            "primary_category": "wine_shop",
+            "categories": {"primary": "wine_shop"},
+            "taxonomy": {},
+            "confidence": 0.95,
+            "operating_status": "open",
+            "country_code": "FR",
+            "region": "Ile-de-France",
+            "city": "Paris",
+            "postcode": "75001",
+            "address": "1 Rue du Vin",
+            "latitude": 48.86,
+            "longitude": 2.34,
+            "websites": ["https://example.test/shop"],
+            "phones": ["+33100000000"],
+            "socials": [],
+            "source_updated_at": "2026-08-01",
+        }
+        candidate["raw_hash"] = MODULE.stable_hash(candidate)
+        return candidate
+
+    def test_upsert_keeps_discovery_separate_from_verified_inventory(self):
+        con = MODULE.connect_shop(self.db_path)
+        try:
+            run_id = con.execute(
+                "insert into merchant_discovery_runs(provider,status) values('overture','running')"
+            ).lastrowid
+            outcome = MODULE.upsert_candidate(con, self.candidate(), run_id, "2026-07-22.0")
+            con.commit()
+
+            merchant = con.execute(
+                "select inventory_status, website_url from merchants"
+            ).fetchone()
+            place_source = con.execute(
+                "select provider, provider_release, active from merchant_place_sources"
+            ).fetchone()
+            inventory_sources = con.execute("select count(*) from merchant_sources").fetchone()[0]
+
+            self.assertEqual("inserted", outcome)
+            self.assertEqual("pending", merchant["inventory_status"])
+            self.assertEqual("https://example.test/shop", merchant["website_url"])
+            self.assertEqual(("overture", "2026-07-22.0", 1), tuple(place_source))
+            self.assertEqual(0, inventory_sources)
+        finally:
+            con.close()
+
+    def test_reimport_updates_same_place_instead_of_duplicating_it(self):
+        con = MODULE.connect_shop(self.db_path)
+        try:
+            first_run = con.execute(
+                "insert into merchant_discovery_runs(provider,status) values('overture','running')"
+            ).lastrowid
+            first = self.candidate()
+            MODULE.upsert_candidate(con, first, first_run, "2026-07-22.0")
+            second_run = con.execute(
+                "insert into merchant_discovery_runs(provider,status) values('overture','running')"
+            ).lastrowid
+            second = self.candidate()
+            second["city"] = "Lyon"
+            second["raw_hash"] = MODULE.stable_hash(second)
+            outcome = MODULE.upsert_candidate(con, second, second_run, "2026-08-19.0")
+            con.commit()
+
+            self.assertEqual("updated", outcome)
+            self.assertEqual(1, con.execute("select count(*) from merchants").fetchone()[0])
+            self.assertEqual(1, con.execute("select count(*) from merchant_place_sources").fetchone()[0])
+            row = con.execute(
+                "select provider_release, city, last_seen_run_id from merchant_place_sources"
+            ).fetchone()
+            self.assertEqual(("2026-08-19.0", "Lyon", second_run), tuple(row))
+        finally:
+            con.close()
+
+    def test_name_only_restaurant_is_not_a_shop_candidate(self):
+        row = {
+            "id": "restaurant-1",
+            "name": "Wine Garden Restaurant",
+            "old_primary": "restaurant",
+            "categories_json": "[]",
+            "basic_category": "restaurant",
+            "taxonomy_primary": "restaurant",
+            "taxonomy_json": "{}",
+        }
+        self.assertIsNone(MODULE.candidate_from_row(row))
+
+
+if __name__ == "__main__":
+    unittest.main()
