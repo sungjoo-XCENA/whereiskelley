@@ -73,9 +73,10 @@
       margin-top: 14px;
     }
     .database-mode-control {
-      display: inline-grid;
-      grid-template-columns: repeat(2, max-content);
-      gap: 2px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      width: 260px;
+      gap: 3px;
       padding: 3px;
       border: 1px solid #d9dee7;
       border-radius: 8px;
@@ -86,28 +87,16 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 7px;
-      min-height: 32px;
-      padding: 0 11px;
+      min-height: 38px;
+      padding: 0 16px;
       border: 1px solid transparent;
       border-radius: 6px;
       background: transparent;
       color: #5d687a;
-      font-size: 12px;
-      font-weight: 750;
+      font-size: 14px;
+      font-weight: 800;
       cursor: pointer;
       transition: color 140ms ease, background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
-    }
-    .database-mode-control button::before {
-      content: "";
-      width: 7px;
-      height: 7px;
-      flex: 0 0 7px;
-      border-radius: 50%;
-      background: #7c8798;
-    }
-    .database-mode-control button[data-database-mode="shops"]::before {
-      background: var(--red);
     }
     .database-mode-control button:hover:not(.active) {
       color: #111418;
@@ -118,26 +107,29 @@
       outline-offset: 2px;
     }
     .database-mode-control button.active {
-      border-color: #dfe3ea;
-      background: #fff;
-      color: #111418;
-      box-shadow: 0 1px 3px rgba(17, 20, 24, 0.12);
+      border-color: #111827;
+      background: #111827;
+      color: #fff;
+      box-shadow: 0 1px 3px rgba(17, 20, 24, 0.18);
     }
-    .database-title-row {
+    .database-map-header {
       display: flex;
-      align-items: center;
+      align-items: flex-end;
+      justify-content: space-between;
       flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 2px;
+      gap: 12px;
+      margin-bottom: 14px;
     }
-    .database-title-row h2 {
+    .database-map-header h2 {
       margin: 0;
     }
-    .database-mode-control.compact {
-      flex: 0 0 auto;
+    .database-map-titlebar {
+      display: flex;
+      align-items: flex-end;
+      gap: 16px;
     }
-    .database-mode-control.compact button {
-      min-height: 31px;
+    .database-map-header .map-legend {
+      margin: 0 0 3px;
     }
     .database-summary-copy {
       margin: 7px 0 14px;
@@ -978,6 +970,18 @@
       }
     }
     @media (max-width: 640px) {
+      .database-map-header,
+      .database-map-titlebar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .database-map-titlebar,
+      .database-mode-control {
+        width: 100%;
+      }
+      .database-map-titlebar {
+        gap: 10px;
+      }
       .collection-head {
         display: grid;
       }
@@ -1988,15 +1992,15 @@
     const noun = state.databaseMode === "shops" ? "wine shops" : "restaurants";
 
     const mapHtml = `<section class="dash-panel" data-dashboard-section="map">
-      <div class="collection-head">
-        <div>
-          <p class="dash-kicker">Built database</p>
-          <div class="database-title-row">
+      <div class="database-map-header">
+        <div class="database-map-titlebar">
+          <div>
+            <p class="dash-kicker">Built database</p>
             <h2>Database map</h2>
-            <div class="database-mode-control compact" role="tablist" aria-label="Database type">
-              <button type="button" role="tab" aria-selected="${state.databaseMode === "restaurants"}" data-database-mode="restaurants" class="${state.databaseMode === "restaurants" ? "active" : ""}">Restaurants</button>
-              <button type="button" role="tab" aria-selected="${state.databaseMode === "shops"}" data-database-mode="shops" class="${state.databaseMode === "shops" ? "active" : ""}">Wine shops</button>
-            </div>
+          </div>
+          <div class="database-mode-control" role="tablist" aria-label="Database type">
+            <button type="button" role="tab" aria-selected="${state.databaseMode === "restaurants"}" data-database-mode="restaurants" class="${state.databaseMode === "restaurants" ? "active" : ""}">Restaurants</button>
+            <button type="button" role="tab" aria-selected="${state.databaseMode === "shops"}" data-database-mode="shops" class="${state.databaseMode === "shops" ? "active" : ""}">Wine shops</button>
           </div>
         </div>
         <div class="map-legend">

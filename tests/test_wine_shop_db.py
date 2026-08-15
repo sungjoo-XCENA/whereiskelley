@@ -2,10 +2,55 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from wine_shop_db import connect_shop, ensure_shop_db, search_shop_products, upsert_product, utc_now
+from wine_shop_db import (
+    connect_shop,
+    ensure_shop_db,
+    search_shop_products,
+    shop_collection_status,
+    upsert_product,
+    utc_now,
+)
 
 
 class WineShopDatabaseTests(unittest.TestCase):
+    def test_map_only_includes_inventory_checked_shops_with_valid_locations(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "shops.sqlite"
+            ensure_shop_db(db_path)
+            con = connect_shop(db_path)
+            try:
+                con.executemany(
+                    """
+                    insert into merchants(
+                      name,normalized_name,website_url,country,city,address,
+                      latitude,longitude,last_inventory_checked_at,inventory_status
+                    ) values(?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    [
+                        (
+                            "Checked Wine Shop", "checked wine shop", "https://checked.example",
+                            "France", "Paris", "Paris, France", 48.8566, 2.3522,
+                            utc_now(), "review",
+                        ),
+                        (
+                            "Candidate Only", "candidate only", "https://candidate.example",
+                            "France", "Lyon", "Lyon, France", 45.7640, 4.8357,
+                            None, "pending",
+                        ),
+                        (
+                            "Bad Antarctic Candidate", "bad antarctic candidate", "https://bad.example",
+                            "AQ", None, "AQ", -80.7606, -144.8438,
+                            utc_now(), "review",
+                        ),
+                    ],
+                )
+                con.commit()
+            finally:
+                con.close()
+
+            payload = shop_collection_status(path=db_path)
+            self.assertEqual([row["name"] for row in payload["mapMerchants"]], ["Checked Wine Shop"])
+
     def test_product_is_searchable_in_integrated_result_shape(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "shops.sqlite"

@@ -127,7 +127,11 @@ def shop_collection_status(path=None, map_limit=6000):
                 from merchants m
                 left join merchant_sources s on s.merchant_id=m.id
                 left join merchant_products p on p.merchant_id=m.id and p.active=1
-                where m.active=1 and m.latitude is not null and m.longitude is not null
+                where m.active=1
+                  and m.last_inventory_checked_at is not null
+                  and m.latitude between -60 and 85
+                  and m.longitude between -180 and 180
+                  and upper(trim(coalesce(m.country, ''))) not in ('AQ', 'ANTARCTICA')
                 group by m.id
                 order by m.id
                 limit ?
