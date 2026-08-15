@@ -1,8 +1,15 @@
+import base64
+import io
+import json
+import sys
 import tempfile
+import types
 import unittest
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
+from unittest.mock import patch
 
 from scripts.wine_shop_collect import (
     external_website,
@@ -13,6 +20,11 @@ from scripts.wine_shop_collect import (
     DomainSlots,
     RobotsPolicy,
     AccessCircuit,
+    corksy_config_from_html,
+    corksy_products_from_payload,
+    parse_csv_products,
+    parse_pdf_products,
+    parse_xlsx_products,
     save_inventory_result,
 )
 from wine_shop_db import connect_shop, ensure_shop_db, upsert_product
@@ -121,6 +133,136 @@ class WineShopCollectorTests(unittest.TestCase):
         )
         self.assertEqual(len(products), 1)
         self.assertIsNone(products[0]["price_value"])
+
+    def test_corksy_widget_config_and_products_are_structured(self):
+        widget = base64.b64encode(json.dumps({
+            "collectionId": "71b2a32c-b972-4a27-bd0c-3ea8dc97cc6a",
+        }).encode()).decode()
+        html = f"""
+        <script>window.Parameters = {{ExternalUid: 'public-app-key'}};</script>
+        <div data-widget-config="{widget}"></div><script src="gocorksy-products.js"></script>
+        """
+        config = corksy_config_from_html(html)
+        self.assertEqual(config["app_key"], "public-app-key")
+        self.assertEqual(config["collection_ids"], ["71b2a32c-b972-4a27-bd0c-3ea8dc97cc6a"])
+        payload = {
+            "data": {"searchVariantsV2": {"totalCount": 1, "nodes": [{
+                "productId": "product-1", "productName": "Volcano Rosé 750ml",
+                "pageItemUrl": "volcano-rose-750ml",
+                "product": {"nodes": [{"variants": {"nodes": [{
+                    "id": "variant-1", "name": "750 ml", "price": "30.00",
+                    "discountPrice": "0.00", "pageItemUrl": "volcano-rose-750ml",
+                    "available": "10",
+                }]}}]},
+            }]}}
+        }
+        products, total = corksy_products_from_payload(payload, "https://volcanowinery.com/wines")
+        self.assertEqual(total, 1)
+        self.assertEqual(products[0]["price_value"], 30.0)
+        self.assertEqual(products[0]["currency"], "USD")
+        self.assertEqual(products[0]["source_url"], "https://volcanowinery.com/wine/volcano-rose-750ml")
+
+    def test_dynamic_corksy_catalog_is_crawled_end_to_end(self):
+        widget = base64.b64encode(json.dumps({"collectionId": "collection-1"}).encode()).decode()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/robots.txt":
+                    body, content_type = b"User-agent: *\nAllow: /\n", "text/plain"
+                elif self.path == "/":
+                    body, content_type = b'<a href="/wines">Wines</a>', "text/html"
+                elif self.path == "/wines":
+                    body = (
+                        f"<script>window.Parameters={{ExternalUid:'app-key'}};</script>"
+                        f"<div data-widget-config=\"{widget}\"></div>"
+                        '<script src="gocorksy-products.js"></script>'
+                    ).encode()
+                    content_type = "text/html"
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("content-type", content_type)
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                return
+
+        login = {"status": 200, "body": json.dumps({"accessToken": "token"}).encode()}
+        graph = {"status": 200, "body": json.dumps({
+            "data": {"searchVariantsV2": {"totalCount": 1, "nodes": [{
+                "productId": "p1", "productName": "Volcano Rosé 750ml",
+                "pageItemUrl": "volcano-rose-750ml",
+                "product": {"nodes": [{"variants": {"nodes": [{
+                    "id": "v1", "name": "Default", "price": "30.00",
+                    "discountPrice": "0.00", "pageItemUrl": "volcano-rose-750ml",
+                    "available": "5",
+                }]}}]},
+            }]}}
+        }).encode()}
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{server.server_port}"
+            slots = DomainSlots(2)
+            with patch("scripts.wine_shop_collect.post_json", side_effect=[login, graph]):
+                result = crawl_merchant_inventory(
+                    {"id": 1, "website_url": base}, max_pages=5, max_depth=2,
+                    domain_slots=slots, robots=RobotsPolicy(slots),
+                )
+            self.assertEqual(result["status"], "found")
+            self.assertEqual(result["sources"][0]["platform"], "corksy")
+            products = [item for items in result["products"].values() for item in items]
+            self.assertEqual(len(products), 1)
+            self.assertEqual(products[0]["raw_name"], "Volcano Rosé 750ml")
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_pdf_csv_and_xlsx_price_lists_remain_supported(self):
+        fake_reader = types.SimpleNamespace(
+            pages=[types.SimpleNamespace(extract_text=lambda: "2011 Chateau Rayas Chateauneuf du Pape EUR 1,700")]
+        )
+        fake_module = types.SimpleNamespace(PdfReader=lambda _stream: fake_reader)
+        with patch.dict(sys.modules, {"pypdf": fake_module}):
+            pdf_products, error = parse_pdf_products(b"pdf", "https://shop.test/list.pdf")
+        self.assertFalse(error)
+        self.assertEqual(pdf_products[0]["price_value"], 1700.0)
+
+        csv_products = parse_csv_products(
+            b"2011,Chateau Rayas,Chateauneuf du Pape,EUR 1700\n",
+            "https://shop.test/list.csv",
+        )
+        self.assertEqual(csv_products[0]["currency"], "EUR")
+
+        shared = b'<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>2011 Chateau Rayas Chateauneuf du Pape EUR 1700</t></si></sst>'
+        sheet = b'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row><c t="s"><v>0</v></c></row></sheetData></worksheet>'
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr("xl/sharedStrings.xml", shared)
+            archive.writestr("xl/worksheets/sheet1.xml", sheet)
+        xlsx_products = parse_xlsx_products(stream.getvalue(), "https://shop.test/list.xlsx")
+        self.assertEqual(xlsx_products[0]["price_value"], 1700.0)
+
+    def test_script_or_long_prose_is_not_saved_as_a_product(self):
+        self.assertIsNone(product_from_text(
+            "window.document function() Burgundy 2021 EUR 1000 schema.org",
+            "https://merchant.test/wines",
+        ))
+        self.assertIsNone(product_from_text(
+            "At the vineyard's high elevation, we see wintertime temperatures drop to around 38 degrees "
+            "which is low enough to satisfy the grapes chill hour requirements of a cumulative 150 hours "
+            "below 45 degrees. In the summer, temperatures warm to the high 70s, perfect for ripening our "
+            "Pinot noir, Symphony, Syrah and Cayuga White grapes.",
+            "https://merchant.test/vineyard",
+        ))
+        self.assertIsNone(product_from_text(
+            "In late 2007 the winery decided to expand the vineyard further to include the vinifera vines "
+            "Pinot noir and Syrah.",
+            "https://merchant.test/vineyard",
+        ))
 
     def test_official_site_html_inventory_is_crawled_end_to_end(self):
         class Handler(BaseHTTPRequestHandler):

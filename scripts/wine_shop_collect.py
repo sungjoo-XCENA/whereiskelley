@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import base64
 import csv
 import hashlib
 import heapq
@@ -253,7 +254,10 @@ def atomic_progress(payload):
     temp.replace(PROGRESS_PATH)
 
 
-def fetch_url(url, timeout=20, limiter=None, headers=None, domain_slots=None, robots=None, obey_robots=True):
+def fetch_url(
+    url, timeout=20, limiter=None, headers=None, domain_slots=None, robots=None,
+    obey_robots=True, method="GET", data=None,
+):
     if obey_robots and robots is not None and not robots.allowed(url):
         return {
             "status": 0,
@@ -271,7 +275,7 @@ def fetch_url(url, timeout=20, limiter=None, headers=None, domain_slots=None, ro
         "Accept-Language": "en-US,en;q=0.8",
     }
     request_headers.update(headers or {})
-    request = Request(url, headers=request_headers)
+    request = Request(url, headers=request_headers, data=data, method=method)
     status = 0
     slot = domain_slots.for_url(url) if domain_slots else None
     try:
@@ -301,6 +305,20 @@ def fetch_url(url, timeout=20, limiter=None, headers=None, domain_slots=None, ro
     if limiter:
         limiter.result(result["status"])
     return result
+
+
+def post_json(url, payload, timeout=25, headers=None, domain_slots=None):
+    request_headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    request_headers.update(headers or {})
+    return fetch_url(
+        url,
+        timeout=timeout,
+        headers=request_headers,
+        domain_slots=domain_slots,
+        obey_robots=False,
+        method="POST",
+        data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+    )
 
 
 def iter_json_nodes(value):
@@ -641,16 +659,36 @@ def price_match_from_text(text):
     return None
 
 
-def product_from_text(text, source_url, source_key="", structured=False):
+def product_from_text(text, source_url, source_key="", structured=False, trusted_catalog=False):
     clean = " ".join(str(text or "").split()).strip()
     if len(clean) < 5:
         return None
     folded = fold_text(clean)
-    if not any(term in folded for term in WINE_EVIDENCE):
+    if not trusted_catalog and not any(term in folded for term in WINE_EVIDENCE):
         return None
+    if not structured:
+        # A single catalogue row is compact. Long sentence-shaped blocks are
+        # usually editorial copy where a temperature, year, or address was
+        # mistaken for a price.
+        if len(clean) > 240 or len(clean.split()) > 38:
+            return None
+        if any(marker in folded for marker in (
+            "window.", "document.", "function(", "webpack", "application/ld+json",
+            "schema.org", "javascript:",
+        )):
+            return None
     price_match = price_match_from_text(clean)
     vintage_match = VINTAGE_RE.search(clean)
     if not structured and not price_match and not vintage_match:
+        return None
+    if not structured and not price_match and len(clean) > 180:
+        return None
+    if (
+        not structured
+        and not price_match
+        and len(clean.split()) >= 12
+        and clean.endswith((".", "!", "?"))
+    ):
         return None
     price_value = number_value(price_match.group(2)) if price_match else None
     currency = currency_code((price_match.group(1) or price_match.group(3)) if price_match else "")
@@ -669,6 +707,124 @@ def product_from_text(text, source_url, source_key="", structured=False):
         "availability": "listed",
         "raw_text": clean[:4000],
     }
+
+
+def corksy_config_from_html(html):
+    folded = fold_text(html[:250000])
+    if "corksy" not in folded and "data-widget-config" not in folded:
+        return None
+    app_match = re.search(r"ExternalUid\s*:\s*['\"]([^'\"]+)['\"]", html, re.I)
+    if not app_match:
+        return None
+    collection_ids = []
+    for encoded in re.findall(r"data-widget-config\s*=\s*['\"]([^'\"]+)['\"]", html, re.I):
+        try:
+            raw = unescape(encoded).strip()
+            raw += "=" * (-len(raw) % 4)
+            config = json.loads(base64.b64decode(raw).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        collection_id = str(config.get("collectionId") or "").strip()
+        if collection_id and collection_id not in collection_ids:
+            collection_ids.append(collection_id)
+    if not collection_ids:
+        return None
+    return {"app_key": app_match.group(1), "collection_ids": collection_ids}
+
+
+def corksy_products_from_payload(payload, catalog_url):
+    search = ((payload.get("data") or {}).get("searchVariantsV2") or {})
+    products = []
+    for row in search.get("nodes") or []:
+        name = str(row.get("productName") or "").strip()
+        product_nodes = ((row.get("product") or {}).get("nodes") or [])
+        variants = (product_nodes[0].get("variants") or {}).get("nodes") if product_nodes else []
+        variants = variants or [{}]
+        for variant in variants:
+            variant_name = str(variant.get("name") or "").strip()
+            compact_name = re.sub(r"\W+", "", fold_text(name))
+            compact_variant = re.sub(r"\W+", "", fold_text(variant_name))
+            include_variant = (
+                variant_name
+                and variant_name.lower() != "default"
+                and compact_variant not in compact_name
+            )
+            display_name = " ".join(
+                value for value in (name, variant_name if include_variant else "") if value
+            )
+            slug = str(variant.get("pageItemUrl") or row.get("pageItemUrl") or "").strip("/")
+            product_url = urljoin(catalog_url, f"/wine/{slug}") if slug else catalog_url
+            product = product_from_text(
+                display_name,
+                product_url,
+                str(variant.get("id") or row.get("productId") or content_hash(display_name)),
+                structured=True,
+                trusted_catalog=True,
+            )
+            if not product:
+                continue
+            regular_price = number_value(variant.get("price"))
+            discount_price = number_value(variant.get("discountPrice"))
+            price = discount_price if discount_price and discount_price > 0 else regular_price
+            product["price_value"] = price
+            product["currency"] = "USD"
+            product["price_text"] = f"USD {price:g}" if price is not None else ""
+            available = number_value(variant.get("available"))
+            product["availability"] = "in_stock" if available is None or available > 0 else "out_of_stock"
+            products.append(product)
+    return products, int(search.get("totalCount") or len(products))
+
+
+def corksy_products(catalog_url, html, domain_slots=None, config=None):
+    config = config or corksy_config_from_html(html)
+    if not config:
+        return []
+    login = post_json(
+        "https://api.gocorksy.com/users/v1/auth/app/login",
+        {"appKey": config["app_key"]},
+        domain_slots=domain_slots,
+    )
+    if login["status"] != 200:
+        return []
+    try:
+        token = json.loads(login["body"].decode("utf-8"))["accessToken"]
+    except (KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
+        return []
+    query = """
+      query Search($offset:Int,$first:Int,$pCollectionId:UUID) {
+        searchVariantsV2(first:$first,offset:$offset,pCollectionId:$pCollectionId) {
+          nodes {
+            productId productName pageItemUrl
+            product { nodes { variants(filter:{deletedAt:{isNull:true}}) {
+              nodes { id price discountPrice pageItemUrl name available:shipAvailableForEcom }
+            } } }
+          }
+          totalCount
+        }
+      }
+    """
+    products = []
+    for collection_id in config["collection_ids"]:
+        offset = 0
+        while True:
+            response = post_json(
+                "https://graphql.gocorksy.com/graphql",
+                {"query": query, "variables": {"first": 100, "offset": offset, "pCollectionId": collection_id}},
+                headers={"Authorization": f"Bearer {token}"},
+                domain_slots=domain_slots,
+            )
+            if response["status"] != 200:
+                break
+            try:
+                payload = json.loads(response["body"].decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                break
+            page_products, total = corksy_products_from_payload(payload, catalog_url)
+            products.extend(page_products)
+            offset += 100
+            if offset >= total or not page_products:
+                break
+    return products
 
 
 def structured_products(nodes, page_url):
@@ -903,6 +1059,7 @@ def crawl_merchant_inventory(merchant, max_pages=160, max_depth=5, domain_slots=
     enqueue(100, 0, root_response["url"], root_response)
     enqueue(18, 1, urljoin(base, "/sitemap.xml"))
     seen = set()
+    corksy_catalogs = set()
     while queue and len(seen) < max_pages:
         _negative_priority, depth, _order, url, prefetched = heapq.heappop(queue)
         normalized_url = url.split("#", 1)[0]
@@ -922,6 +1079,8 @@ def crawl_merchant_inventory(merchant, max_pages=160, max_depth=5, domain_slots=
         final_url = response["url"]
         products = []
         source_type = "html"
+        source_platform = platform
+        is_corksy_source = False
         parser = None
         if "pdf" in content_type or final_url.lower().endswith(".pdf"):
             source_type = "pdf"
@@ -953,6 +1112,27 @@ def crawl_merchant_inventory(merchant, max_pages=160, max_depth=5, domain_slots=
             except Exception:
                 parser = None
             if parser:
+                corksy_config = corksy_config_from_html(html)
+                if not corksy_config and "data-widget-config" in html:
+                    expanded = fetch_url(
+                        final_url,
+                        timeout=22,
+                        headers={"Accept": "*/*", "Accept-Language": ""},
+                        domain_slots=domain_slots,
+                        robots=robots,
+                    )
+                    if expanded["status"] == 200:
+                        expanded_html = expanded["body"].decode("utf-8", errors="replace")
+                        corksy_config = corksy_config_from_html(expanded_html)
+                if corksy_config:
+                    catalog_key = (corksy_config["app_key"], tuple(corksy_config["collection_ids"]))
+                    if catalog_key not in corksy_catalogs:
+                        corksy_catalogs.add(catalog_key)
+                        catalog_products = corksy_products(final_url, html, domain_slots, corksy_config)
+                        if catalog_products:
+                            products.extend(catalog_products)
+                            source_platform = "corksy"
+                            is_corksy_source = True
                 products.extend(structured_products(parse_json_ld(parser), final_url))
                 if link_priority(final_url, "") > 0 or any(term in fold_text(" ".join(parser.text[:3000])) for term in WINE_EVIDENCE):
                     for line in visible_lines(parser):
@@ -964,7 +1144,9 @@ def crawl_merchant_inventory(merchant, max_pages=160, max_depth=5, domain_slots=
             for product in products:
                 deduped[(product["source_key"], product.get("price_value"))] = product
             products = list(deduped.values())
-            sources.append({"url": final_url, "type": source_type, "platform": platform, "status": "found", "confidence": 0.95 if source_type != "html" else 0.8})
+            if is_corksy_source:
+                source_type = "json"
+            sources.append({"url": final_url, "type": source_type, "platform": source_platform, "status": "found", "confidence": 0.98 if is_corksy_source else 0.95 if source_type != "html" else 0.8})
             products_by_source[final_url] = products
         if parser and depth < max_depth:
             for href, label in parser.links:
@@ -1064,6 +1246,9 @@ def run_inventory(args):
     stale_before = (datetime.now(timezone.utc) - timedelta(days=args.stale_days)).isoformat(timespec="seconds")
     conditions = ["active=1", "website_url is not null", "trim(website_url)!=''"]
     params = []
+    if args.merchant_id:
+        conditions.append("id=?")
+        params.append(args.merchant_id)
     if args.resume:
         conditions.append("(last_inventory_checked_at is null or last_inventory_checked_at < ?)")
         params.append(stale_before)
@@ -1174,6 +1359,7 @@ def build_parser():
     inventory.add_argument("--stale-days", type=int, default=14)
     inventory.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
     inventory.add_argument("--limit", type=int, default=0)
+    inventory.add_argument("--merchant-id", type=int, default=0)
     return parser
 
 

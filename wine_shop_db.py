@@ -158,12 +158,15 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
         return []
     ensure_shop_db(path)
     con = connect_shop(path)
+    result_limit = max(1, min(int(limit), 5000))
+    candidate_limit = min(50000, max(2000, result_limit * 20))
     args = []
     filters = ["p.active=1", "m.active=1"]
-    fts_query = " AND ".join(f'"{token.replace(chr(34), chr(34) * 2)}"' for token in tokens)
-    join_fts = "join merchant_products_fts f on f.rowid=p.id"
-    filters.append("merchant_products_fts match ?")
+    fts_query = " OR ".join(f'"{token.replace(chr(34), chr(34) * 2)}"' for token in tokens)
+    merchant_matches = " or ".join("m.normalized_name like ?" for _ in tokens)
+    filters.append(f"(p.id in (select rowid from merchant_products_fts where merchant_products_fts match ?) or {merchant_matches})")
     args.append(fts_query)
+    args.extend(f"%{token}%" for token in tokens)
     if country:
         filters.append("lower(coalesce(m.country,''))=lower(?)")
         args.append(country)
@@ -173,13 +176,12 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
     if vintage:
         filters.append("(p.vintage=? or p.raw_text like ?)")
         args.extend([vintage, f"%{vintage}%"])
-    args.append(max(1, min(int(limit), 5000)))
+    args.append(candidate_limit)
     sql = f"""
       select p.*, m.name as merchant_name, m.merchant_type, m.country, m.city, m.address,
              m.latitude, m.longitude, m.website_url, m.wine_searcher_url,
              s.source_url as inventory_url, s.source_type, s.last_checked_at
       from merchant_products p
-      {join_fts}
       join merchants m on m.id=p.merchant_id
       join merchant_sources s on s.id=p.source_id
       where {' and '.join(filters)}
@@ -191,9 +193,11 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
     except sqlite3.OperationalError:
         fallback_filters = ["p.active=1", "m.active=1"]
         fallback_args = []
+        candidate_parts = []
         for token in tokens:
-            fallback_filters.append("p.normalized_text like ?")
-            fallback_args.append(f"%{token}%")
+            candidate_parts.extend(("p.normalized_text like ?", "m.normalized_name like ?"))
+            fallback_args.extend((f"%{token}%", f"%{token}%"))
+        fallback_filters.append("(" + " or ".join(candidate_parts) + ")")
         if country:
             fallback_filters.append("lower(coalesce(m.country,''))=lower(?)")
             fallback_args.append(country)
@@ -203,7 +207,7 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
         if vintage:
             fallback_filters.append("(p.vintage=? or p.raw_text like ?)")
             fallback_args.extend([vintage, f"%{vintage}%"])
-        fallback_args.append(max(1, min(int(limit), 5000)))
+        fallback_args.append(candidate_limit)
         rows = con.execute(
             f"""
             select p.*, m.name as merchant_name, m.merchant_type, m.country, m.city, m.address,
@@ -223,6 +227,12 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
 
     results = []
     for row in rows:
+        searchable = fold_text(" ".join(filter(None, (
+            row["merchant_name"], row["raw_name"], row["raw_text"], row["producer"],
+            row["wine_name"], row["region"],
+        ))))
+        if not all(token in searchable for token in tokens):
+            continue
         source_url = row["source_url"] or row["inventory_url"] or row["website_url"] or ""
         location_query = ", ".join(filter(None, (row["merchant_name"], row["address"], row["city"], row["country"])))
         price_text = (row["price_text"] or "").strip()
@@ -260,6 +270,8 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
                 "availabilityOnly": row["price_value"] is None,
             },
         })
+        if len(results) >= result_limit:
+            break
     return results
 
 
