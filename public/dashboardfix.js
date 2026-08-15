@@ -94,6 +94,27 @@
       background: #111418;
       color: #fff;
     }
+    .database-title-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 2px;
+    }
+    .database-title-row h2 {
+      margin: 0;
+    }
+    .database-mode-control.compact {
+      gap: 2px;
+      padding: 2px;
+      border-radius: 6px;
+    }
+    .database-mode-control.compact button {
+      min-height: 27px;
+      padding: 0 9px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
     .database-summary-copy {
       margin: 7px 0 14px;
       color: var(--muted);
@@ -109,6 +130,141 @@
     .collection-switch-panel h2,
     .collection-stage h2 {
       margin: 2px 0 0;
+    }
+    .collection-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      min-height: 72px;
+    }
+    .collection-toolbar h2 {
+      margin: 2px 0 0;
+    }
+    .collection-job-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+    .collection-job {
+      margin-top: 0;
+    }
+    .collection-job-head,
+    .collection-job-progress-head,
+    .collection-job-footer,
+    .resource-summary-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .collection-job-head h2 {
+      margin: 2px 0 0;
+    }
+    .collection-job-progress {
+      margin-top: 18px;
+    }
+    .collection-job-progress-head strong {
+      font-size: 22px;
+    }
+    .collection-job-progress-head span,
+    .collection-job-current,
+    .collection-job-footer small {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .collection-job-current {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 20px;
+      margin-top: -4px;
+    }
+    .collection-job-current b {
+      max-width: 68%;
+      overflow: hidden;
+      color: var(--ink);
+      text-align: right;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .collection-stat-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: 16px;
+      border-block: 1px solid var(--line);
+    }
+    .collection-stat {
+      min-width: 0;
+      padding: 13px 10px;
+      border-right: 1px solid var(--line);
+    }
+    .collection-stat:first-child {
+      padding-left: 0;
+    }
+    .collection-stat:last-child {
+      padding-right: 0;
+      border-right: 0;
+    }
+    .collection-stat span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .collection-stat b {
+      display: block;
+      margin-top: 6px;
+      overflow-wrap: anywhere;
+      font-size: 17px;
+      line-height: 1.15;
+    }
+    .collection-job-footer {
+      align-items: flex-end;
+      margin-top: 14px;
+    }
+    .collection-job-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .resource-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 22px;
+      margin-top: 16px;
+    }
+    .resource-summary-head b {
+      font-size: 20px;
+    }
+    .resource-summary-head span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .resource-meter {
+      height: 8px;
+      margin: 9px 0 7px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e5e7eb;
+    }
+    .resource-meter i {
+      display: block;
+      width: var(--resource-value, 0%);
+      height: 100%;
+      border-radius: inherit;
+      background: var(--resource-color, var(--accent));
+    }
+    .resource-summary-item small {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
     }
     .collection-stage-grid {
       display: grid;
@@ -583,6 +739,7 @@
     @media (max-width: 980px) {
       .dashboard-grid,
       .dashboard-split,
+      .collection-job-grid,
       .collection-stage-grid,
       .collection-pipeline,
       .resource-grid {
@@ -601,6 +758,10 @@
         align-items: stretch;
         flex-direction: column;
       }
+      .collection-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
       .dashboard-progress-actions {
         justify-content: flex-start;
         margin-left: 0;
@@ -609,6 +770,30 @@
       }
       .collection-metrics,
       .db-health-grid {
+        grid-template-columns: 1fr;
+      }
+      .collection-stat-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .collection-stat:nth-child(2) {
+        border-right: 0;
+      }
+      .collection-stat:nth-child(n + 3) {
+        border-top: 1px solid var(--line);
+      }
+      .collection-job-footer,
+      .collection-job-current {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .collection-job-current b {
+        max-width: 100%;
+        text-align: left;
+      }
+      .collection-job-actions {
+        justify-content: flex-start;
+      }
+      .resource-summary-grid {
         grid-template-columns: 1fr;
       }
       .dashboard-map-wrap {
@@ -765,7 +950,7 @@
     </svg>`;
   }
 
-  function resourcePanelMarkup(payload, options = {}) {
+  function legacyResourcePanelMarkup(payload, options = {}) {
     const samples = chartSamples(payload);
     const latest = latestSample(samples);
     const cpu = Number.isFinite(Number(latest.cpuPercent)) ? `${number(latest.cpuPercent).toFixed(1)}%` : "-";
@@ -834,6 +1019,58 @@
         </article>
       </div>
     </section>`;
+  }
+
+  function resourcePanelMarkup(payload) {
+    const latest = latestSample(chartSamples(payload));
+    const values = [
+      {
+        label: "CPU",
+        percent: Number.isFinite(Number(latest.cpuPercent)) ? number(latest.cpuPercent) : null,
+        detail: Number.isFinite(Number(latest.collectorCpuPercent))
+          ? `Collector ${number(latest.collectorCpuPercent).toFixed(1)}%`
+          : `${fmtInt(latest.cores || 0)} cores`,
+        color: "#b0123f"
+      },
+      {
+        label: "Memory",
+        percent: Number.isFinite(Number(latest.memoryPercent)) ? number(latest.memoryPercent) : null,
+        detail: latest.memoryTotalBytes
+          ? `${formatBytes(latest.memoryUsedBytes)} / ${formatBytes(latest.memoryTotalBytes)}`
+          : "No sample yet",
+        color: "#0f766e"
+      },
+      {
+        label: "Storage",
+        percent: Number.isFinite(Number(latest.diskPercent)) ? number(latest.diskPercent) : null,
+        detail: latest.diskTotalBytes
+          ? `${formatBytes(latest.diskUsedBytes)} / ${formatBytes(latest.diskTotalBytes)}`
+          : "No sample yet",
+        color: "#d97706"
+      }
+    ];
+    return `<section class="dash-panel" data-dashboard-section="resources">
+      <div class="collection-head">
+        <div><p class="dash-kicker">Server</p><h2>Resource use</h2></div>
+        <span class="dashboard-action-note">${latest.at ? `Updated ${html(formatTime(latest.at))}` : "Waiting for a server sample"}</span>
+      </div>
+      <div class="resource-summary-grid">
+        ${values.map((item) => `<article class="resource-summary-item">
+          <div class="resource-summary-head"><span>${html(item.label)}</span><b>${item.percent == null ? "-" : `${html(item.percent.toFixed(1))}%`}</b></div>
+          <div class="resource-meter" style="--resource-value:${html(item.percent == null ? 0 : Math.min(100, Math.max(0, item.percent)))}%;--resource-color:${html(item.color)}"><i></i></div>
+          <small>${html(item.detail)}</small>
+        </article>`).join("")}
+      </div>
+    </section>`;
+  }
+
+  function collectionResourcePayload() {
+    const candidates = [state.guidePayload, state.shopPayload].filter(Boolean);
+    return candidates.sort((left, right) => {
+      const leftSample = latestSample(chartSamples(left));
+      const rightSample = latestSample(chartSamples(right));
+      return (Date.parse(rightSample.at || "") || 0) - (Date.parse(leftSample.at || "") || 0);
+    })[0] || {};
   }
 
   async function fetchJson(path, fallback) {
@@ -1517,18 +1754,18 @@
       <div class="collection-head">
         <div>
           <p class="dash-kicker">Built database</p>
-          <h2>Database map</h2>
+          <div class="database-title-row">
+            <h2>Database map</h2>
+            <div class="database-mode-control compact" aria-label="Database type">
+              <button type="button" data-database-mode="restaurants" class="${state.databaseMode === "restaurants" ? "active" : ""}">Restaurants</button>
+              <button type="button" data-database-mode="shops" class="${state.databaseMode === "shops" ? "active" : ""}">Wine shops</button>
+            </div>
+          </div>
         </div>
-        <div>
-          <div class="database-mode-control" aria-label="Database type">
-            <button type="button" data-database-mode="restaurants" class="${state.databaseMode === "restaurants" ? "active" : ""}">Restaurants</button>
-            <button type="button" data-database-mode="shops" class="${state.databaseMode === "shops" ? "active" : ""}">Wine shops</button>
-          </div>
-          <div class="map-legend">
-            <span class="legend-dot" style="--dot:#16a34a">Inventory found</span>
-            <span class="legend-dot" style="--dot:#dc2626">No wine list</span>
-            <span class="legend-dot" style="--dot:#f59e0b">Pending / review</span>
-          </div>
+        <div class="map-legend">
+          <span class="legend-dot" style="--dot:#16a34a">Inventory found</span>
+          <span class="legend-dot" style="--dot:#dc2626">No wine list</span>
+          <span class="legend-dot" style="--dot:#f59e0b">Pending / review</span>
         </div>
       </div>
       <div class="dashboard-map-wrap">
@@ -1556,23 +1793,146 @@
 
   function renderCollection() {
     const root = ensureDataViews().collectionView;
-    if (state.collectionMode === "shops") renderShopCollection(root);
-    else renderRestaurantCollection(root);
+    root.innerHTML = `${collectionSwitchMarkup()}
+      <div class="collection-job-grid">
+        ${restaurantCollectionCardMarkup()}
+        ${shopCollectionCardMarkup()}
+      </div>
+      ${resourcePanelMarkup(collectionResourcePayload())}`;
   }
 
   function collectionSwitchMarkup() {
-    const restaurants = state.collectionMode === "restaurants";
-    return `<section class="dash-panel collection-switch-panel">
+    const message = state.guideActionMessage || state.shopActionMessage;
+    return `<section class="dash-panel collection-toolbar">
       <div>
         <p class="dash-kicker">Collection</p>
-        <h2>${html(restaurants ? "Restaurant wine lists" : "Wine-shop inventories")}</h2>
-        <p class="collection-stage-copy">First maintain the place directory, then scan the saved official websites for wine-list content.</p>
+        <h2>Collection overview</h2>
       </div>
-      <div class="database-mode-control" aria-label="Collection type">
-        <button type="button" data-collection-mode="restaurants" class="${restaurants ? "active" : ""}">Restaurants</button>
-        <button type="button" data-collection-mode="shops" class="${restaurants ? "" : "active"}">Wine shops</button>
+      <div class="collection-job-actions">
+        ${message ? `<span class="dashboard-action-note">${html(message)}</span>` : ""}
+        ${state.lastRefreshAt ? `<span class="dashboard-action-note">Updated ${html(state.lastRefreshAt)}</span>` : ""}
+        <button class="dashboard-refresh" type="button" data-refresh-collection ${state.guideLoadInFlight ? "disabled" : ""}>${html(state.guideLoadInFlight ? "Refreshing..." : "Refresh")}</button>
       </div>
     </section>`;
+  }
+
+  function collectionJobCardMarkup(config) {
+    const percent = Math.min(100, Math.max(0, number(config.percent)));
+    return `<section class="dash-panel collection-job">
+      <div class="collection-job-head">
+        <div><p class="dash-kicker">${html(config.kicker)}</p><h2>${html(config.title)}</h2></div>
+        <span class="dash-pill ${html(config.pillClass || "")}">${html(config.status)}</span>
+      </div>
+      <div class="collection-job-progress collection-job-progress-head">
+        <strong>${html(percent.toFixed(1))}%</strong>
+        <span>${html(fmtInt(config.processed))} / ${html(fmtInt(config.total))}</span>
+      </div>
+      <div class="dash-progress" style="--dash-progress:${html(percent)}%"><i></i></div>
+      <div class="collection-job-current">
+        <span>${html(config.currentLabel || "Current")}</span>
+        <b>${html(config.current || "-")}</b>
+      </div>
+      <div class="collection-stat-grid">
+        ${config.stats.map((item) => `<div class="collection-stat"><span>${html(item.label)}</span><b>${html(item.value)}</b></div>`).join("")}
+      </div>
+      <div class="collection-job-footer">
+        <div><span class="dash-kicker">Last update</span><b>${html(config.updated || "-")}</b></div>
+        <div class="collection-job-actions">${config.actions}</div>
+      </div>
+    </section>`;
+  }
+
+  function restaurantCollectionCardMarkup() {
+    const metrics = guideMetrics(state.guidePayload || {});
+    const { payload, values, progress, found, savedLines, etaText } = metrics;
+    const directoryRun = payload.lastDirectoryUpdate
+      || (payload.latestRuns || []).find((run) => String(run.sources_requested || "").includes("michelin"))
+      || {};
+    const inventoryRun = payload.lastInventoryCollection || {};
+    const directoryRunning = values.running && ["reading_guides", "saving_targets"].includes(progress.phase);
+    const inventoryRunning = values.running && !directoryRunning;
+    const status = directoryRunning ? "Updating places" : inventoryRunning ? "Scanning" : values.stopped ? "Stopped" : inventoryRun.finished_at ? "Done" : "Ready";
+    const updatedAt = inventoryRun.finished_at || directoryRun.finished_at;
+    return collectionJobCardMarkup({
+      kicker: "Restaurants",
+      title: "Restaurant collection",
+      status,
+      pillClass: values.running ? "good" : values.stopped ? "warn" : "",
+      processed: values.processed,
+      total: values.total,
+      percent: values.percent,
+      currentLabel: values.running && etaText !== "-" ? `Current / ETA ${etaText}` : "Current restaurant",
+      current: progress.currentTarget || "-",
+      stats: [
+        { label: "Restaurants", value: fmtInt(payload.counts?.targets) },
+        { label: "Website URLs", value: fmtInt(payload.counts?.withWebsite) },
+        { label: "Verified lists", value: fmtInt(found) },
+        { label: "Wine lines", value: fmtInt(savedLines) }
+      ],
+      updated: updatedAt ? formatTime(updatedAt) : "Not updated yet",
+      actions: `<button class="dashboard-refresh" type="button" data-start-guide-directory ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(directoryRunning ? "Updating..." : "Update places")}</button>
+        <button class="dashboard-refresh" type="button" data-start-guide-collection ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(inventoryRunning ? "Scanning..." : "Scan lists")}</button>`
+    });
+  }
+
+  function shopCollectionCardMarkup() {
+    const shop = state.shopPayload || {};
+    const progress = shop.progress || {};
+    const counts = shop.counts || {};
+    const discoveryRun = (shop.latestDiscoveryRuns || [])[0] || {};
+    const inventoryRun = (shop.latestRuns || []).find((run) => run.phase === "inventory") || {};
+    const phase = String(progress.phase || "");
+    const overtureRunning = Boolean(shop.running?.overture || (progress.status === "running" && phase.startsWith("overture_")));
+    const inventoryRunning = Boolean(shop.running?.inventory || (progress.status === "running" && phase.startsWith("inventory")));
+    const anyRunning = overtureRunning || inventoryRunning || Boolean(shop.running?.merchantScan);
+    const stopped = progress.status === "stalled" || Boolean(progress.stale);
+    let processed = 0;
+    let total = 0;
+    let percent = 0;
+    if (overtureRunning) {
+      processed = number(progress.sourceFilesCompleted || progress.stageIndex);
+      total = number(progress.sourceFiles || progress.stageCount);
+      percent = number(progress.progressPercent) || (total ? (processed / total) * 100 : 0);
+    } else if (inventoryRunning) {
+      processed = number(progress.checked);
+      total = number(progress.total || counts.withWebsite);
+      percent = number(progress.progressPercent) || (total ? (processed / total) * 100 : 0);
+    } else if (inventoryRun.finished_at) {
+      processed = number(inventoryRun.checked || inventoryRun.processed || inventoryRun.total);
+      total = number(inventoryRun.total || processed);
+      percent = total ? Math.min(100, (processed / total) * 100) : 100;
+    } else if (discoveryRun.finished_at) {
+      processed = number(counts.merchants);
+      total = processed;
+      percent = processed ? 100 : 0;
+    }
+    const etaSeconds = progress.estimatedRemainingSeconds;
+    const etaFinish = progress.estimatedFinishAt;
+    const eta = etaSeconds == null ? "-" : `${formatDuration(etaSeconds)}${etaFinish ? ` / ${formatTime(etaFinish)}` : ""}`;
+    const status = overtureRunning ? "Updating directory" : inventoryRunning ? "Scanning" : anyRunning ? "Collecting" : stopped ? "Stopped" : (inventoryRun.finished_at || discoveryRun.finished_at) ? "Done" : "Ready";
+    const updatedAt = [inventoryRun.finished_at, discoveryRun.finished_at]
+      .filter(Boolean)
+      .sort((left, right) => (Date.parse(right) || 0) - (Date.parse(left) || 0))[0];
+    return collectionJobCardMarkup({
+      kicker: "Wine shops",
+      title: "Wine-shop collection",
+      status,
+      pillClass: anyRunning ? "good" : stopped ? "warn" : "",
+      processed,
+      total,
+      percent,
+      currentLabel: anyRunning && eta !== "-" ? `Current / ETA ${eta}` : "Current shop",
+      current: progress.currentTarget || progress.currentFile || "-",
+      stats: [
+        { label: "Wine shops", value: fmtInt(counts.merchants) },
+        { label: "Website URLs", value: fmtInt(counts.withWebsite) },
+        { label: "Inventories", value: fmtInt(counts.inventoryFound) },
+        { label: "Products", value: fmtInt(counts.products) }
+      ],
+      updated: updatedAt ? formatTime(updatedAt) : "Not updated yet",
+      actions: `<button class="dashboard-refresh" type="button" data-start-shop-collection="overture" ${anyRunning || state.shopActionInFlight ? "disabled" : ""}>${html(overtureRunning ? "Updating..." : "Update directory")}</button>
+        <button class="dashboard-refresh" type="button" data-start-shop-collection="inventory" ${anyRunning || state.shopActionInFlight || !number(counts.withWebsite) ? "disabled" : ""}>${html(inventoryRunning ? "Scanning..." : "Scan inventories")}</button>`
+    });
   }
 
   function renderRestaurantCollection(root) {
