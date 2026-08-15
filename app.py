@@ -403,6 +403,10 @@ def start_shop_collection(payload):
             sys.executable, script,
             "--release", str(payload.get("release") or "latest"),
             "--threads", str(max(1, int(payload.get("threads") or os.environ.get("WHEREISKELLEY_OVERTURE_THREADS", "4")))),
+            "--source-workers", str(max(1, min(16, int(
+                payload.get("sourceWorkers")
+                or os.environ.get("WHEREISKELLEY_OVERTURE_SOURCE_WORKERS", "16")
+            )))),
             "--memory-limit", str(payload.get("memoryLimit") or os.environ.get("WHEREISKELLEY_OVERTURE_MEMORY", "18GB")),
             "--batch-size", str(max(500, int(payload.get("batchSize") or os.environ.get("WHEREISKELLEY_OVERTURE_BATCH_SIZE", "5000")))),
         ]

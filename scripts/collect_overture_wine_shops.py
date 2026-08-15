@@ -921,12 +921,12 @@ def main():
     parser.add_argument("--threads", type=int, default=max(1, min(os.cpu_count() or 2, 8)))
     parser.add_argument(
         "--source-workers", type=int, default=0,
-        help="Parallel Overture parquet readers; 0 uses twice the CPU thread count",
+        help="Parallel Overture parquet readers; 0 uses four times the CPU thread count",
     )
     parser.add_argument("--memory-limit", default="", help="DuckDB limit such as 12GB")
     args = parser.parse_args()
     args.batch_size = max(100, min(args.batch_size, 10_000))
-    args.source_workers = max(1, min(args.source_workers or args.threads * 2, 16))
+    args.source_workers = max(1, min(args.source_workers or args.threads * 4, 16))
     summary = run_import(args)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
