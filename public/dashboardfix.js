@@ -1955,8 +1955,8 @@
       total,
       percent,
       progressLabel: directoryRunning ? "Restaurant list update" : "Restaurant website scan",
-      progressText: !directoryRunning && !scanStarted ? "Not started" : `${percent.toFixed(1)}%`,
-      countText: `${fmtInt(processed)} / ${fmtInt(total)} websites`,
+      progressText: scanCompleted && !values.running ? "Complete" : !directoryRunning && !scanStarted ? "Not started" : `${percent.toFixed(1)}%`,
+      countText: scanCompleted && !values.running ? `${fmtInt(inventoryProcessed)} websites checked` : `${fmtInt(processed)} / ${fmtInt(total)} websites`,
       progressHint: scanCompleted && !values.running ? "Last completed run" : "",
       currentLabel: values.running && etaText !== "-" ? `Current / ETA ${etaText}` : "Current restaurant",
       current: progress.currentTarget || "-",
@@ -2047,10 +2047,12 @@
       total,
       percent,
       progressLabel: overtureRunning ? "Shop list update" : "Website inventory scan",
-      progressText: !overtureRunning && !inventoryStarted ? "Not started" : `${percent.toFixed(1)}%`,
+      progressText: inventoryCompleted && !anyRunning ? "Complete" : !overtureRunning && !inventoryStarted ? "Not started" : `${percent.toFixed(1)}%`,
       countText: overtureRunning
         ? `${fmtInt(processed)} / ${fmtInt(total)} source files`
-        : `${fmtInt(processed)} / ${fmtInt(total)} websites`,
+        : inventoryCompleted && !anyRunning
+          ? `${fmtInt(processed)} websites checked`
+          : `${fmtInt(processed)} / ${fmtInt(total)} websites`,
       progressHint: directoryCompleted && !inventoryStarted ? "Shop list is ready" : inventoryCompleted && !anyRunning ? "Last completed run" : "",
       currentLabel: anyRunning && eta !== "-" ? `Current / ETA ${eta}` : "Current shop",
       current: progress.currentTarget || progress.currentFile || "-",
