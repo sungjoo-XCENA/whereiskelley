@@ -230,8 +230,7 @@ def build_query(path, columns, country="", bbox=None, limit=0):
     name_search = (
         r"(^|[^a-z])(wine|wines|cellar|cellars|liquor|spirits|caviste|vin|vins|vino|vini|"
         r"vinoteca|enoteca|wein|weinhandlung|wijn|vinho|vinhos|garrafeira|vinhandel|wino)"
-        r"([^a-z]|$)|\u8461\u8404\u9152|\u7d05\u9152|\u7ea2\u9152|\u6d0b\u9152|"
-        r"\u30ef\u30a4\u30f3|\uc640\uc778|\u0432\u0438\u043d\u043e"
+        r"([^a-z]|$)|葡萄酒|紅酒|红酒|洋酒|ワイン|와인|вино"
     )
     strict_categories = (
         r"liquor_store|wine_shop|wine_store|wine_and_spirits_store|"
