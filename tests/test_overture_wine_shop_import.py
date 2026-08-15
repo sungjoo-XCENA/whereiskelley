@@ -154,6 +154,52 @@ class OvertureWineShopImportTests(unittest.TestCase):
         finally:
             con.close()
 
+    def test_batch_reimport_collapses_unchanged_rows(self):
+        con = MODULE.connect_shop(self.db_path)
+        try:
+            first_run = con.execute(
+                "insert into merchant_discovery_runs(provider,status) values('overture','running')"
+            ).lastrowid
+            candidates = [
+                self.candidate("place-1", "Kelley Fine Wines"),
+                self.candidate("place-2", "Kelley Cellars"),
+            ]
+            state = MODULE.load_import_state(con)
+            first = MODULE.upsert_candidate_batch(
+                con, candidates, first_run, "2026-07-22.0", state=state
+            )
+            con.commit()
+            self.assertEqual(2, first["inserted"])
+
+            second_run = con.execute(
+                "insert into merchant_discovery_runs(provider,status) values('overture','running')"
+            ).lastrowid
+            state = MODULE.load_import_state(con)
+            statements = []
+            con.set_trace_callback(statements.append)
+            second = MODULE.upsert_candidate_batch(
+                con, candidates, second_run, "2026-08-19.0", state=state
+            )
+            con.set_trace_callback(None)
+            con.commit()
+
+            self.assertEqual(2, second["unchanged"])
+            merchant_updates = [
+                sql
+                for sql in statements
+                if " ".join(sql.lower().split()).startswith("update merchants set")
+            ]
+            self.assertEqual(1, len(merchant_updates))
+            self.assertEqual(
+                2,
+                con.execute(
+                    "select count(*) from merchant_place_sources where last_seen_run_id=?",
+                    (second_run,),
+                ).fetchone()[0],
+            )
+        finally:
+            con.close()
+
 
 if __name__ == "__main__":
     unittest.main()

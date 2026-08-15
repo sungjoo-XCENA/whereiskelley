@@ -529,6 +529,64 @@ def upsert_candidate(con, candidate, run_id, release, now=None, state=None):
     return outcome
 
 
+def upsert_candidate_batch(con, candidates, run_id, release, now=None, state=None):
+    """Merge one fetched batch, collapsing unchanged rows into three SQL updates."""
+    now = now or utc_now()
+    outcomes = {"inserted": 0, "updated": 0, "unchanged": 0, "errors": 0}
+    unchanged = []
+    for candidate in candidates:
+        previous = state["places"].get(candidate["provider_place_id"]) if state is not None else None
+        if previous and previous[2] == candidate["raw_hash"]:
+            unchanged.append((int(previous[0]), int(previous[1])))
+            continue
+        try:
+            outcome = upsert_candidate(
+                con, candidate, run_id, release, now=now, state=state
+            )
+            outcomes[outcome] += 1
+        except (sqlite3.Error, ValueError, TypeError):
+            outcomes["errors"] += 1
+
+    if unchanged:
+        con.execute(
+            """
+            create temp table if not exists overture_unchanged_batch(
+              place_source_id integer primary key,
+              merchant_id integer not null
+            ) without rowid
+            """
+        )
+        con.execute("delete from overture_unchanged_batch")
+        con.executemany(
+            "insert into overture_unchanged_batch(place_source_id,merchant_id) values(?,?)",
+            unchanged,
+        )
+        con.execute(
+            """
+            update merchants set last_seen_at=?,active=1
+            where id in (select merchant_id from overture_unchanged_batch)
+            """,
+            (now,),
+        )
+        con.execute(
+            """
+            update merchant_place_sources set
+              provider_release=?,last_seen_at=?,last_seen_run_id=?,active=1
+            where id in (select place_source_id from overture_unchanged_batch)
+            """,
+            (release, now, run_id),
+        )
+        con.execute(
+            """
+            update merchant_websites set active=1,last_seen_at=?
+            where place_source_id in (select place_source_id from overture_unchanged_batch)
+            """,
+            (now,),
+        )
+        outcomes["unchanged"] += len(unchanged)
+    return outcomes
+
+
 def finalize_full_run(con, run_id, now=None):
     now = now or utc_now()
     stale_ids = [
@@ -637,19 +695,19 @@ def run_import(args):
             if not rows:
                 break
             now = utc_now()
+            candidates = []
             for values in rows:
                 counts["source_rows"] += 1
                 candidate = candidate_from_row(dict(zip(names, values)))
                 if not candidate:
                     continue
                 counts["candidates"] += 1
-                try:
-                    outcome = upsert_candidate(
-                        con, candidate, run_id, release, now, state=import_state
-                    )
-                    counts[outcome] += 1
-                except (sqlite3.Error, ValueError, TypeError):
-                    counts["errors"] += 1
+                candidates.append(candidate)
+            batch_outcomes = upsert_candidate_batch(
+                con, candidates, run_id, release, now=now, state=import_state
+            )
+            for outcome, value in batch_outcomes.items():
+                counts[outcome] += value
             con.execute(
                 """
                 update merchant_discovery_runs set source_rows=?,candidates=?,inserted=?,updated=?,unchanged=?,errors=?
