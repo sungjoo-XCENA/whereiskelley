@@ -163,7 +163,23 @@
       margin: 2px 0 0;
     }
     .collection-job-progress {
+      margin-top: 0;
+    }
+    .collection-job-progress-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
       margin-top: 18px;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .collection-job-progress-label em {
+      font-style: normal;
+      text-transform: none;
     }
     .collection-job-progress-head strong {
       font-size: 22px;
@@ -189,6 +205,50 @@
       text-align: right;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .collection-job-stages {
+      display: grid;
+      gap: 7px;
+      margin-top: 14px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #f8fafc;
+    }
+    .collection-job-stage {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .collection-job-stage span {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .collection-job-stage i {
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: #cbd5e1;
+    }
+    .collection-job-stage.complete i {
+      background: #17a566;
+    }
+    .collection-job-stage.active i {
+      background: var(--accent);
+      box-shadow: 0 0 0 3px #f8dbe4;
+    }
+    .collection-job-stage.pending i {
+      background: #f59e0b;
+    }
+    .collection-job-stage b {
+      color: var(--ink);
+      text-align: right;
     }
     .collection-stat-grid {
       display: grid;
@@ -789,6 +849,9 @@
       .collection-job-current b {
         max-width: 100%;
         text-align: left;
+      }
+      .collection-job-stage {
+        align-items: flex-start;
       }
       .collection-job-actions {
         justify-content: flex-start;
@@ -1818,20 +1881,27 @@
 
   function collectionJobCardMarkup(config) {
     const percent = Math.min(100, Math.max(0, number(config.percent)));
+    const progressText = config.progressText || `${percent.toFixed(1)}%`;
+    const countText = config.countText || `${fmtInt(config.processed)} / ${fmtInt(config.total)}`;
+    const stages = (config.stages || []).map((stage) => `<div class="collection-job-stage ${html(stage.state || "")}">
+      <span><i></i>${html(stage.label)}</span><b>${html(stage.value)}</b>
+    </div>`).join("");
     return `<section class="dash-panel collection-job">
       <div class="collection-job-head">
         <div><p class="dash-kicker">${html(config.kicker)}</p><h2>${html(config.title)}</h2></div>
         <span class="dash-pill ${html(config.pillClass || "")}">${html(config.status)}</span>
       </div>
+      <div class="collection-job-progress-label"><span>${html(config.progressLabel || "Current progress")}</span><em>${html(config.progressHint || "")}</em></div>
       <div class="collection-job-progress collection-job-progress-head">
-        <strong>${html(percent.toFixed(1))}%</strong>
-        <span>${html(fmtInt(config.processed))} / ${html(fmtInt(config.total))}</span>
+        <strong>${html(progressText)}</strong>
+        <span>${html(countText)}</span>
       </div>
       <div class="dash-progress" style="--dash-progress:${html(percent)}%"><i></i></div>
       <div class="collection-job-current">
         <span>${html(config.currentLabel || "Current")}</span>
         <b>${html(config.current || "-")}</b>
       </div>
+      ${stages ? `<div class="collection-job-stages">${stages}</div>` : ""}
       <div class="collection-stat-grid">
         ${config.stats.map((item) => `<div class="collection-stat"><span>${html(item.label)}</span><b>${html(item.value)}</b></div>`).join("")}
       </div>
@@ -1851,27 +1921,66 @@
     const inventoryRun = payload.lastInventoryCollection || {};
     const directoryRunning = values.running && ["reading_guides", "saving_targets"].includes(progress.phase);
     const inventoryRunning = values.running && !directoryRunning;
-    const status = directoryRunning ? "Updating places" : inventoryRunning ? "Scanning" : values.stopped ? "Stopped" : inventoryRun.finished_at ? "Done" : "Ready";
+    const directorySaved = number(payload.counts?.targets);
+    const websitesAvailable = number(payload.counts?.withWebsite);
+    const inventoryProcessed = inventoryRunning
+      ? number(values.processed)
+      : number(inventoryRun.websites_checked);
+    const inventoryTotal = inventoryRunning
+      ? number(values.total || websitesAvailable)
+      : number(inventoryRun.target_count || websitesAvailable);
+    const processed = directoryRunning ? number(values.processed) : inventoryProcessed;
+    const total = directoryRunning ? number(values.total || directorySaved) : inventoryTotal;
+    const percent = total ? Math.min(100, (processed / total) * 100) : 0;
+    const scanCompleted = Boolean(inventoryRun.finished_at);
+    const scanStarted = inventoryRunning || scanCompleted || inventoryProcessed > 0;
+    const status = directoryRunning
+      ? "Updating restaurant list"
+      : inventoryRunning
+        ? "Scanning websites"
+        : values.stopped
+          ? "Scan interrupted"
+          : scanCompleted
+            ? "Website scan complete"
+            : websitesAvailable
+              ? "Ready to scan"
+              : "Restaurant list needed";
     const updatedAt = inventoryRun.finished_at || directoryRun.finished_at;
     return collectionJobCardMarkup({
       kicker: "Restaurants",
       title: "Restaurant collection",
       status,
-      pillClass: values.running ? "good" : values.stopped ? "warn" : "",
-      processed: values.processed,
-      total: values.total,
-      percent: values.percent,
+      pillClass: values.running || scanCompleted ? "good" : "warn",
+      processed,
+      total,
+      percent,
+      progressLabel: directoryRunning ? "Restaurant list update" : "Restaurant website scan",
+      progressText: !directoryRunning && !scanStarted ? "Not started" : `${percent.toFixed(1)}%`,
+      countText: `${fmtInt(processed)} / ${fmtInt(total)} websites`,
+      progressHint: scanCompleted && !values.running ? "Last completed run" : "",
       currentLabel: values.running && etaText !== "-" ? `Current / ETA ${etaText}` : "Current restaurant",
       current: progress.currentTarget || "-",
+      stages: [
+        {
+          label: "Restaurant list",
+          value: directorySaved ? `${fmtInt(directorySaved)} saved` : "Not updated",
+          state: directoryRunning ? "active" : directorySaved ? "complete" : "pending"
+        },
+        {
+          label: "Website wine-list scan",
+          value: scanCompleted ? `${fmtInt(inventoryProcessed)} checked` : inventoryRunning ? `${fmtInt(inventoryProcessed)} / ${fmtInt(inventoryTotal)}` : "Not started",
+          state: inventoryRunning ? "active" : scanCompleted ? "complete" : "pending"
+        }
+      ],
       stats: [
-        { label: "Restaurants", value: fmtInt(payload.counts?.targets) },
-        { label: "Website URLs", value: fmtInt(payload.counts?.withWebsite) },
+        { label: "Restaurants saved", value: fmtInt(directorySaved) },
+        { label: "Websites to scan", value: fmtInt(websitesAvailable) },
         { label: "Verified lists", value: fmtInt(found) },
         { label: "Wine lines", value: fmtInt(savedLines) }
       ],
       updated: updatedAt ? formatTime(updatedAt) : "Not updated yet",
-      actions: `<button class="dashboard-refresh" type="button" data-start-guide-directory ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(directoryRunning ? "Updating..." : "Update places")}</button>
-        <button class="dashboard-refresh" type="button" data-start-guide-collection ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(inventoryRunning ? "Scanning..." : "Scan lists")}</button>`
+      actions: `<button class="dashboard-refresh" type="button" data-start-guide-directory ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(directoryRunning ? "Updating..." : "Update restaurant list")}</button>
+        <button class="dashboard-refresh" type="button" data-start-guide-collection ${values.running || state.guideActionInFlight ? "disabled" : ""}>${html(inventoryRunning ? "Scanning..." : "Scan restaurant websites")}</button>`
     });
   }
 
@@ -1901,15 +2010,31 @@
       processed = number(inventoryRun.checked || inventoryRun.processed || inventoryRun.total);
       total = number(inventoryRun.total || processed);
       percent = total ? Math.min(100, (processed / total) * 100) : 100;
-    } else if (discoveryRun.finished_at) {
-      processed = number(counts.merchants);
-      total = processed;
-      percent = processed ? 100 : 0;
     }
     const etaSeconds = progress.estimatedRemainingSeconds;
     const etaFinish = progress.estimatedFinishAt;
     const eta = etaSeconds == null ? "-" : `${formatDuration(etaSeconds)}${etaFinish ? ` / ${formatTime(etaFinish)}` : ""}`;
-    const status = overtureRunning ? "Updating directory" : inventoryRunning ? "Scanning" : anyRunning ? "Collecting" : stopped ? "Stopped" : (inventoryRun.finished_at || discoveryRun.finished_at) ? "Done" : "Ready";
+    const directoryCompleted = Boolean(discoveryRun.finished_at);
+    const inventoryCompleted = Boolean(inventoryRun.finished_at && inventoryRun.status !== "blocked");
+    const inventoryStarted = inventoryRunning || inventoryCompleted || processed > 0;
+    if (!overtureRunning && !inventoryStarted) {
+      processed = 0;
+      total = number(counts.withWebsite);
+      percent = 0;
+    }
+    const status = overtureRunning
+      ? "Updating shop list"
+      : inventoryRunning
+        ? "Scanning websites"
+        : anyRunning
+          ? "Collecting"
+          : stopped
+            ? "Scan interrupted"
+            : inventoryCompleted
+              ? "Website scan complete"
+              : directoryCompleted
+                ? "Ready to scan websites"
+                : "Shop list needed";
     const updatedAt = [inventoryRun.finished_at, discoveryRun.finished_at]
       .filter(Boolean)
       .sort((left, right) => (Date.parse(right) || 0) - (Date.parse(left) || 0))[0];
@@ -1917,21 +2042,39 @@
       kicker: "Wine shops",
       title: "Wine-shop collection",
       status,
-      pillClass: anyRunning ? "good" : stopped ? "warn" : "",
+      pillClass: anyRunning || inventoryCompleted ? "good" : "warn",
       processed,
       total,
       percent,
+      progressLabel: overtureRunning ? "Shop list update" : "Website inventory scan",
+      progressText: !overtureRunning && !inventoryStarted ? "Not started" : `${percent.toFixed(1)}%`,
+      countText: overtureRunning
+        ? `${fmtInt(processed)} / ${fmtInt(total)} source files`
+        : `${fmtInt(processed)} / ${fmtInt(total)} websites`,
+      progressHint: directoryCompleted && !inventoryStarted ? "Shop list is ready" : inventoryCompleted && !anyRunning ? "Last completed run" : "",
       currentLabel: anyRunning && eta !== "-" ? `Current / ETA ${eta}` : "Current shop",
       current: progress.currentTarget || progress.currentFile || "-",
+      stages: [
+        {
+          label: "Shop list",
+          value: directoryCompleted ? `${fmtInt(counts.merchants)} saved` : overtureRunning ? "Updating" : "Not updated",
+          state: overtureRunning ? "active" : directoryCompleted ? "complete" : "pending"
+        },
+        {
+          label: "Website inventory scan",
+          value: inventoryCompleted ? `${fmtInt(processed)} checked` : inventoryRunning ? `${fmtInt(processed)} / ${fmtInt(total)}` : "Not started",
+          state: inventoryRunning ? "active" : inventoryCompleted ? "complete" : "pending"
+        }
+      ],
       stats: [
-        { label: "Wine shops", value: fmtInt(counts.merchants) },
-        { label: "Website URLs", value: fmtInt(counts.withWebsite) },
-        { label: "Inventories", value: fmtInt(counts.inventoryFound) },
-        { label: "Products", value: fmtInt(counts.products) }
+        { label: "Shops saved", value: fmtInt(counts.merchants) },
+        { label: "Websites to scan", value: fmtInt(counts.withWebsite) },
+        { label: "Lists found", value: fmtInt(counts.inventoryFound) },
+        { label: "Wine products", value: fmtInt(counts.products) }
       ],
       updated: updatedAt ? formatTime(updatedAt) : "Not updated yet",
-      actions: `<button class="dashboard-refresh" type="button" data-start-shop-collection="overture" ${anyRunning || state.shopActionInFlight ? "disabled" : ""}>${html(overtureRunning ? "Updating..." : "Update directory")}</button>
-        <button class="dashboard-refresh" type="button" data-start-shop-collection="inventory" ${anyRunning || state.shopActionInFlight || !number(counts.withWebsite) ? "disabled" : ""}>${html(inventoryRunning ? "Scanning..." : "Scan inventories")}</button>`
+      actions: `<button class="dashboard-refresh" type="button" data-start-shop-collection="overture" ${anyRunning || state.shopActionInFlight ? "disabled" : ""}>${html(overtureRunning ? "Updating..." : "Update shop list")}</button>
+        <button class="dashboard-refresh" type="button" data-start-shop-collection="inventory" ${anyRunning || state.shopActionInFlight || !number(counts.withWebsite) ? "disabled" : ""}>${html(inventoryRunning ? "Scanning..." : `Scan ${fmtInt(counts.withWebsite)} websites`)}</button>`
     });
   }
 
