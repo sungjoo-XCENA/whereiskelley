@@ -13,6 +13,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
@@ -310,11 +311,48 @@ def candidate_from_row(row):
     return payload
 
 
-def find_existing_merchant(con, candidate):
+def prepare_import_connection(con):
+    """Give the long-running bulk importer a large local read cache."""
+    con.execute("pragma cache_size=-524288")
+    con.execute("pragma mmap_size=8589934592")
+    con.execute("pragma temp_store=memory")
+    con.execute("pragma wal_autocheckpoint=10000")
+
+
+def load_import_state(con):
+    """Cache stable lookup keys so the import does not re-query SQLite per row."""
+    places = {
+        str(row[0]): (int(row[1]), int(row[2]), str(row[3] or ""))
+        for row in con.execute(
+            """
+            select provider_place_id,id,merchant_id,raw_hash
+            from merchant_place_sources
+            where provider='overture'
+            """
+        )
+    }
+    domains = {}
+    for row in con.execute(
+        """
+        select id,normalized_name,website_domain
+        from merchants
+        where coalesce(normalized_name,'')!='' and coalesce(website_domain,'')!=''
+        order by id
+        """
+    ):
+        domains.setdefault((str(row[1]), str(row[2]).casefold()), int(row[0]))
+    return {"places": places, "domains": domains}
+
+
+def find_existing_merchant(con, candidate, state=None):
     normalized_name = fold_text(candidate["name"])
     website = (candidate.get("websites") or [""])[0]
     domain = website_domain(website)
     if domain:
+        if state is not None:
+            merchant_id = state["domains"].get((normalized_name, domain))
+            if merchant_id is not None:
+                return merchant_id
         row = con.execute(
             "select id from merchants where normalized_name=? and website_domain=? limit 1",
             (normalized_name, domain),
@@ -382,23 +420,52 @@ def update_merchant(con, merchant_id, candidate, now):
     )
 
 
-def upsert_candidate(con, candidate, run_id, release, now=None):
+def upsert_candidate(con, candidate, run_id, release, now=None, state=None):
     now = now or utc_now()
-    previous = con.execute(
+    cached_previous = state["places"].get(candidate["provider_place_id"]) if state is not None else None
+    previous = cached_previous or con.execute(
         "select id, merchant_id, raw_hash from merchant_place_sources where provider='overture' and provider_place_id=?",
         (candidate["provider_place_id"],),
     ).fetchone()
     if previous:
-        place_source_id = int(previous["id"])
-        merchant_id = int(previous["merchant_id"])
-        outcome = "unchanged" if previous["raw_hash"] == candidate["raw_hash"] else "updated"
+        if isinstance(previous, tuple):
+            place_source_id, merchant_id, previous_hash = previous
+        else:
+            place_source_id = int(previous["id"])
+            merchant_id = int(previous["merchant_id"])
+            previous_hash = str(previous["raw_hash"] or "")
+        outcome = "unchanged" if previous_hash == candidate["raw_hash"] else "updated"
     else:
-        merchant_id = find_existing_merchant(con, candidate)
+        merchant_id = find_existing_merchant(con, candidate, state=state)
         if merchant_id is None:
             merchant_id = create_merchant(con, candidate, now)
         place_source_id = None
         outcome = "inserted"
     update_merchant(con, merchant_id, candidate, now)
+    website = (candidate.get("websites") or [""])[0]
+    domain = website_domain(website)
+    if state is not None and domain:
+        state["domains"].setdefault((fold_text(candidate["name"]), domain), merchant_id)
+
+    if outcome == "unchanged":
+        con.execute(
+            """
+            update merchant_place_sources set
+              provider_release=?,last_seen_at=?,last_seen_run_id=?,active=1
+            where id=?
+            """,
+            (release, now, run_id, place_source_id),
+        )
+        con.execute(
+            "update merchant_websites set active=1,last_seen_at=? where place_source_id=?",
+            (now, place_source_id),
+        )
+        if state is not None:
+            state["places"][candidate["provider_place_id"]] = (
+                place_source_id, merchant_id, candidate["raw_hash"]
+            )
+        return outcome
+
     categories_json = json.dumps(
         {"categories": candidate.get("categories") or {}, "taxonomy": candidate.get("taxonomy") or {}},
         ensure_ascii=False,
@@ -416,8 +483,7 @@ def upsert_candidate(con, candidate, run_id, release, now=None):
         json.dumps(candidate.get("socials") or [], ensure_ascii=False),
         candidate.get("source_updated_at"), candidate["raw_hash"], now, now, run_id, run_id,
     )
-    con.execute(
-        """
+    source_sql = """
         insert into merchant_place_sources(
           merchant_id,provider,provider_place_id,provider_release,candidate_reason,name,normalized_name,
           primary_category,categories_json,confidence,operating_status,country_code,country,region,city,
@@ -435,14 +501,10 @@ def upsert_candidate(con, candidate, run_id, release, now=None):
           socials_json=excluded.socials_json,source_updated_at=excluded.source_updated_at,
           raw_hash=excluded.raw_hash,last_seen_at=excluded.last_seen_at,
           last_seen_run_id=excluded.last_seen_run_id,active=1
-        """,
-        values,
-    )
+        """
+    cursor = con.execute(source_sql, values)
     if place_source_id is None:
-        place_source_id = con.execute(
-            "select id from merchant_place_sources where provider='overture' and provider_place_id=?",
-            (candidate["provider_place_id"],),
-        ).fetchone()[0]
+        place_source_id = int(cursor.lastrowid)
     con.execute("update merchant_websites set active=0 where place_source_id=?", (place_source_id,))
     for website in candidate.get("websites") or []:
         normalized = normalize_url(website)
@@ -459,6 +521,10 @@ def upsert_candidate(con, candidate, run_id, release, now=None):
               last_seen_at=excluded.last_seen_at,active=1
             """,
             (merchant_id, place_source_id, website, normalized, website_domain(normalized), now, now),
+        )
+    if state is not None:
+        state["places"][candidate["provider_place_id"]] = (
+            place_source_id, merchant_id, candidate["raw_hash"]
         )
     return outcome
 
@@ -512,6 +578,7 @@ def run_import(args):
     }
     ensure_shop_db(args.db)
     con = connect_shop(args.db)
+    prepare_import_connection(con)
     run_id = con.execute(
         "insert into merchant_discovery_runs(provider,provider_release,scope,status,config_json) values('overture',?,?, 'running',?)",
         (release, scope, json.dumps(config, ensure_ascii=False)),
@@ -519,6 +586,8 @@ def run_import(args):
     con.commit()
     counts = {"source_rows": 0, "candidates": 0, "inserted": 0, "updated": 0, "unchanged": 0, "errors": 0}
     started_at = utc_now()
+    started_monotonic = time.monotonic()
+    import_state = load_import_state(con)
 
     def write_progress(
         status="running",
@@ -528,12 +597,15 @@ def run_import(args):
         stage_label="Prepare Overture release",
         stage_status="running",
     ):
+        elapsed_seconds = max(0.001, time.monotonic() - started_monotonic)
         atomic_write_json(args.progress, {
             "generatedAt": utc_now(), "startedAt": started_at,
             "status": status, "phase": phase,
             "message": message, "runId": run_id, "provider": "overture", "release": release,
             "scope": scope, "threads": args.threads, "memoryLimit": args.memory_limit,
             "batchSize": args.batch_size,
+            "elapsedSeconds": round(elapsed_seconds, 1),
+            "rowsPerSecond": round(counts["source_rows"] / elapsed_seconds, 1),
             "stageIndex": stage_index, "stageCount": 4,
             "stageLabel": stage_label, "stageStatus": stage_status,
             "stageProcessed": counts["source_rows"] if stage_index == 2 else None,
@@ -572,7 +644,9 @@ def run_import(args):
                     continue
                 counts["candidates"] += 1
                 try:
-                    outcome = upsert_candidate(con, candidate, run_id, release, now)
+                    outcome = upsert_candidate(
+                        con, candidate, run_id, release, now, state=import_state
+                    )
                     counts[outcome] += 1
                 except (sqlite3.Error, ValueError, TypeError):
                     counts["errors"] += 1

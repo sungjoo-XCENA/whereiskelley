@@ -109,6 +109,51 @@ class OvertureWineShopImportTests(unittest.TestCase):
         }
         self.assertIsNone(MODULE.candidate_from_row(row))
 
+    def test_cached_reimport_uses_fast_unchanged_path(self):
+        con = MODULE.connect_shop(self.db_path)
+        try:
+            first_run = con.execute(
+                "insert into merchant_discovery_runs(provider,status) values('overture','running')"
+            ).lastrowid
+            candidate = self.candidate()
+            MODULE.upsert_candidate(con, candidate, first_run, "2026-07-22.0")
+            con.commit()
+
+            second_run = con.execute(
+                "insert into merchant_discovery_runs(provider,status) values('overture','running')"
+            ).lastrowid
+            state = MODULE.load_import_state(con)
+            statements = []
+            con.set_trace_callback(statements.append)
+            outcome = MODULE.upsert_candidate(
+                con, candidate, second_run, "2026-08-19.0", state=state
+            )
+            con.set_trace_callback(None)
+            con.commit()
+
+            self.assertEqual("unchanged", outcome)
+            self.assertFalse(any("select id, merchant_id, raw_hash" in sql.lower() for sql in statements))
+            self.assertEqual(
+                second_run,
+                con.execute(
+                    "select last_seen_run_id from merchant_place_sources where provider_place_id='place-1'"
+                ).fetchone()[0],
+            )
+            self.assertEqual(1, con.execute("select active from merchant_websites").fetchone()[0])
+        finally:
+            con.close()
+
+    def test_import_indexes_cover_name_matching(self):
+        con = MODULE.connect_shop(self.db_path)
+        try:
+            indexes = {
+                row[1] for row in con.execute("pragma index_list('merchants')").fetchall()
+            }
+            self.assertIn("idx_merchants_name_domain", indexes)
+            self.assertIn("idx_merchants_name_location", indexes)
+        finally:
+            con.close()
+
 
 if __name__ == "__main__":
     unittest.main()

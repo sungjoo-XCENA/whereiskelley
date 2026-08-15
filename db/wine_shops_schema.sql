@@ -230,6 +230,8 @@ end;
 
 create index if not exists idx_merchants_location on merchants(country, city);
 create index if not exists idx_merchants_inventory on merchants(inventory_status, active);
+create index if not exists idx_merchants_name_domain on merchants(normalized_name, website_domain);
+create index if not exists idx_merchants_name_location on merchants(normalized_name, latitude, longitude);
 create index if not exists idx_merchant_sources_status on merchant_sources(status, next_crawl_at);
 create index if not exists idx_merchant_sources_merchant on merchant_sources(merchant_id);
 create index if not exists idx_merchant_products_merchant on merchant_products(merchant_id, active);
