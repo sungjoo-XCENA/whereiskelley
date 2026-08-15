@@ -1931,9 +1931,10 @@
       : number(inventoryRun.target_count || websitesAvailable);
     const processed = directoryRunning ? number(values.processed) : inventoryProcessed;
     const total = directoryRunning ? number(values.total || directorySaved) : inventoryTotal;
-    const percent = total ? Math.min(100, (processed / total) * 100) : 0;
+    let percent = total ? Math.min(100, (processed / total) * 100) : 0;
     const scanCompleted = Boolean(inventoryRun.finished_at);
     const scanStarted = inventoryRunning || scanCompleted || inventoryProcessed > 0;
+    if (scanCompleted && !values.running) percent = 100;
     const status = directoryRunning
       ? "Updating restaurant list"
       : inventoryRunning
