@@ -10,9 +10,11 @@ import argparse
 import hashlib
 import json
 import os
+import queue
 import re
 import sqlite3
 import sys
+import threading
 import time
 import unicodedata
 from datetime import datetime, timezone
@@ -161,6 +163,67 @@ def parquet_columns(connection, path):
         "DESCRIBE SELECT * FROM read_parquet({}) LIMIT 0".format(sql_literal(path))
     )
     return {str(row[0]) for row in result.fetchall()}
+
+
+def parquet_files(connection, path):
+    return [str(row[0]) for row in connection.execute("select file from glob(?)", [path]).fetchall()]
+
+
+def worker_memory_limit(total_limit, workers):
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(GB|MB)\s*", str(total_limit or ""), re.IGNORECASE)
+    if not match:
+        return ""
+    total_mb = float(match.group(1)) * (1024 if match.group(2).upper() == "GB" else 1)
+    return "{}MB".format(max(512, int(total_mb / max(1, workers))))
+
+
+def configure_duck(connection, threads=1, memory_limit=""):
+    connection.execute("PRAGMA threads={}".format(max(1, int(threads))))
+    connection.execute("SET preserve_insertion_order=false")
+    if memory_limit:
+        connection.execute("SET memory_limit={}".format(sql_literal(memory_limit)))
+    load_httpfs(connection)
+
+
+def put_worker_message(output, stop_event, message):
+    while not stop_event.is_set():
+        try:
+            output.put(message, timeout=0.5)
+            return True
+        except queue.Full:
+            continue
+    return False
+
+
+def read_overture_file(
+    duckdb_module,
+    file_path,
+    columns,
+    country,
+    bbox,
+    batch_size,
+    output,
+    stop_event,
+    memory_limit,
+):
+    connection = None
+    try:
+        connection = duckdb_module.connect()
+        configure_duck(connection, threads=1, memory_limit=memory_limit)
+        result = connection.execute(build_query(file_path, columns, country, bbox, 0))
+        names = [column[0] for column in result.description]
+        while not stop_event.is_set():
+            rows = result.fetchmany(batch_size)
+            if not rows:
+                break
+            if not put_worker_message(output, stop_event, ("batch", file_path, names, rows)):
+                return
+        put_worker_message(output, stop_event, ("done", file_path, None, None))
+    except Exception as error:
+        put_worker_message(output, stop_event, ("error", file_path, None, error))
+    finally:
+        if connection is not None:
+            connection.close()
 
 
 def build_query(path, columns, country="", bbox=None, limit=0):
@@ -632,7 +695,8 @@ def run_import(args):
     partial = bool(args.country or args.bbox or args.limit)
     config = {
         "release": release, "path": path, "scope": scope, "limit": args.limit,
-        "batchSize": args.batch_size, "threads": args.threads, "partial": partial,
+        "batchSize": args.batch_size, "threads": args.threads,
+        "sourceWorkers": args.source_workers, "partial": partial,
     }
     ensure_shop_db(args.db)
     con = connect_shop(args.db)
@@ -646,6 +710,9 @@ def run_import(args):
     started_at = utc_now()
     started_monotonic = time.monotonic()
     import_state = load_import_state(con)
+    source_files_total = 0
+    source_files_completed = 0
+    source_workers = 1
 
     def write_progress(
         status="running",
@@ -661,7 +728,9 @@ def run_import(args):
             "status": status, "phase": phase,
             "message": message, "runId": run_id, "provider": "overture", "release": release,
             "scope": scope, "threads": args.threads, "memoryLimit": args.memory_limit,
-            "batchSize": args.batch_size,
+            "batchSize": args.batch_size, "sourceWorkers": source_workers,
+            "sourceFiles": source_files_total,
+            "sourceFilesCompleted": source_files_completed,
             "elapsedSeconds": round(elapsed_seconds, 1),
             "rowsPerSecond": round(counts["source_rows"] / elapsed_seconds, 1),
             "stageIndex": stage_index, "stageCount": 4,
@@ -671,67 +740,122 @@ def run_import(args):
             **counts,
         })
 
-    write_progress()
-    duck = None
-    try:
-        duck = duckdb.connect()
-        duck.execute("PRAGMA threads={}".format(max(1, args.threads)))
-        duck.execute("SET preserve_insertion_order=false")
-        if args.memory_limit:
-            duck.execute("SET memory_limit={}".format(sql_literal(args.memory_limit)))
-        load_httpfs(duck)
-        columns = parquet_columns(duck, path)
-        query = build_query(path, columns, args.country, args.bbox, args.limit)
-        result = duck.execute(query)
-        names = [column[0] for column in result.description]
+    def merge_rows(names, rows):
+        now = utc_now()
+        candidates = []
+        for values in rows:
+            counts["source_rows"] += 1
+            candidate = candidate_from_row(dict(zip(names, values)))
+            if not candidate:
+                continue
+            counts["candidates"] += 1
+            candidates.append(candidate)
+        batch_outcomes = upsert_candidate_batch(
+            con, candidates, run_id, release, now=now, state=import_state
+        )
+        for outcome, value in batch_outcomes.items():
+            counts[outcome] += value
+        con.execute(
+            """
+            update merchant_discovery_runs set source_rows=?,candidates=?,inserted=?,updated=?,unchanged=?,errors=?
+            where id=?
+            """,
+            (counts["source_rows"], counts["candidates"], counts["inserted"], counts["updated"],
+             counts["unchanged"], counts["errors"], run_id),
+        )
+        con.commit()
         write_progress(
-            message="Reading places, filtering wine shops, and merging duplicates.",
+            message="Read {:,} places and saved {:,} wine-shop candidates.".format(
+                counts["source_rows"], counts["candidates"]
+            ),
             phase="overture_importing",
             stage_index=2,
             stage_label="Import and merge shop directory",
         )
-        while True:
-            rows = result.fetchmany(args.batch_size)
-            if not rows:
-                break
-            now = utc_now()
-            candidates = []
-            for values in rows:
-                counts["source_rows"] += 1
-                candidate = candidate_from_row(dict(zip(names, values)))
-                if not candidate:
-                    continue
-                counts["candidates"] += 1
-                candidates.append(candidate)
-            batch_outcomes = upsert_candidate_batch(
-                con, candidates, run_id, release, now=now, state=import_state
-            )
-            for outcome, value in batch_outcomes.items():
-                counts[outcome] += value
-            con.execute(
-                """
-                update merchant_discovery_runs set source_rows=?,candidates=?,inserted=?,updated=?,unchanged=?,errors=?
-                where id=?
-                """,
-                (counts["source_rows"], counts["candidates"], counts["inserted"], counts["updated"],
-                 counts["unchanged"], counts["errors"], run_id),
-            )
-            con.commit()
-            write_progress(
-                message="Read {:,} places and saved {:,} wine-shop candidates.".format(
-                    counts["source_rows"], counts["candidates"]
-                ),
-                phase="overture_importing",
-                stage_index=2,
-                stage_label="Import and merge shop directory",
-            )
-            print(
-                "Saved {:,} candidates ({} new, {} updated, {} unchanged, {} errors)".format(
-                    counts["candidates"], counts["inserted"], counts["updated"],
-                    counts["unchanged"], counts["errors"]
-                ),
-                flush=True,
-            )
+        print(
+            "Saved {:,} candidates ({} new, {} updated, {} unchanged, {} errors)".format(
+                counts["candidates"], counts["inserted"], counts["updated"],
+                counts["unchanged"], counts["errors"]
+            ),
+            flush=True,
+        )
+
+    write_progress()
+    duck = None
+    stop_event = threading.Event()
+    reader_threads = []
+    try:
+        duck = duckdb.connect()
+        configure_duck(duck, threads=args.threads, memory_limit=args.memory_limit)
+        files = parquet_files(duck, path)
+        if not files:
+            raise RuntimeError("Overture release contains no Places parquet files")
+        source_files_total = len(files)
+        source_workers = min(args.source_workers, source_files_total)
+        columns = parquet_columns(duck, files[0])
+        write_progress(
+            message="Reading {} Overture files with {} parallel streams.".format(
+                source_files_total, source_workers
+            ),
+            phase="overture_importing",
+            stage_index=2,
+            stage_label="Import and merge shop directory",
+        )
+        if args.limit or source_workers == 1:
+            result = duck.execute(build_query(path, columns, args.country, args.bbox, args.limit))
+            names = [column[0] for column in result.description]
+            while True:
+                rows = result.fetchmany(args.batch_size)
+                if not rows:
+                    break
+                merge_rows(names, rows)
+            source_files_completed = source_files_total
+        else:
+            duck.close()
+            duck = None
+            output = queue.Queue(maxsize=source_workers * 2)
+            per_worker_memory = worker_memory_limit(args.memory_limit, source_workers)
+            for file_path in files:
+                thread = threading.Thread(
+                    target=read_overture_file,
+                    args=(
+                        duckdb, file_path, columns, args.country, args.bbox,
+                        args.batch_size, output, stop_event, per_worker_memory,
+                    ),
+                    name="overture-reader-{}".format(len(reader_threads) + 1),
+                    daemon=True,
+                )
+                reader_threads.append(thread)
+            next_reader = 0
+            active_readers = 0
+
+            def start_reader():
+                nonlocal next_reader, active_readers
+                if next_reader < len(reader_threads):
+                    reader_threads[next_reader].start()
+                    next_reader += 1
+                    active_readers += 1
+
+            for _ in range(source_workers):
+                start_reader()
+            while active_readers:
+                kind, file_path, names, payload = output.get()
+                if kind == "batch":
+                    merge_rows(names, payload)
+                elif kind == "done":
+                    active_readers -= 1
+                    source_files_completed += 1
+                    start_reader()
+                    write_progress(
+                        message="Completed {:,}/{:,} Overture files with {} parallel streams.".format(
+                            source_files_completed, source_files_total, source_workers
+                        ),
+                        phase="overture_importing",
+                        stage_index=2,
+                        stage_label="Import and merge shop directory",
+                    )
+                else:
+                    raise RuntimeError("Failed reading {}: {}".format(file_path, payload))
         write_progress(
             message="Finalizing website URLs and reconciling the previous directory.",
             phase="overture_reconciling",
@@ -776,6 +900,10 @@ def run_import(args):
         )
         raise
     finally:
+        stop_event.set()
+        for thread in reader_threads:
+            if thread.is_alive():
+                thread.join(timeout=5)
         if duck is not None:
             duck.close()
         con.close()
@@ -791,9 +919,14 @@ def main():
     parser.add_argument("--limit", type=int, default=0, help="Testing only; makes the run partial")
     parser.add_argument("--batch-size", type=int, default=1000)
     parser.add_argument("--threads", type=int, default=max(1, min(os.cpu_count() or 2, 8)))
+    parser.add_argument(
+        "--source-workers", type=int, default=0,
+        help="Parallel Overture parquet readers; 0 uses twice the CPU thread count",
+    )
     parser.add_argument("--memory-limit", default="", help="DuckDB limit such as 12GB")
     args = parser.parse_args()
     args.batch_size = max(100, min(args.batch_size, 10_000))
+    args.source_workers = max(1, min(args.source_workers or args.threads * 2, 16))
     summary = run_import(args)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
