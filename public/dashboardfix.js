@@ -781,7 +781,9 @@
     const shopPhase = String(payload?.progress?.phase || "");
     const workerText = isShop
       ? shopPhase.startsWith("overture_")
-        ? `${fmtInt(payload?.progress?.sourceWorkers || 16)} streams × ${fmtInt(payload?.progress?.readerThreads || 4)} reader threads`
+        ? shopPhase === "overture_caching"
+          ? `${fmtInt(payload?.progress?.downloadWorkers || 16)} parallel downloads`
+          : `${fmtInt(payload?.progress?.sourceWorkers || 16)} streams × ${fmtInt(payload?.progress?.readerThreads || 4)} reader threads`
         : shopPhase.startsWith("inventory")
           ? "Wine-shop inventory workers"
           : "Waiting for shop collection"

@@ -411,6 +411,14 @@ def start_shop_collection(payload):
                 payload.get("readerThreads")
                 or os.environ.get("WHEREISKELLEY_OVERTURE_READER_THREADS", "4")
             )))),
+            "--download-workers", str(max(1, min(16, int(
+                payload.get("downloadWorkers")
+                or os.environ.get("WHEREISKELLEY_OVERTURE_DOWNLOAD_WORKERS", "16")
+            )))),
+            "--cache-dir", str(
+                payload.get("cacheDir")
+                or os.environ.get("WHEREISKELLEY_OVERTURE_CACHE_DIR", str(ROOT / "data" / "overture-cache"))
+            ),
             "--memory-limit", str(payload.get("memoryLimit") or os.environ.get("WHEREISKELLEY_OVERTURE_MEMORY", "18GB")),
             "--batch-size", str(max(500, int(payload.get("batchSize") or os.environ.get("WHEREISKELLEY_OVERTURE_BATCH_SIZE", "5000")))),
         ]

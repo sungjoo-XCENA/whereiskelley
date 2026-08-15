@@ -7,6 +7,7 @@ remain separate, repeatable phases linked through the canonical merchant id.
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 import os
@@ -19,7 +20,7 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -167,6 +168,92 @@ def parquet_columns(connection, path):
 
 def parquet_files(connection, path):
     return [str(row[0]) for row in connection.execute("select file from glob(?)", [path]).fetchall()]
+
+
+def s3_https_url(path):
+    parsed = urlparse(str(path))
+    if parsed.scheme != "s3" or not parsed.netloc:
+        return str(path)
+    key = quote(parsed.path.lstrip("/"), safe="/=")
+    return "https://{}.s3.us-west-2.amazonaws.com/{}".format(parsed.netloc, key)
+
+
+def cached_source_path(cache_dir, release, source_path):
+    name = Path(urlparse(str(source_path)).path).name
+    return Path(cache_dir) / release / name
+
+
+def download_source_file(source_path, target_path, progress=None):
+    target_path = Path(target_path)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    if target_path.is_file() and target_path.stat().st_size > 0:
+        return target_path, target_path.stat().st_size, True
+
+    partial_path = target_path.with_suffix(target_path.suffix + ".part")
+    downloaded = partial_path.stat().st_size if partial_path.exists() else 0
+    headers = {"User-Agent": "whereiskelley-overture-cache/1.0"}
+    if downloaded:
+        headers["Range"] = "bytes={}-".format(downloaded)
+    request = Request(s3_https_url(source_path), headers=headers)
+    with urlopen(request, timeout=120) as response:
+        append = downloaded > 0 and getattr(response, "status", 200) == 206
+        if not append:
+            downloaded = 0
+        mode = "ab" if append else "wb"
+        with partial_path.open(mode) as output:
+            while True:
+                chunk = response.read(8 * 1024 * 1024)
+                if not chunk:
+                    break
+                output.write(chunk)
+                downloaded += len(chunk)
+                if progress:
+                    progress(len(chunk))
+    partial_path.replace(target_path)
+    return target_path, downloaded, False
+
+
+def download_source_file_with_retry(source_path, target_path, progress=None, attempts=3):
+    for attempt in range(1, attempts + 1):
+        try:
+            return download_source_file(source_path, target_path, progress)
+        except Exception:
+            if attempt >= attempts:
+                raise
+            time.sleep(2 ** (attempt - 1))
+
+
+def cache_overture_files(
+    source_files,
+    cache_dir,
+    release,
+    workers,
+    progress=None,
+    completed=None,
+):
+    targets = [cached_source_path(cache_dir, release, source) for source in source_files]
+    missing = [
+        (source, target)
+        for source, target in zip(source_files, targets)
+        if not target.is_file() or target.stat().st_size <= 0
+    ]
+    completed_count = len(source_files) - len(missing)
+    if completed:
+        completed(completed_count, len(source_files))
+    if not missing:
+        return [str(path) for path in targets]
+
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(missing)))) as executor:
+        futures = {
+            executor.submit(download_source_file_with_retry, source, target, progress): target
+            for source, target in missing
+        }
+        for future in as_completed(futures):
+            future.result()
+            completed_count += 1
+            if completed:
+                completed(completed_count, len(source_files))
+    return [str(path) for path in targets]
 
 
 def worker_memory_limit(total_limit, workers):
@@ -698,6 +785,7 @@ def run_import(args):
         "release": release, "path": path, "scope": scope, "limit": args.limit,
         "batchSize": args.batch_size, "threads": args.threads,
         "sourceWorkers": args.source_workers, "readerThreads": args.reader_threads,
+        "downloadWorkers": args.download_workers, "cacheDir": str(args.cache_dir),
         "partial": partial,
     }
     ensure_shop_db(args.db)
@@ -715,6 +803,10 @@ def run_import(args):
     source_files_total = 0
     source_files_completed = 0
     source_workers = 1
+    cached_bytes = 0
+    cache_files_completed = 0
+    cache_lock = threading.Lock()
+    cache_last_write = [0.0]
 
     def write_progress(
         status="running",
@@ -723,6 +815,8 @@ def run_import(args):
         stage_index=1,
         stage_label="Prepare Overture release",
         stage_status="running",
+        stage_processed=None,
+        stage_total=None,
     ):
         elapsed_seconds = max(0.001, time.monotonic() - started_monotonic)
         atomic_write_json(args.progress, {
@@ -732,14 +826,18 @@ def run_import(args):
             "scope": scope, "threads": args.threads, "memoryLimit": args.memory_limit,
             "batchSize": args.batch_size, "sourceWorkers": source_workers,
             "readerThreads": args.reader_threads,
+            "downloadWorkers": args.download_workers,
+            "cacheDir": str(args.cache_dir),
+            "cachedBytes": cached_bytes,
+            "cacheFilesCompleted": cache_files_completed,
             "sourceFiles": source_files_total,
             "sourceFilesCompleted": source_files_completed,
             "elapsedSeconds": round(elapsed_seconds, 1),
             "rowsPerSecond": round(counts["source_rows"] / elapsed_seconds, 1),
             "stageIndex": stage_index, "stageCount": 4,
             "stageLabel": stage_label, "stageStatus": stage_status,
-            "stageProcessed": counts["source_rows"] if stage_index == 2 else None,
-            "stageTotal": None,
+            "stageProcessed": counts["source_rows"] if stage_processed is None and stage_index == 2 else stage_processed,
+            "stageTotal": stage_total,
             **counts,
         })
 
@@ -795,6 +893,56 @@ def run_import(args):
             raise RuntimeError("Overture release contains no Places parquet files")
         source_files_total = len(files)
         source_workers = min(args.source_workers, source_files_total)
+        if args.cache_dir:
+            def cache_progress(delta):
+                nonlocal cached_bytes
+                with cache_lock:
+                    cached_bytes += delta
+                    now = time.monotonic()
+                    if now - cache_last_write[0] < 1:
+                        return
+                    cache_last_write[0] = now
+                    write_progress(
+                        message="Caching Overture Places locally ({:.2f} GiB downloaded).".format(
+                            cached_bytes / (1024 ** 3)
+                        ),
+                        phase="overture_caching",
+                        stage_index=1,
+                        stage_label="Cache Overture source files",
+                        stage_processed=cached_bytes,
+                    )
+
+            def cache_completed(completed, total):
+                nonlocal cache_files_completed
+                with cache_lock:
+                    cache_files_completed = completed
+                    write_progress(
+                        message="Cached {:,}/{:,} Overture source files.".format(completed, total),
+                        phase="overture_caching",
+                        stage_index=1,
+                        stage_label="Cache Overture source files",
+                        stage_processed=completed,
+                        stage_total=total,
+                    )
+
+            write_progress(
+                message="Caching {} Overture files with {} parallel downloads.".format(
+                    source_files_total, min(args.download_workers, source_files_total)
+                ),
+                phase="overture_caching",
+                stage_index=1,
+                stage_label="Cache Overture source files",
+            )
+            files = cache_overture_files(
+                files,
+                args.cache_dir,
+                release,
+                args.download_workers,
+                cache_progress,
+                cache_completed,
+            )
+            cache_files_completed = source_files_total
+            source_files_completed = 0
         columns = parquet_columns(duck, files[0])
         write_progress(
             message="Reading {} Overture files with {} parallel streams.".format(
@@ -931,11 +1079,20 @@ def main():
         "--reader-threads", type=int, default=0,
         help="DuckDB threads per parquet reader; 0 uses the available CPU count up to four",
     )
+    parser.add_argument(
+        "--download-workers", type=int, default=16,
+        help="Parallel downloads used to populate the release-specific local cache",
+    )
+    parser.add_argument(
+        "--cache-dir", type=Path, default=ROOT / "data" / "overture-cache",
+        help="Release-specific Parquet cache; pass an empty value to disable",
+    )
     parser.add_argument("--memory-limit", default="", help="DuckDB limit such as 12GB")
     args = parser.parse_args()
     args.batch_size = max(100, min(args.batch_size, 10_000))
     args.source_workers = max(1, min(args.source_workers or args.threads * 4, 16))
     args.reader_threads = max(1, min(args.reader_threads or (os.cpu_count() or 2), 4))
+    args.download_workers = max(1, min(args.download_workers, 16))
     summary = run_import(args)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

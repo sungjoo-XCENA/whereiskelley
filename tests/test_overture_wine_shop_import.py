@@ -245,6 +245,40 @@ class OvertureWineShopImportTests(unittest.TestCase):
         )
         self.assertEqual(("done", "source.parquet", None, None), output.get_nowait())
 
+    def test_s3_source_uses_public_https_endpoint(self):
+        self.assertEqual(
+            "https://overturemaps-us-west-2.s3.us-west-2.amazonaws.com/"
+            "release/2026-07-22.0/theme=places/type=place/part-1.parquet",
+            MODULE.s3_https_url(
+                "s3://overturemaps-us-west-2/release/2026-07-22.0/"
+                "theme=places/type=place/part-1.parquet"
+            ),
+        )
+
+    def test_cache_reuses_completed_release_file(self):
+        cache_dir = Path(self.tempdir.name) / "cache"
+        source = (
+            "s3://overturemaps-us-west-2/release/2026-07-22.0/"
+            "theme=places/type=place/part-1.parquet"
+        )
+        target = MODULE.cached_source_path(cache_dir, "2026-07-22.0", source)
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"cached parquet")
+        completed = []
+
+        with mock.patch.object(MODULE, "download_source_file_with_retry") as download:
+            paths = MODULE.cache_overture_files(
+                [source],
+                cache_dir,
+                "2026-07-22.0",
+                16,
+                completed=lambda done, total: completed.append((done, total)),
+            )
+
+        download.assert_not_called()
+        self.assertEqual([str(target)], paths)
+        self.assertEqual([(1, 1)], completed)
+
 
 if __name__ == "__main__":
     unittest.main()
