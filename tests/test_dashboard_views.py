@@ -62,6 +62,10 @@ class DashboardViewTests(unittest.TestCase):
     def test_resource_panel_hides_internal_sample_interval(self):
         self.assertNotIn("samples / every", self.script)
 
+    def test_resource_chart_uses_latest_250_five_second_samples(self):
+        self.assertIn("samples.length <= 250", self.script)
+        self.assertIn("Array.from({ length: 250 }", self.script)
+
     def test_collection_shows_worker_and_resource_limits(self):
         self.assertIn("workerConfig", self.script)
         self.assertIn("resourceGovernor", self.script)

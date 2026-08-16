@@ -23,6 +23,10 @@ class FinishedProcess:
 
 
 class ResourceMonitorTests(unittest.TestCase):
+    def test_default_history_matches_dashboard_refresh(self):
+        self.assertEqual(resource_monitor.DEFAULT_INTERVAL, 5)
+        self.assertEqual(resource_monitor.MAX_SAMPLES, 250)
+
     def test_cpu_percent_uses_total_and_idle_deltas(self):
         self.assertEqual(resource_monitor.cpu_percent((100, 40), (200, 70)), 70.0)
         self.assertIsNone(resource_monitor.cpu_percent(None, (200, 70)))
@@ -73,6 +77,25 @@ class ResourceMonitorTests(unittest.TestCase):
             self.assertEqual(payload["samples"][0]["sourceCandidatesTotal"], 40)
             self.assertIn("diskPercent", payload["samples"][0])
             self.assertEqual(payload["exitCode"], 0)
+
+    def test_append_sample_keeps_only_the_latest_250_samples(self):
+        with tempfile.TemporaryDirectory() as directory:
+            history_path = Path(directory) / "resource-history.json"
+            progress = {"runId": 18, "startedAt": "2026-08-16T00:00:00+00:00"}
+
+            for index in range(260):
+                resource_monitor.append_sample(
+                    history_path,
+                    {"at": f"sample-{index}"},
+                    progress,
+                    interval_seconds=5,
+                )
+
+            payload = json.loads(history_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["intervalSeconds"], 5)
+            self.assertEqual(len(payload["samples"]), 250)
+            self.assertEqual(payload["samples"][0]["at"], "sample-10")
+            self.assertEqual(payload["samples"][-1]["at"], "sample-259")
 
 
 if __name__ == "__main__":

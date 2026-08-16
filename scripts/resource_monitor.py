@@ -11,8 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HISTORY_PATH = ROOT / "public" / "data" / "resource-history.json"
 PROGRESS_PATH = ROOT / "public" / "data" / "guide-progress.json"
-DEFAULT_INTERVAL = max(5, int(os.environ.get("WHEREISKELLEY_RESOURCE_SAMPLE_SECONDS", "30")))
-MAX_SAMPLES = max(120, int(os.environ.get("WHEREISKELLEY_RESOURCE_MAX_SAMPLES", "1440")))
+DEFAULT_INTERVAL = max(5, int(os.environ.get("WHEREISKELLEY_RESOURCE_SAMPLE_SECONDS", "5")))
+MAX_SAMPLES = max(120, int(os.environ.get("WHEREISKELLEY_RESOURCE_MAX_SAMPLES", "250")))
 
 
 def utc_now():

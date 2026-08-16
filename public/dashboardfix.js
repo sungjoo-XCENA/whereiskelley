@@ -1175,9 +1175,9 @@
     const samples = Array.isArray(payload?.resourceHistory?.samples)
       ? payload.resourceHistory.samples
       : [];
-    if (samples.length <= 240) return samples;
-    const step = (samples.length - 1) / 239;
-    return Array.from({ length: 240 }, (_value, index) => samples[Math.round(index * step)]);
+    if (samples.length <= 250) return samples;
+    const step = (samples.length - 1) / 249;
+    return Array.from({ length: 250 }, (_value, index) => samples[Math.round(index * step)]);
   }
 
   function latestSample(samples) {
