@@ -44,6 +44,7 @@ class IntegratedSearchUiTests(unittest.TestCase):
         self.assertIn('short: "W", label: "Wine Shop DB"', APP_SCRIPT)
         self.assertIn("sourceLegendMarkup()", APP_SCRIPT)
         self.assertIn("groupSourceMarks(group)", APP_SCRIPT)
+        self.assertIn("if (!candidates.length) return [];", APP_SCRIPT)
 
     def test_review_cross_is_removed_from_venue_name(self):
         self.assertIn("stripVenueReviewPrefix", APP_SCRIPT)

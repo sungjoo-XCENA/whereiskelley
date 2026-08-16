@@ -465,7 +465,8 @@ function sourcePriceOffers(group) {
     const candidates = sourceLines
       .filter(hasValidPrice)
       .sort((a, b) => groupResultKrwValue(a) - groupResultKrwValue(b));
-    return [{ ...source, result: candidates[0] || sourceLines[0] }];
+    if (!candidates.length) return [];
+    return [{ ...source, result: candidates[0] }];
   });
 }
 
