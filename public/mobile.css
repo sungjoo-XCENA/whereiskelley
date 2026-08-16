@@ -126,7 +126,7 @@
   }
 
   .result-table > tbody > tr.place-row > td:nth-child(6)::before {
-    content: 'Price offers';
+    content: 'Price';
   }
 
   .place-cell {

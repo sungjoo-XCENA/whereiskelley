@@ -445,8 +445,7 @@ function priceOffersMarkup(group) {
   const offers = sourcePriceOffers(group);
   if (!offers.length) return `<span class="review-pill muted">N/A</span>`;
   return `<div class="price-offers">${offers.map((offer) => `
-    <span class="price-offer ${escapeHtml(offer.key)}">
-      <small>${escapeHtml(offer.label)}</small>
+    <span class="price-offer ${escapeHtml(offer.key)}" title="${escapeHtml(offer.label)}">
       ${krwPriceMarkup(offer.result)}
     </span>`).join("")}</div>`;
 }
@@ -854,7 +853,7 @@ function renderResultList() {
           <th>${sortHeader("Country", "country")}</th>
           <th>${sortHeader("Updated", "updated")}</th>
           <th>${sortHeader("Matches", "matches")}</th>
-          <th>${sortHeader("Price offers", "krw")}</th>
+          <th>${sortHeader("Price", "krw")}</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -867,9 +866,8 @@ function renderPlaceRow(group) {
   const venue = group.venue || {};
   const firstList = group.results[0]?.wineList || {};
   const expanded = key && key === activeVenueKey;
-  const sources = [...new Set(group.results.map(resultSource))].sort();
   return `<tr class="place-row${expanded ? " active" : ""}" data-venue-key="${escapeHtml(key)}">
-      <td class="place-cell"><b>${escapeHtml(fallback(venue.name))}</b><span>${escapeHtml(venue.type || "Restaurant / wine bar")}</span><span class="source-badges">${sources.map(sourceBadge).join("")}</span></td>
+      <td class="place-cell"><b>${escapeHtml(fallback(venue.name))}</b><span>${escapeHtml(venue.type || "Restaurant / wine bar")}</span></td>
       <td>${escapeHtml(fallback(venue.city))}</td>
       <td>${escapeHtml(fallback(venue.country))}</td>
       <td>${escapeHtml(fallback(groupUpdatedValue(group) || firstList.updatedDate || firstList.updatedText))}</td>

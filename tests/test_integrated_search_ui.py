@@ -26,7 +26,9 @@ class IntegratedSearchUiTests(unittest.TestCase):
 
     def test_same_restaurant_is_grouped_but_source_prices_stay_separate(self):
         self.assertIn('return `${name}|${city}|${country}`', APP_SCRIPT)
-        self.assertIn('sortHeader("Price offers", "krw")', APP_SCRIPT)
+        self.assertIn('sortHeader("Price", "krw")', APP_SCRIPT)
+        self.assertIn('title="${escapeHtml(offer.label)}"', APP_SCRIPT)
+        self.assertNotIn("sources.map(sourceBadge)", APP_SCRIPT)
         self.assertIn('label: "Star Wine"', APP_SCRIPT)
         self.assertIn('label: "Restaurant DB"', APP_SCRIPT)
         self.assertIn('label: "Wine Shop DB"', APP_SCRIPT)

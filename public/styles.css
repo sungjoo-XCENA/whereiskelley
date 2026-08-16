@@ -238,26 +238,21 @@ button:hover {
 
 .price-offers {
   display: grid;
-  gap: 4px;
-  min-width: 142px;
+  gap: 6px;
+  min-width: 112px;
 }
 
 .price-offer {
-  display: grid;
-  grid-template-columns: 60px minmax(0, 1fr);
+  display: flex;
+  min-width: 0;
   align-items: center;
-  gap: 6px;
   white-space: nowrap;
 }
 
-.price-offer small {
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 850;
-}
-
 .price-offer .krw-price {
+  display: block;
   font-size: 12px;
+  line-height: 1.2;
 }
 
 .offer-note {
