@@ -67,6 +67,11 @@ class IntegratedSearchUiTests(unittest.TestCase):
         self.assertIn('if (error.name === "AbortError") return', APP_SCRIPT)
         self.assertNotIn("submitButton.disabled = true", APP_SCRIPT)
 
+    def test_collected_shop_uses_one_canonical_wine_list_button(self):
+        self.assertIn("result.venue?.inventoryUrl", APP_SCRIPT)
+        self.assertIn("const collectedListUrl = collectedResults", APP_SCRIPT)
+        self.assertNotIn("collectedListUrls.slice(0, 3)", APP_SCRIPT)
+
 
 if __name__ == "__main__":
     unittest.main()

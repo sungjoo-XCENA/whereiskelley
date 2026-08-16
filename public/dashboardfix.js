@@ -24,8 +24,12 @@
     guideActionKind: "",
     shopActionInFlight: false,
     shopActionMessage: "",
-    lastRefreshAt: ""
+    lastRefreshAt: "",
+    collectionRefreshTimer: null,
+    mapLoadedOnce: false
   };
+
+  const COLLECTION_REFRESH_MS = 5000;
 
   const css = document.createElement("style");
   css.textContent = `
@@ -73,27 +77,27 @@
       margin-top: 14px;
     }
     .database-mode-control {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      width: 260px;
-      gap: 3px;
-      padding: 3px;
+      display: inline-flex;
+      width: auto;
+      gap: 5px;
+      padding: 4px;
       border: 1px solid #d9dee7;
       border-radius: 8px;
-      background: #eef1f5;
+      background: #f3f5f8;
       box-shadow: inset 0 1px 2px rgba(17, 20, 24, 0.04);
     }
     .database-mode-control button {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-height: 38px;
-      padding: 0 16px;
+      gap: 6px;
+      min-height: 30px;
+      padding: 0 10px 0 7px;
       border: 1px solid transparent;
       border-radius: 6px;
       background: transparent;
       color: #5d687a;
-      font-size: 14px;
+      font-size: 12px;
       font-weight: 800;
       cursor: pointer;
       transition: color 140ms ease, background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
@@ -106,11 +110,36 @@
       outline: 2px solid rgba(171, 15, 58, 0.28);
       outline-offset: 2px;
     }
-    .database-mode-control button.active {
-      border-color: #111827;
-      background: #111827;
+    .database-mode-key {
+      display: inline-grid;
+      width: 19px;
+      height: 19px;
+      place-items: center;
+      border-radius: 50%;
+      background: #d8dee8;
+      color: #4b5563;
+      font-size: 10px;
+      font-weight: 950;
+    }
+    .database-mode-control button.restaurant.active {
+      border-color: #85d7bc;
+      background: #eaf9f3;
+      color: #08795d;
+      box-shadow: 0 1px 3px rgba(8, 121, 93, 0.12);
+    }
+    .database-mode-control button.shop.active {
+      border-color: #f1bd72;
+      background: #fff5e7;
+      color: #9a4f00;
+      box-shadow: 0 1px 3px rgba(154, 79, 0, 0.12);
+    }
+    .database-mode-control button.restaurant.active .database-mode-key {
+      background: #0f9f76;
       color: #fff;
-      box-shadow: 0 1px 3px rgba(17, 20, 24, 0.18);
+    }
+    .database-mode-control button.shop.active .database-mode-key {
+      background: #e98b13;
+      color: #fff;
     }
     .database-map-header {
       display: flex;
@@ -130,6 +159,29 @@
     }
     .database-map-header .map-legend {
       margin: 0 0 3px;
+    }
+    .database-map-tools {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .database-world-reset {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 30px;
+      padding: 0 9px;
+      border: 1px solid #cbd5e1;
+      border-radius: 7px;
+      background: #fff;
+      color: #334155;
+      font-size: 12px;
+      font-weight: 850;
+      cursor: pointer;
+    }
+    .database-world-reset:hover {
+      border-color: #0f766e;
+      color: #0f766e;
     }
     .database-summary-copy {
       margin: 7px 0 14px;
@@ -156,6 +208,46 @@
     }
     .collection-toolbar h2 {
       margin: 2px 0 0;
+    }
+    .collection-toolbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .collection-sync-copy {
+      display: grid;
+      justify-items: end;
+      gap: 3px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
+      line-height: 1.2;
+    }
+    .collection-sync-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #08795d;
+      font-weight: 900;
+    }
+    .collection-sync-state::before {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #10a878;
+      content: "";
+      box-shadow: 0 0 0 3px rgba(16, 168, 120, 0.1);
+    }
+    .collection-sync-copy .dashboard-action-note {
+      max-width: 420px;
+      overflow: hidden;
+      color: var(--ink);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .collection-refresh-button span {
+      font-size: 16px;
+      line-height: 1;
     }
     .collection-job-grid {
       display: grid;
@@ -949,8 +1041,12 @@
         flex-direction: column;
       }
       .database-map-titlebar,
-      .database-mode-control {
+      .database-map-tools {
         width: 100%;
+      }
+      .database-map-tools {
+        align-items: flex-start;
+        justify-content: space-between;
       }
       .database-map-titlebar {
         gap: 10px;
@@ -965,6 +1061,13 @@
       .collection-toolbar {
         align-items: flex-start;
         flex-direction: column;
+      }
+      .collection-toolbar-actions {
+        width: 100%;
+        justify-content: space-between;
+      }
+      .collection-sync-copy {
+        justify-items: start;
       }
       .dashboard-progress-actions {
         justify-content: flex-start;
@@ -1294,12 +1397,20 @@
     return !progress.status && !number(counts.targets || counts.wineLines || counts.wineListSources);
   }
 
-  async function fetchLiveGuideCollection() {
+  async function fetchLiveGuideCollection(options = {}) {
+    const compact = Boolean(options.compact);
+    const suffix = compact ? "?compact=1" : "";
     const [proxied, shops, resourceHistory] = await Promise.all([
-      fetchJson("/api/guide-collection", null),
-      fetchJson("/api/shop-collection", null),
+      fetchJson(`/api/guide-collection${suffix}`, null),
+      fetchJson(`/api/shop-collection${suffix}`, null),
       fetchJson("/data/resource-history.json", null)
     ]);
+    if (compact && proxied && !proxied.mapTargets?.length && state.guidePayload?.mapTargets?.length) {
+      proxied.mapTargets = state.guidePayload.mapTargets;
+    }
+    if (compact && shops && !shops.mapMerchants?.length && state.shopPayload?.mapMerchants?.length) {
+      shops.mapMerchants = state.shopPayload.mapMerchants;
+    }
     state.shopPayload = shops;
     if (proxied && resourceHistory?.samples) proxied.resourceHistory = resourceHistory;
     if (!isEmptyGuidePayload(proxied)) return proxied;
@@ -1430,17 +1541,30 @@
     document.querySelector(".map-panel")?.classList.toggle("hidden", !showSearch);
     if (view === "database") {
       renderDatabase();
-      if (!state.guideLoadedOnce) loadGuideStats({ force: true });
+      if (!state.guideLoadedOnce || !state.mapLoadedOnce) loadGuideStats({ force: true });
     }
     if (view === "collection") {
       renderCollection();
-      if (!state.guideLoadedOnce) loadGuideStats({ force: true });
+      if (!state.guideLoadedOnce) loadGuideStats({ force: true, compact: true });
     }
     if (showSearch) {
       try {
         if (typeof renderMap === "function") renderMap(typeof latestResults === "undefined" ? [] : latestResults);
       } catch (_error) {}
     }
+    syncCollectionAutoRefresh();
+  }
+
+  function syncCollectionAutoRefresh() {
+    if (state.collectionRefreshTimer) {
+      window.clearInterval(state.collectionRefreshTimer);
+      state.collectionRefreshTimer = null;
+    }
+    if (state.activeView !== "collection") return;
+    state.collectionRefreshTimer = window.setInterval(() => {
+      if (document.hidden || state.activeView !== "collection") return;
+      loadGuideStats({ force: true, silent: true, compact: true });
+    }, COLLECTION_REFRESH_MS);
   }
 
   function progressValues(payload) {
@@ -1967,14 +2091,17 @@
             <h2>Database map</h2>
           </div>
           <div class="database-mode-control" role="tablist" aria-label="Database type">
-            <button type="button" role="tab" aria-selected="${state.databaseMode === "restaurants"}" data-database-mode="restaurants" class="${state.databaseMode === "restaurants" ? "active" : ""}">Restaurants</button>
-            <button type="button" role="tab" aria-selected="${state.databaseMode === "shops"}" data-database-mode="shops" class="${state.databaseMode === "shops" ? "active" : ""}">Wine shops</button>
+            <button type="button" role="tab" aria-selected="${state.databaseMode === "restaurants"}" data-database-mode="restaurants" class="restaurant ${state.databaseMode === "restaurants" ? "active" : ""}"><span class="database-mode-key">R</span><span>Restaurants</span></button>
+            <button type="button" role="tab" aria-selected="${state.databaseMode === "shops"}" data-database-mode="shops" class="shop ${state.databaseMode === "shops" ? "active" : ""}"><span class="database-mode-key">W</span><span>Wine shops</span></button>
           </div>
         </div>
-        <div class="map-legend">
-          <span class="legend-dot" style="--dot:#16a34a">Inventory found</span>
-          <span class="legend-dot" style="--dot:#dc2626">No wine list</span>
-          <span class="legend-dot" style="--dot:#f59e0b">Pending / review</span>
+        <div class="database-map-tools">
+          <div class="map-legend">
+            <span class="legend-dot" style="--dot:#16a34a">Inventory found</span>
+            <span class="legend-dot" style="--dot:#dc2626">No wine list</span>
+            <span class="legend-dot" style="--dot:#f59e0b">Pending / review</span>
+          </div>
+          <button class="database-world-reset" type="button" data-clear-dashboard-selection title="Reset the map to show every saved place"><span aria-hidden="true">&#8634;</span>World view</button>
         </div>
       </div>
       <div class="dashboard-map-wrap">
@@ -2017,10 +2144,13 @@
         <p class="dash-kicker">Collection</p>
         <h2>Collection overview</h2>
       </div>
-      <div class="collection-job-actions">
-        ${message ? `<span class="dashboard-action-note">${html(message)}</span>` : ""}
-        ${state.lastRefreshAt ? `<span class="dashboard-action-note">Updated ${html(state.lastRefreshAt)}</span>` : ""}
-        <button class="dashboard-refresh" type="button" data-refresh-collection ${state.guideLoadInFlight ? "disabled" : ""}>${html(state.guideLoadInFlight ? "Refreshing..." : "Refresh")}</button>
+      <div class="collection-toolbar-actions">
+        <div class="collection-sync-copy">
+          <span class="collection-sync-state">Auto refresh</span>
+          <time>${state.lastRefreshAt ? `Updated ${html(state.lastRefreshAt)}` : "Waiting for data"}</time>
+          ${message ? `<span class="dashboard-action-note">${html(message)}</span>` : ""}
+        </div>
+        <button class="dashboard-refresh collection-refresh-button" type="button" data-refresh-collection ${state.guideLoadInFlight ? "disabled" : ""}><span aria-hidden="true">&#8635;</span>${html(state.guideLoadInFlight ? "Refreshing" : "Refresh")}</button>
       </div>
     </section>`;
   }
@@ -2565,25 +2695,28 @@
     if (state.guideLoadInFlight) return;
     if (state.guideLoadedOnce && !options.force) return;
     state.guideLoadInFlight = true;
-    if (options.force) {
+    if (options.force && !options.silent) {
       state.guideActionKind = "";
       state.guideActionMessage = "Refreshing saved data...";
       renderActiveGuideView();
     }
     try {
-      const payload = await fetchLiveGuideCollection();
+      const payload = await fetchLiveGuideCollection({ compact: options.compact });
       if (isEmptyGuidePayload(payload) && state.guidePayload) return;
       state.guidePayload = payload;
       state.guideLoadedOnce = true;
+      if (!options.compact) state.mapLoadedOnce = true;
       state.lastRefreshAt = new Date().toLocaleTimeString();
-      if (options.force && !state.guideActionMessage.includes("started")) {
+      if (options.force && !options.silent && !state.guideActionMessage.includes("started")) {
         state.guideActionKind = "good";
         state.guideActionMessage = "Saved data refreshed.";
       }
       renderActiveGuideView();
     } catch (error) {
-      state.guideActionKind = "bad";
-      state.guideActionMessage = `Refresh failed: ${error.message || error}`;
+      if (!options.silent) {
+        state.guideActionKind = "bad";
+        state.guideActionMessage = `Refresh failed: ${error.message || error}`;
+      }
     } finally {
       state.guideLoadInFlight = false;
       renderActiveGuideView();
@@ -2612,6 +2745,11 @@
       if (!event.target.closest("[data-start-guide-collection]")) return;
       event.preventDefault();
       startGuideRecollection("inventory");
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && state.activeView === "collection") {
+        loadGuideStats({ force: true, silent: true, compact: true });
+      }
     });
     document.body.addEventListener("click", (event) => {
       if (!event.target.closest("[data-start-guide-directory]")) return;

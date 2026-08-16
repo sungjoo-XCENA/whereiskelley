@@ -82,7 +82,7 @@ def _row_dict(row):
     return {key: row[key] for key in row.keys()}
 
 
-def shop_collection_status(path=None, map_limit=6000):
+def shop_collection_status(path=None, map_limit=6000, include_map=True):
     ensure_shop_db(path)
     progress = read_progress()
     con = connect_shop(path)
@@ -114,7 +114,7 @@ def shop_collection_status(path=None, map_limit=6000):
                 "select * from merchant_discovery_runs order by id desc limit 8"
             ).fetchall()
         ]
-        map_merchants = [
+        map_merchants = [] if not include_map else [
             _row_dict(row)
             for row in con.execute(
                 """
@@ -260,6 +260,7 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
                 "address": row["address"] or "",
                 "googleMapsUrl": f"https://www.google.com/maps/search/?api=1&query={quote_plus(location_query)}",
                 "url": row["website_url"] or row["wine_searcher_url"] or "",
+                "inventoryUrl": row["inventory_url"] or source_url,
             },
             "wineList": {
                 "id": f"shop-source-{row['source_id']}",

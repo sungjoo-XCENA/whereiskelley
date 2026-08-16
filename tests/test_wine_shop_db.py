@@ -98,6 +98,10 @@ class WineShopDatabaseTests(unittest.TestCase):
             self.assertEqual(results[0]["source"], "Wine Shop Database")
             self.assertEqual(results[0]["prices"], ["CHF 1700"])
             self.assertEqual(results[0]["venue"]["name"], "Di Jin Wines SA")
+            self.assertEqual(
+                results[0]["venue"]["inventoryUrl"],
+                "https://www.di-jin-wines.com/pricelist.xlsx",
+            )
             self.assertEqual(results[0]["wineList"]["downloadUrl"], "https://www.di-jin-wines.com/pricelist.xlsx")
 
     def test_search_terms_can_span_merchant_and_product_names(self):
@@ -126,6 +130,7 @@ class WineShopDatabaseTests(unittest.TestCase):
             results = search_shop_products("Volcano Rose", path=db_path)
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0]["venue"]["name"], "Volcano Winery")
+            self.assertEqual(results[0]["venue"]["inventoryUrl"], "https://volcanowinery.com/wines")
             self.assertEqual(results[0]["priceValue"], 30)
 
 

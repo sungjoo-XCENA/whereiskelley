@@ -48,8 +48,10 @@ COUNTRY_COORDS = {
     "UK": (55.3781, -3.4360),
     "USA": (37.0902, -95.7129),
 }
-CURRENCY_RE = r"\u20ac|\$|\u00a3|\u00a5|\u20a9|CHF|DKK|SEK|NOK|USD|EUR|GBP|CAD|AUD|SGD|HKD|AED|CNY|CZK|ARS|JPY|KRW"
-PRICE_CURRENCY_RE = r"A\$|AU\$|CA\$|HK\$|S\$|US\$|" + CURRENCY_RE
+CURRENCY_SYMBOL_RE = r"\u20ac|\$|\u00a3|\u00a5|\u20a9"
+CURRENCY_CODE_RE = r"CHF|DKK|SEK|NOK|USD|EUR|GBP|CAD|AUD|SGD|HKD|AED|CNY|CZK|ARS|JPY|KRW"
+CURRENCY_RE = rf"(?:{CURRENCY_SYMBOL_RE}|(?<![A-Za-z])(?:{CURRENCY_CODE_RE})(?![A-Za-z]))"
+PRICE_CURRENCY_RE = rf"(?:A\$|AU\$|CA\$|HK\$|S\$|US\$|{CURRENCY_RE})"
 NO_PRICE_RE = r"\b(?:ask\s+(?:your\s+)?sommelier|ask\s+(?:us|staff)|on\s+request|upon\s+request|price\s+on\s+request|market\s+price|enquire|inquire|poa|n/?a|sold\s+out)\b|\ubb38\uc758|\uc2dc\uac00|\uc2ef\uac00"
 CURRENCY_ALIASES = {
     "\u20ac": "EUR",

@@ -38,9 +38,23 @@ class DashboardViewTests(unittest.TestCase):
 
     def test_selected_restaurant_has_one_clear_world_map_action(self):
         self.assertIn("Back to world map", self.script)
+        self.assertIn("World view", self.script)
+        self.assertIn("database-world-reset", self.script)
         self.assertNotIn("data-world-view-control", self.script)
         self.assertNotIn("function syncWorldViewControls()", self.script)
         self.assertNotIn(">Close</button>", self.script)
+
+    def test_collection_auto_refreshes_with_compact_payloads(self):
+        self.assertIn("COLLECTION_REFRESH_MS = 5000", self.script)
+        self.assertIn("syncCollectionAutoRefresh()", self.script)
+        self.assertIn('const suffix = compact ? "?compact=1" : ""', self.script)
+        self.assertIn("Auto refresh", self.script)
+
+    def test_database_mode_uses_compact_colored_keys(self):
+        self.assertIn('class="database-mode-key">R</span>', self.script)
+        self.assertIn('class="database-mode-key">W</span>', self.script)
+        self.assertIn("button.restaurant.active", self.script)
+        self.assertIn("button.shop.active", self.script)
 
     def test_collection_shows_worker_and_resource_limits(self):
         self.assertIn("workerConfig", self.script)

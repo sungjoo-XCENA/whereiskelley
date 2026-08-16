@@ -1,9 +1,12 @@
 import io
 import hashlib
 import hmac
+import ipaddress
 import json
 import mimetypes
 import os
+import re
+import socket
 import subprocess
 import sqlite3
 import sys
@@ -509,6 +512,56 @@ def javascript_response(handler, text, status=200):
     handler.wfile.write(body)
 
 
+def safe_remote_url(value):
+    try:
+        parsed = urlparse(str(value or "").strip())
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+            return False
+        for info in socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)):
+            address = ipaddress.ip_address(info[4][0])
+            if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
+                return False
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def pdf_file_response(handler, params):
+    candidates = []
+    for value in [params.get("url", [""])[0], *params.get("fallbackUrls", [""])[0].split("|")]:
+        url = str(value or "").strip()
+        if url and url not in candidates and safe_remote_url(url):
+            candidates.append(url)
+    if not candidates:
+        return text_response(handler, "No valid PDF URL was provided.", status=400)
+
+    filename = Path(params.get("filename", ["wine-list.pdf"])[0]).name
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "-", filename).strip(".-") or "wine-list.pdf"
+    if not filename.lower().endswith(".pdf"):
+        filename += ".pdf"
+
+    errors = []
+    for url in candidates:
+        try:
+            body, _content_type, final_url = sync_search_api.fetch_binary(url)
+            if not body.lstrip().startswith(b"%PDF"):
+                errors.append(f"{url}: response was not a PDF")
+                continue
+            handler.send_response(200)
+            handler.send_header("content-type", "application/pdf")
+            handler.send_header("content-disposition", f'inline; filename="{filename}"')
+            handler.send_header("cache-control", "private, max-age=300")
+            handler.send_header("access-control-allow-origin", ALLOWED_ORIGIN)
+            handler.send_header("x-pdf-source", str(final_url or url))
+            handler.send_header("content-length", str(len(body)))
+            handler.end_headers()
+            handler.wfile.write(body)
+            return
+        except Exception as exc:
+            errors.append(f"{url}: {exc}")
+    return text_response(handler, "PDF download failed. " + " | ".join(errors[:3]), status=502)
+
+
 def shop_browser_extension_response(handler):
     extension_dir = ROOT / "tools" / "wine-searcher-browser-collector"
     if not extension_dir.exists():
@@ -607,7 +660,7 @@ def mark_stale_progress(progress):
     return stalled
 
 
-def guide_collection_status():
+def guide_collection_status(include_map=True):
     progress = mark_stale_progress(read_json_file(GUIDE_PROGRESS_PATH, {}))
     snapshot = read_json_file(GUIDE_STATUS_PATH, {})
     payload = {
@@ -719,7 +772,7 @@ def guide_collection_status():
                 """
             )
         ]
-        payload["mapTargets"] = [
+        payload["mapTargets"] = [] if not include_map else [
             row_to_dict(row)
             for row in con.execute(
                 """
@@ -1875,9 +1928,11 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
             if parsed.path == "/api/guide-collection":
-                return json_response(self, guide_collection_status())
+                include_map = params.get("compact", ["0"])[0].lower() not in ("1", "true", "yes")
+                return json_response(self, guide_collection_status(include_map=include_map))
             if parsed.path == "/api/shop-collection":
-                payload = shop_collection_status()
+                include_map = params.get("compact", ["0"])[0].lower() not in ("1", "true", "yes")
+                payload = shop_collection_status(include_map=include_map)
                 payload["collectionKind"] = "shops"
                 payload["resourceHistory"] = read_json_file(SHOP_RESOURCE_HISTORY_PATH, {})
                 payload["running"] = {
@@ -1900,6 +1955,8 @@ class Handler(BaseHTTPRequestHandler):
                 return json_response(self, pdf_lines(params))
             if parsed.path == "/api/pdf_lines_v2":
                 return json_response(self, pdf_lines(params))
+            if parsed.path == "/api/pdf_file":
+                return pdf_file_response(self, params)
             if parsed.path == "/api/unparsed":
                 return json_response(self, unparsed(params))
             if parsed.path in ("/config.js", "/api/config"):

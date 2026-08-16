@@ -979,9 +979,9 @@ function renderExpandedPlace(group) {
         <tbody>${lines || `<tr><td colspan="7" class="muted">Review needed. No priced wine line was verified from the PDF.</td></tr>`}</tbody>
       </table>`
     : "";
-  const collectedListUrls = collectedResults
-    .map((result) => pdfUrl(result.wineList || {}))
-    .filter((url, index, values) => url && values.indexOf(url) === index);
+  const collectedListUrl = collectedResults
+    .map((result) => result.venue?.inventoryUrl || pdfUrl(result.wineList || {}))
+    .find(Boolean) || "";
   const starWineVenue = group.results.find((result) => resultSourceKind(result) === "live")?.venue || {};
   const databaseVenue = group.results.find((result) => resultSourceKind(result) !== "live")?.venue || {};
   const mapUrl = databaseVenue.googleMapsUrl || starWineVenue.googleMapsUrl || venue.googleMapsUrl || venue.starWineMapUrl;
@@ -995,7 +995,7 @@ function renderExpandedPlace(group) {
           </div>
           <div class="actions compact">
             ${pdfLinksMarkup(pdfLists)}
-            ${collectedListUrls.slice(0, 3).map((url) => `<a class="primary-link" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">Wine list</a>`).join("")}
+            ${collectedListUrl ? `<a class="primary-link" href="${escapeHtml(collectedListUrl)}" target="_blank" rel="noreferrer">Wine list</a>` : ""}
             ${mapUrl ? `<a class="secondary" href="${escapeHtml(mapUrl)}" target="_blank" rel="noreferrer">Map</a>` : ""}
             ${starWineVenue.url ? `<a class="secondary" href="${escapeHtml(starWineVenue.url)}" target="_blank" rel="noreferrer">Star Wine</a>` : ""}
             ${databaseVenue.url ? `<a class="secondary" href="${escapeHtml(databaseVenue.url)}" target="_blank" rel="noreferrer">Official website</a>` : ""}
