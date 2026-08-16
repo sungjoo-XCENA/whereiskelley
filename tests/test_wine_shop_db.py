@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import wine_shop_db
 from wine_shop_db import (
     connect_shop,
     ensure_shop_db,
@@ -67,7 +68,7 @@ class WineShopDatabaseTests(unittest.TestCase):
                     (
                         33938, "https://www.wine-searcher.com/merchant/33938",
                         "Di Jin Wines SA", "di jin wines sa", "https://www.di-jin-wines.com/en/",
-                        "Switzerland", "Geneva", "Geneva, Switzerland", 46.2044, 6.1432, utc_now(),
+                        "CH", "Geneva", "Geneva, Switzerland", 46.2044, 6.1432, utc_now(),
                     ),
                 ).lastrowid
                 source_id = con.execute(
@@ -98,6 +99,8 @@ class WineShopDatabaseTests(unittest.TestCase):
             self.assertEqual(results[0]["source"], "Wine Shop Database")
             self.assertEqual(results[0]["prices"], ["CHF 1700"])
             self.assertEqual(results[0]["venue"]["name"], "Di Jin Wines SA")
+            self.assertEqual(results[0]["venue"]["country"], "Switzerland")
+            self.assertEqual(results[0]["venue"]["countryCode"], "CH")
             self.assertEqual(
                 results[0]["venue"]["inventoryUrl"],
                 "https://www.di-jin-wines.com/pricelist.xlsx",
@@ -132,6 +135,70 @@ class WineShopDatabaseTests(unittest.TestCase):
             self.assertEqual(results[0]["venue"]["name"], "Volcano Winery")
             self.assertEqual(results[0]["venue"]["inventoryUrl"], "https://volcanowinery.com/wines")
             self.assertEqual(results[0]["priceValue"], 30)
+
+    def test_hong_kong_filter_uses_iso_code_and_displays_country_name(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "shops.sqlite"
+            ensure_shop_db(db_path)
+            con = connect_shop(db_path)
+            try:
+                merchant_id = con.execute(
+                    "insert into merchants(name,normalized_name,website_url,country,city,active,inventory_status) values(?,?,?,?,?,1,'found')",
+                    ("Hong Kong Wines", "hong kong wines", "https://hk.example", "HK", "Hong Kong"),
+                ).lastrowid
+                source_id = con.execute(
+                    "insert into merchant_sources(merchant_id,source_type,source_url,status,parser_status) values(?,'html',?,'found','parsed')",
+                    (merchant_id, "https://hk.example/wines"),
+                ).lastrowid
+                upsert_product(con, merchant_id, source_id, {
+                    "source_key": "rayas-2011",
+                    "source_url": "https://hk.example/wines/rayas-2011",
+                    "raw_name": "Chateau Rayas 2011",
+                    "raw_text": "Chateau Rayas 2011 HK$12,888",
+                    "wine_name": "Chateau Rayas",
+                    "vintage": "2011",
+                    "price_value": 12888,
+                    "currency": "HKD",
+                    "price_text": "HK$12,888",
+                })
+                con.commit()
+            finally:
+                con.close()
+
+            hong_kong = search_shop_products("Rayas", country="Hong Kong", path=db_path)
+            china = search_shop_products("Rayas", country="China", path=db_path)
+
+            self.assertEqual(len(hong_kong), 1)
+            self.assertEqual(hong_kong[0]["venue"]["country"], "Hong Kong")
+            self.assertEqual(hong_kong[0]["venue"]["countryCode"], "HK")
+            self.assertEqual(china, [])
+
+    def test_existing_country_names_are_migrated_without_losing_original_value(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "shops.sqlite"
+            ensure_shop_db(db_path)
+            con = connect_shop(db_path)
+            try:
+                merchant_id = con.execute(
+                    "insert into merchants(name,normalized_name,country,city,active) values(?,?,?,?,1)",
+                    ("Legacy Shop", "legacy shop", "Hong Kong", "Hong Kong"),
+                ).lastrowid
+                con.commit()
+            finally:
+                con.close()
+
+            wine_shop_db._INITIALIZED_PATHS.discard(str(db_path.resolve()))
+            ensure_shop_db(db_path)
+            con = connect_shop(db_path)
+            try:
+                row = con.execute(
+                    "select country,country_raw from merchants where id=?", (merchant_id,)
+                ).fetchone()
+            finally:
+                con.close()
+
+            self.assertEqual(row["country"], "HK")
+            self.assertEqual(row["country_raw"], "Hong Kong")
 
 
 if __name__ == "__main__":

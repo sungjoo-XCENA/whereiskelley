@@ -37,6 +37,7 @@ create table if not exists merchants (
   website_url text,
   website_domain text,
   country text,
+  country_raw text,
   city text,
   address text,
   latitude real,

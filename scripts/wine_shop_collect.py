@@ -30,6 +30,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from wine_shop_db import SHOP_DB_PATH, PROGRESS_PATH, connect_shop, content_hash, ensure_shop_db, fold_text, upsert_product, utc_now
+from country_codes import normalize_country_code
 
 
 USER_AGENT = os.environ.get(
@@ -465,14 +466,20 @@ def save_profile_result(con, result):
     )
     if not profile:
         return False
+    raw_country = (profile.get("country") or "").strip()
+    country_code = normalize_country_code(
+        raw_country,
+        city=profile.get("city"),
+        address=profile.get("address"),
+    )
     con.execute(
         """
         insert into merchants(
           wine_searcher_id,wine_searcher_url,name,normalized_name,merchant_type,description,
-          website_url,website_domain,country,city,address,latitude,longitude,phone,
+          website_url,website_domain,country,country_raw,city,address,latitude,longitude,phone,
           wine_searcher_item_count,profile_status,profile_error,first_seen_at,last_seen_at,
           last_profile_checked_at,active,raw_hash
-        ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)
+        ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         on conflict(wine_searcher_id) do update set
           wine_searcher_url=excluded.wine_searcher_url,name=excluded.name,
           normalized_name=excluded.normalized_name,merchant_type=excluded.merchant_type,
@@ -480,6 +487,7 @@ def save_profile_result(con, result):
           website_url=coalesce(nullif(excluded.website_url,''),merchants.website_url),
           website_domain=coalesce(nullif(excluded.website_domain,''),merchants.website_domain),
           country=coalesce(nullif(excluded.country,''),merchants.country),
+          country_raw=coalesce(nullif(excluded.country_raw,''),merchants.country_raw),
           city=coalesce(nullif(excluded.city,''),merchants.city),
           address=coalesce(nullif(excluded.address,''),merchants.address),
           latitude=coalesce(excluded.latitude,merchants.latitude),
@@ -492,9 +500,11 @@ def save_profile_result(con, result):
         (
             merchant_id, profile["wine_searcher_url"], profile["name"], profile["normalized_name"],
             profile["merchant_type"], profile["description"], profile["website_url"],
-            profile["website_domain"], profile["country"], profile["city"], profile["address"],
+            profile["website_domain"], country_code or None, raw_country or None,
+            profile["city"], profile["address"],
             profile["latitude"], profile["longitude"], profile["phone"],
-            profile["wine_searcher_item_count"], "found", "", utc_now(), utc_now(), utc_now(), profile["raw_hash"],
+            profile["wine_searcher_item_count"], "found", "", utc_now(), utc_now(), utc_now(),
+            1, profile["raw_hash"],
         ),
     )
     return True

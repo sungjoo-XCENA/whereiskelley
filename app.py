@@ -21,6 +21,13 @@ from urllib.parse import parse_qs, quote_plus, urlparse
 from urllib.request import Request, urlopen
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from country_codes import (
+    COUNTRY_NAMES,
+    country_display_name,
+    country_values_match,
+    normalize_country_code,
+)
+
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC_DIR = ROOT / "public"
@@ -88,6 +95,8 @@ COLLECTOR_PROCESS = None
 SHOP_COLLECTOR_PROCESSES = {}
 SEARCH_REFRESH_LOCK = threading.Lock()
 SEARCH_REFRESH_CACHE = {}
+DB_SCHEMA_LOCK = threading.Lock()
+DB_SCHEMA_READY = set()
 SEARCH_REFRESH_CACHE_TTL = int(os.environ.get("WHEREISKELLEY_SEARCH_CACHE_SECONDS", "900"))
 SEARCH_PAGE_WORKERS = max(1, min(int(os.environ.get("WHEREISKELLEY_SEARCH_PAGE_WORKERS", "8")), 12))
 SEARCH_LOCATION_WORKERS = max(1, min(int(os.environ.get("WHEREISKELLEY_SEARCH_LOCATION_WORKERS", "8")), 12))
@@ -596,6 +605,50 @@ def config_js():
 def ensure_db():
     if not DB_PATH.exists():
         raise RuntimeError("Database is missing. Run scripts\\sync.ps1 or scripts\\sync.py first.")
+    resolved = str(DB_PATH.resolve())
+    if resolved in DB_SCHEMA_READY:
+        return
+    with DB_SCHEMA_LOCK:
+        if resolved in DB_SCHEMA_READY:
+            return
+        con = connect()
+        try:
+            for table in ("michelin_places", "guide_places", "restaurant_targets"):
+                columns = {row[1] for row in con.execute(f"pragma table_info({table})")}
+                if "country_raw" not in columns:
+                    con.execute(f"alter table {table} add column country_raw text")
+                con.execute(
+                    f"update {table} set country=upper(trim(country)) "
+                    "where length(trim(coalesce(country,'')))=2"
+                )
+                placeholders = ",".join("?" for _ in COUNTRY_NAMES)
+                legacy_rows = con.execute(
+                    f"""
+                    select id,country,country_raw,city,address
+                    from {table}
+                    where trim(coalesce(country,''))!=''
+                      and upper(trim(country)) not in ({placeholders})
+                    """,
+                    tuple(COUNTRY_NAMES),
+                ).fetchall()
+                for row in legacy_rows:
+                    code = normalize_country_code(
+                        row["country"], city=row["city"], address=row["address"]
+                    )
+                    if not code:
+                        continue
+                    con.execute(
+                        f"""
+                        update {table}
+                        set country_raw=coalesce(nullif(country_raw,''),country),country=?
+                        where id=?
+                        """,
+                        (code, row["id"]),
+                    )
+            con.commit()
+        finally:
+            con.close()
+        DB_SCHEMA_READY.add(resolved)
 
 
 def stats():
@@ -867,6 +920,18 @@ def guide_collection_status(include_map=True):
                 """
             )
         ]
+        for target in payload["mapTargets"]:
+            country_code = normalize_country_code(
+                target.get("country"),
+                city=target.get("city"),
+                address=target.get("address"),
+            )
+            target["countryCode"] = country_code
+            target["country"] = country_display_name(
+                country_code or target.get("country"),
+                city=target.get("city"),
+                address=target.get("address"),
+            )
         payload["latestRuns"] = [
             row_to_dict(row)
             for row in con.execute(
@@ -1367,7 +1432,10 @@ COUNTRY_ALIAS_INDEX = {
 
 def canonical_country_name(value):
     raw = (value or "").strip()
-    return COUNTRY_ALIAS_INDEX.get(country_token(raw), raw)
+    canonical = COUNTRY_ALIAS_INDEX.get(country_token(raw), raw)
+    if canonical == "Greater China":
+        return canonical
+    return country_display_name(canonical) if normalize_country_code(canonical) else canonical
 
 
 GREATER_CHINA_UI_COUNTRIES = ("China", "Hong Kong", "Macau", "Taiwan")
@@ -1386,7 +1454,9 @@ TAIWAN_CITY_TOKENS = (
 def display_country_name(value, city="", region_slug="", address=""):
     canonical = canonical_country_name(value)
     if canonical != "Greater China":
-        return canonical
+        return country_display_name(
+            canonical, city=city, address=address, region=region_slug
+        )
 
     hints = country_token(" ".join((city or "", region_slug or "", address or "")))
     if "hong kong" in hints:
@@ -1426,9 +1496,7 @@ def starwine_storage_countries(country):
 
 
 def country_names_match(left, right):
-    return country_token(canonical_country_name(left)) == country_token(
-        canonical_country_name(right)
-    )
+    return country_values_match(canonical_country_name(left), canonical_country_name(right))
 
 
 def loose_tokens(value):

@@ -19,6 +19,11 @@ from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from country_codes import normalize_country_code
+
 SCHEMA_PATH = ROOT / "db" / "schema.sql"
 DATA_DIR = ROOT / "data" / "guide"
 PUBLIC_DATA_DIR = ROOT / "public" / "data"
@@ -536,17 +541,22 @@ def source_id(con, code):
 def upsert_guide_place(con, source_code, source_url, place):
     sid = source_id(con, source_code)
     key = target_key(place["name"], place.get("city", ""), place.get("country", ""))
+    raw_country = place.get("country", "")
+    country_code = normalize_country_code(
+        raw_country, city=place.get("city", ""), address=place.get("address", "")
+    )
     con.execute(
         """
         insert into guide_places(
-          source_id, source_key, name, normalized_name, country, city, address, lat, lng,
+          source_id, source_key, name, normalized_name, country, country_raw, city, address, lat, lng,
           place_url, website_url, last_seen_at
         )
-        values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
+        values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
         on conflict(source_id, source_key) do update set
           name=excluded.name,
           normalized_name=excluded.normalized_name,
           country=coalesce(nullif(excluded.country, ''), guide_places.country),
+          country_raw=coalesce(nullif(excluded.country_raw, ''), guide_places.country_raw),
           city=coalesce(nullif(excluded.city, ''), guide_places.city),
           address=coalesce(nullif(excluded.address, ''), guide_places.address),
           lat=coalesce(excluded.lat, guide_places.lat),
@@ -560,7 +570,8 @@ def upsert_guide_place(con, source_code, source_url, place):
             key,
             place["name"],
             normalize_name(place["name"]),
-            place.get("country", ""),
+            country_code,
+            raw_country,
             place.get("city", ""),
             place.get("address", ""),
             place.get("lat"),
@@ -588,6 +599,10 @@ def upsert_target(con, place, source_code):
     if normalize_name(place["name"]) in {"restaurant", "restaurants", "hotel", "hotels"}:
         return
     key = target_key(place["name"], place.get("city", ""), place.get("country", ""))
+    raw_country = place.get("country", "")
+    country_code = normalize_country_code(
+        raw_country, city=place.get("city", ""), address=place.get("address", "")
+    )
     row = con.execute("select * from restaurant_targets where normalized_key = ?", (key,)).fetchone()
     sources = []
     if row:
@@ -601,11 +616,15 @@ def upsert_target(con, place, source_code):
     con.execute(
         """
         insert into restaurant_targets(
-          normalized_key, name, normalized_name, country, city, address, lat, lng,
+          normalized_key, name, normalized_name, country, country_raw, city, address, lat, lng,
           website_url, sources_json, source_count, priority, last_seen_at
         )
-        values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
+        values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
         on conflict(normalized_key) do update set
+          country=coalesce(nullif(excluded.country, ''), restaurant_targets.country),
+          country_raw=coalesce(nullif(excluded.country_raw, ''), restaurant_targets.country_raw),
+          city=coalesce(nullif(excluded.city, ''), restaurant_targets.city),
+          address=coalesce(nullif(excluded.address, ''), restaurant_targets.address),
           website_url=case
             when excluded.website_url != '' then excluded.website_url
             when restaurant_targets.website_url like '%laliste.com%' then ''
@@ -624,7 +643,8 @@ def upsert_target(con, place, source_code):
             key,
             place["name"],
             normalize_name(place["name"]),
-            place.get("country", ""),
+            country_code,
+            raw_country,
             place.get("city", ""),
             place.get("address", ""),
             place.get("lat"),

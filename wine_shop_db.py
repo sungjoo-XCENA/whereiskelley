@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
+from country_codes import COUNTRY_NAMES, country_display_name, normalize_country_code
+
 
 ROOT = Path(__file__).resolve().parent
 SCHEMA_PATH = ROOT / "db" / "wine_shops_schema.sql"
@@ -65,6 +67,37 @@ def ensure_shop_db(path=None):
         con = connect_shop(db_path)
         try:
             con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            columns = {row[1] for row in con.execute("pragma table_info(merchants)")}
+            if "country_raw" not in columns:
+                con.execute("alter table merchants add column country_raw text")
+            con.execute(
+                "update merchants set country=upper(trim(country)) "
+                "where length(trim(coalesce(country,'')))=2"
+            )
+            placeholders = ",".join("?" for _ in COUNTRY_NAMES)
+            legacy_rows = con.execute(
+                f"""
+                select id,country,country_raw,city,address
+                from merchants
+                where trim(coalesce(country,''))!=''
+                  and upper(trim(country)) not in ({placeholders})
+                """,
+                tuple(COUNTRY_NAMES),
+            ).fetchall()
+            for row in legacy_rows:
+                code = normalize_country_code(
+                    row["country"], city=row["city"], address=row["address"]
+                )
+                if not code:
+                    continue
+                con.execute(
+                    """
+                    update merchants
+                    set country_raw=coalesce(nullif(country_raw,''),country),country=?
+                    where id=?
+                    """,
+                    (code, row["id"]),
+                )
             con.commit()
             _INITIALIZED_PATHS.add(db_path)
         finally:
@@ -139,6 +172,18 @@ def shop_collection_status(path=None, map_limit=6000, include_map=True):
                 (int(map_limit),),
             ).fetchall()
         ]
+        for merchant in map_merchants:
+            country_code = normalize_country_code(
+                merchant.get("country"),
+                city=merchant.get("city"),
+                address=merchant.get("address"),
+            )
+            merchant["countryCode"] = country_code
+            merchant["country"] = country_display_name(
+                country_code or merchant.get("country"),
+                city=merchant.get("city"),
+                address=merchant.get("address"),
+            )
         return {
             "generatedAt": utc_now(),
             "progress": progress,
@@ -167,9 +212,14 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
     filters.append(f"(p.id in (select rowid from merchant_products_fts where merchant_products_fts match ?) or {merchant_matches})")
     args.append(fts_query)
     args.extend(f"%{token}%" for token in tokens)
+    country_code = normalize_country_code(country)
     if country:
-        filters.append("lower(coalesce(m.country,''))=lower(?)")
-        args.append(country)
+        if country_code:
+            filters.append("upper(trim(coalesce(m.country,'')))=?")
+            args.append(country_code)
+        else:
+            filters.append("lower(trim(coalesce(m.country,'')))=lower(trim(?))")
+            args.append(country)
     if city:
         filters.append("lower(coalesce(m.city,'')) like lower(?)")
         args.append(f"%{city}%")
@@ -199,8 +249,12 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
             fallback_args.extend((f"%{token}%", f"%{token}%"))
         fallback_filters.append("(" + " or ".join(candidate_parts) + ")")
         if country:
-            fallback_filters.append("lower(coalesce(m.country,''))=lower(?)")
-            fallback_args.append(country)
+            if country_code:
+                fallback_filters.append("upper(trim(coalesce(m.country,'')))=?")
+                fallback_args.append(country_code)
+            else:
+                fallback_filters.append("lower(trim(coalesce(m.country,'')))=lower(trim(?))")
+                fallback_args.append(country)
         if city:
             fallback_filters.append("lower(coalesce(m.city,'')) like lower(?)")
             fallback_args.append(f"%{city}%")
@@ -234,7 +288,15 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
         if not all(token in searchable for token in tokens):
             continue
         source_url = row["source_url"] or row["inventory_url"] or row["website_url"] or ""
-        location_query = ", ".join(filter(None, (row["merchant_name"], row["address"], row["city"], row["country"])))
+        stored_country_code = normalize_country_code(
+            row["country"], city=row["city"], address=row["address"]
+        )
+        display_country = country_display_name(
+            stored_country_code or row["country"], city=row["city"], address=row["address"]
+        )
+        location_query = ", ".join(filter(None, (
+            row["merchant_name"], row["address"], row["city"], display_country,
+        )))
         price_text = (row["price_text"] or "").strip()
         results.append({
             "id": f"shop-{row['merchant_id']}-{row['id']}",
@@ -254,7 +316,8 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
                 "name": row["merchant_name"],
                 "type": row["merchant_type"] or "Wine Shop",
                 "city": row["city"] or "",
-                "country": row["country"] or "",
+                "country": display_country,
+                "countryCode": stored_country_code,
                 "lat": row["latitude"],
                 "lng": row["longitude"],
                 "address": row["address"] or "",
