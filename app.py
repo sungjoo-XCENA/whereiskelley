@@ -1167,7 +1167,7 @@ def search(params):
             continue
         item["venue"] = {
             "id": item.pop("venueId"),
-            "name": item.pop("venueName"),
+            "name": sync_search_api.clean_venue_name(item.pop("venueName")),
             "type": item.pop("venueType"),
             "city": venue_city,
             "country": venue_country,

@@ -231,6 +231,62 @@ button:hover {
   color: #9a3412;
 }
 
+.source-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.source-legend-title {
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.source-key,
+.source-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.source-marks {
+  flex: 0 0 auto;
+  gap: 3px;
+}
+
+.source-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.source-mark.live {
+  background: #fce7f3;
+  color: #9d174d;
+}
+
+.source-mark.db {
+  background: #e8f6f3;
+  color: #176f66;
+}
+
+.source-mark.shop {
+  background: #fff1df;
+  color: #9a3412;
+}
+
 .price-offer.shop {
   border-color: #fdba74;
   background: #fff7ed;
@@ -977,7 +1033,7 @@ button:disabled {
 }
 
 .place-cell b,
-.place-cell span {
+.place-cell > span {
   display: block;
 }
 
@@ -985,11 +1041,26 @@ button:disabled {
   font-weight: 950;
 }
 
-.place-cell span {
+.place-cell > span {
   margin-top: 4px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
+}
+
+.place-cell .source-marks,
+.place-cell .source-mark,
+.place-cell .review-badge {
+  margin-top: 0;
+}
+
+@media (max-width: 720px) {
+  .source-legend {
+    justify-content: flex-start;
+    gap: 9px;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
 }
 
 .expanded-row td {

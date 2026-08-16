@@ -13,6 +13,13 @@ from urllib.request import Request, urlopen
 from pypdf import PdfReader
 
 
+VENUE_REVIEW_PREFIX_RE = re.compile(r"^[\s\u00d7\u2715\u2716\u2717\u2718\u274c]+")
+
+
+def clean_venue_name(value):
+    return VENUE_REVIEW_PREFIX_RE.sub("", str(value or "")).strip()
+
+
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "db" / "starwine.sqlite"
 SCHEMA_PATH = ROOT / "db" / "schema.sql"
@@ -378,7 +385,7 @@ def upsert_venue(con, result, country_id, country, city):
         """,
         (
             slug,
-            venue.get("name") or slug,
+            clean_venue_name(venue.get("name") or slug),
             venue.get("type"),
             country_id,
             city,

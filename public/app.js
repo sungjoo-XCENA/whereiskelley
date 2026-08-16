@@ -280,6 +280,40 @@ function resultSourceLabel(result = {}) {
   return kind === "shop" ? "Wine Shop DB" : kind === "db" ? "Restaurant DB" : "Star Wine";
 }
 
+const SOURCE_MARKS = {
+  live: { short: "S", label: "Star Wine", className: "live" },
+  db: { short: "R", label: "Restaurant DB", className: "db" },
+  shop: { short: "W", label: "Wine Shop DB", className: "shop" }
+};
+
+function sourceMarkMarkup(kind, showLabel = false) {
+  const meta = SOURCE_MARKS[kind];
+  if (!meta) return "";
+  return `<span class="source-key"><span class="source-mark ${meta.className}" title="${escapeHtml(meta.label)}" aria-label="${escapeHtml(meta.label)}">${meta.short}</span>${showLabel ? `<span class="source-key-label">${escapeHtml(meta.label)}</span>` : ""}</span>`;
+}
+
+function groupSourceMarks(group) {
+  const kinds = new Set((group.results || []).map((result) => resultSourceKind(result)));
+  return `<span class="source-marks" aria-label="Result sources">${["live", "db", "shop"].filter((kind) => kinds.has(kind)).map((kind) => sourceMarkMarkup(kind)).join("")}</span>`;
+}
+
+function sourceLegendMarkup() {
+  return `<div class="source-legend" aria-label="Source legend"><span class="source-legend-title">Sources</span>${["live", "db", "shop"].map((kind) => sourceMarkMarkup(kind, true)).join("")}</div>`;
+}
+
+function stripVenueReviewPrefix(value) {
+  return String(value || "").replace(/^[\s\u00d7\u2715\u2716\u2717\u2718\u274c]+/u, "").trim();
+}
+
+function hasVenueReviewPrefix(value) {
+  return /^[\s\u00d7\u2715\u2716\u2717\u2718\u274c]+/u.test(String(value || ""));
+}
+
+function venueReviewBadge(group) {
+  if (!group.nameNeedsReview && !groupPdfReviewReason(group)) return "";
+  return `<span class="review-badge" title="Source list needs review">Review</span>`;
+}
+
 function sourceBadge(source) {
   const value = String(source || "Star Wine");
   const normalized = value.toLowerCase();
@@ -844,7 +878,7 @@ function renderResultList() {
   }
   const groups = sortGroups(groupedVenues(results));
   const rows = groups.map((group) => renderPlaceRow(group)).join("");
-  resultsEl.innerHTML = `${liveLine}<div class="table-wrap">
+  resultsEl.innerHTML = `${liveLine}${sourceLegendMarkup()}<div class="table-wrap">
     <table class="result-table">
       <thead>
         <tr>
@@ -867,7 +901,7 @@ function renderPlaceRow(group) {
   const firstList = group.results[0]?.wineList || {};
   const expanded = key && key === activeVenueKey;
   return `<tr class="place-row${expanded ? " active" : ""}" data-venue-key="${escapeHtml(key)}">
-      <td class="place-cell"><b>${escapeHtml(fallback(venue.name))}</b><span>${escapeHtml(venue.type || "Restaurant / wine bar")}</span></td>
+      <td class="place-cell"><div class="place-name-line"><b>${escapeHtml(fallback(venue.name))}</b>${groupSourceMarks(group)}${venueReviewBadge(group)}</div><span>${escapeHtml(venue.type || "Restaurant / wine bar")}</span></td>
       <td>${escapeHtml(fallback(venue.city))}</td>
       <td>${escapeHtml(fallback(venue.country))}</td>
       <td>${escapeHtml(fallback(groupUpdatedValue(group) || firstList.updatedDate || firstList.updatedText))}</td>
@@ -976,7 +1010,7 @@ function renderExpandedPlace(group) {
 
 function venueKey(result) {
   const venue = result.venue || {};
-  const name = normalizedVenueText(venue.name);
+  const name = normalizedVenueText(stripVenueReviewPrefix(venue.name));
   const city = normalizedVenueText(venue.city);
   const country = normalizedVenueCountry(venue.country);
   if (name && city && country) return `${name}|${city}|${country}`;
@@ -1030,14 +1064,23 @@ function coordinateValue(value) {
 function groupedVenues(results) {
   const groups = new Map();
   for (const result of results) {
-    const venue = result.venue || {};
+    const rawVenue = result.venue || {};
+    const venue = { ...rawVenue, name: stripVenueReviewPrefix(rawVenue.name) };
     const key = venueKey(result);
     if (!key) continue;
     if (!groups.has(key)) {
-      groups.set(key, { key, venue, results: [], lat: coordinateValue(venue.lat), lng: coordinateValue(venue.lng) });
+      groups.set(key, {
+        key,
+        venue,
+        results: [],
+        lat: coordinateValue(venue.lat),
+        lng: coordinateValue(venue.lng),
+        nameNeedsReview: hasVenueReviewPrefix(rawVenue.name)
+      });
     } else {
       const group = groups.get(key);
       group.venue = mergeVenueDetails(group.venue, venue);
+      group.nameNeedsReview = group.nameNeedsReview || hasVenueReviewPrefix(rawVenue.name);
       const incomingLat = coordinateValue(venue.lat);
       const incomingLng = coordinateValue(venue.lng);
       if (!Number.isFinite(group.lat) && Number.isFinite(incomingLat)) group.lat = incomingLat;

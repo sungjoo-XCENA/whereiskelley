@@ -6,6 +6,13 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
+VENUE_REVIEW_PREFIX_RE = re.compile(r"^[\s\u00d7\u2715\u2716\u2717\u2718\u274c]+")
+
+
+def clean_venue_name(value):
+    return VENUE_REVIEW_PREFIX_RE.sub("", str(value or "")).strip()
+
+
 API_URL = "https://starwinelist.com/api/search"
 LOCATION_API_URL = "https://starwinelist.com/api/location/search"
 LOCATION_CACHE = {}
@@ -304,7 +311,7 @@ def normalize_result(result):
         "pageNumber": result.get("page"),
         "venue": {
             "id": venue_id,
-            "name": venue.get("name") or venue_id,
+            "name": clean_venue_name(venue.get("name") or venue_id),
             "type": venue.get("type"),
             "city": city,
             "country": country,
