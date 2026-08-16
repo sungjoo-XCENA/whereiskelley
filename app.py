@@ -1165,9 +1165,11 @@ def search(params):
         )
         if country and not country_names_match(venue_country, country):
             continue
+        raw_venue_name = item.pop("venueName")
         item["venue"] = {
             "id": item.pop("venueId"),
-            "name": sync_search_api.clean_venue_name(item.pop("venueName")),
+            "name": sync_search_api.clean_venue_name(raw_venue_name),
+            "needsReview": sync_search_api.venue_name_needs_review(raw_venue_name),
             "type": item.pop("venueType"),
             "city": venue_city,
             "country": venue_country,

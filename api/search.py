@@ -13,6 +13,10 @@ def clean_venue_name(value):
     return VENUE_REVIEW_PREFIX_RE.sub("", str(value or "")).strip()
 
 
+def venue_name_needs_review(value):
+    return bool(VENUE_REVIEW_PREFIX_RE.match(str(value or "")))
+
+
 API_URL = "https://starwinelist.com/api/search"
 LOCATION_API_URL = "https://starwinelist.com/api/location/search"
 LOCATION_CACHE = {}
@@ -294,6 +298,7 @@ def normalize_result(result):
     vintage_match = re.search(r"\b(19|20)\d{2}\b", raw_text)
     venue_url = venue.get("URL") or ""
     venue_id = venue_slug_from_url(venue_url)
+    raw_venue_name = venue.get("name") or venue_id
     wine_list_id = str(wine_list.get("id") or f"{venue_id}-{result.get('item_id') or ''}")
     price_text, price_value, currency = parse_price(raw_text, country, result.get("page"))
     return {
@@ -311,7 +316,8 @@ def normalize_result(result):
         "pageNumber": result.get("page"),
         "venue": {
             "id": venue_id,
-            "name": clean_venue_name(venue.get("name") or venue_id),
+            "name": clean_venue_name(raw_venue_name),
+            "needsReview": venue_name_needs_review(raw_venue_name),
             "type": venue.get("type"),
             "city": city,
             "country": country,

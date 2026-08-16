@@ -20,6 +20,10 @@ def clean_venue_name(value):
     return VENUE_REVIEW_PREFIX_RE.sub("", str(value or "")).strip()
 
 
+def venue_name_needs_review(value):
+    return bool(VENUE_REVIEW_PREFIX_RE.match(str(value or "")))
+
+
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "db" / "starwine.sqlite"
 SCHEMA_PATH = ROOT / "db" / "schema.sql"

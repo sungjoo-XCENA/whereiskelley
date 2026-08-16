@@ -1044,7 +1044,7 @@ function mergeVenueDetails(current = {}, incoming = {}) {
   const merged = { ...current };
   for (const field of [
     "name", "type", "city", "country", "lat", "lng", "address",
-    "googleMapsUrl", "starWineMapUrl", "url"
+    "googleMapsUrl", "starWineMapUrl", "url", "needsReview"
   ]) {
     const value = incoming[field];
     if ((merged[field] === null || merged[field] === undefined || merged[field] === "")
@@ -1075,12 +1075,12 @@ function groupedVenues(results) {
         results: [],
         lat: coordinateValue(venue.lat),
         lng: coordinateValue(venue.lng),
-        nameNeedsReview: hasVenueReviewPrefix(rawVenue.name)
+        nameNeedsReview: Boolean(rawVenue.needsReview) || hasVenueReviewPrefix(rawVenue.name)
       });
     } else {
       const group = groups.get(key);
       group.venue = mergeVenueDetails(group.venue, venue);
-      group.nameNeedsReview = group.nameNeedsReview || hasVenueReviewPrefix(rawVenue.name);
+      group.nameNeedsReview = group.nameNeedsReview || Boolean(rawVenue.needsReview) || hasVenueReviewPrefix(rawVenue.name);
       const incomingLat = coordinateValue(venue.lat);
       const incomingLng = coordinateValue(venue.lng);
       if (!Number.isFinite(group.lat) && Number.isFinite(incomingLat)) group.lat = incomingLat;

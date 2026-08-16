@@ -11,6 +11,10 @@ class SearchVenueNameTests(unittest.TestCase):
     def test_ordinary_name_is_unchanged(self):
         self.assertEqual(search.clean_venue_name("L’Effervescence"), "L’Effervescence")
 
+    def test_review_marker_is_preserved_as_metadata(self):
+        self.assertTrue(search.venue_name_needs_review("❌Restaurant Kozee"))
+        self.assertFalse(search.venue_name_needs_review("Restaurant Kozee"))
+
 
 if __name__ == "__main__":
     unittest.main()
