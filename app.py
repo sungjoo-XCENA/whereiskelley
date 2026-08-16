@@ -435,7 +435,10 @@ def start_shop_collection(payload):
     else:
         command = [
             sys.executable, script, "inventory",
-            "--workers", str(max(1, int(payload.get("workers") or os.environ.get("WHEREISKELLEY_SHOP_INVENTORY_WORKERS", "64")))),
+            "--workers", str(max(1, int(payload.get("workers") or os.environ.get("WHEREISKELLEY_SHOP_INVENTORY_WORKERS", "96")))),
+            "--processes", str(max(1, min(os.cpu_count() or 1, int(
+                payload.get("processes") or os.environ.get("WHEREISKELLEY_SHOP_INVENTORY_PROCESSES", "4")
+            )))),
             "--per-domain", str(max(1, int(os.environ.get("WHEREISKELLEY_SHOP_PER_DOMAIN", "2")))),
             "--max-pages", str(max(10, int(payload.get("maxPages") or os.environ.get("WHEREISKELLEY_SHOP_MAX_PAGES", "160")))),
             "--depth", str(max(1, min(5, int(payload.get("depth") or 5)))),

@@ -6,6 +6,7 @@ import tempfile
 import types
 import unittest
 import zipfile
+from argparse import Namespace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
@@ -25,12 +26,72 @@ from scripts.wine_shop_collect import (
     parse_csv_products,
     parse_pdf_products,
     parse_xlsx_products,
+    run_inventory,
     save_inventory_result,
 )
 from wine_shop_db import connect_shop, ensure_shop_db, upsert_product
 
 
 class WineShopCollectorTests(unittest.TestCase):
+    def test_inventory_uses_multiple_processes_with_one_database_writer(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/robots.txt":
+                    body, content_type = b"User-agent: *\nAllow: /\n", "text/plain"
+                elif self.path == "/":
+                    body, content_type = b'<a href="/wine-list">Wine list</a>', "text/html"
+                elif self.path == "/wine-list":
+                    body = b"<p>2011 Chateau Rayas Chateauneuf du Pape EUR 1,700</p>"
+                    content_type = "text/html"
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("content-type", content_type)
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                db_path = Path(temp_dir) / "shops.sqlite"
+                ensure_shop_db(db_path)
+                con = connect_shop(db_path)
+                base = f"http://127.0.0.1:{server.server_port}"
+                for index in range(4):
+                    con.execute(
+                        "insert into merchants(wine_searcher_id,name,normalized_name,website_url) values(?,?,?,?)",
+                        (index + 1, f"Shop {index}", f"shop {index}", base),
+                    )
+                con.commit()
+                con.close()
+                args = Namespace(
+                    db=str(db_path), stale_days=14, merchant_id=0, resume=False, limit=0,
+                    per_domain=2, workers=4, processes=2, max_pages=5, depth=2,
+                )
+                with patch("scripts.wine_shop_collect.atomic_progress"):
+                    run_inventory(args)
+                con = connect_shop(db_path)
+                try:
+                    statuses = [row[0] for row in con.execute(
+                        "select inventory_status from merchants order by id"
+                    )]
+                    self.assertEqual(statuses, ["found"] * 4)
+                    self.assertEqual(
+                        con.execute("select count(*) from merchant_products where active=1").fetchone()[0],
+                        4,
+                    )
+                finally:
+                    con.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+
     def test_repeated_access_denials_open_the_scan_circuit(self):
         circuit = AccessCircuit(threshold=3)
         self.assertFalse(circuit.record({"status": 403}))

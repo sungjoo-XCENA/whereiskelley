@@ -30,7 +30,8 @@ if [[ -f "$LAST_START_FILE" ]]; then
 fi
 
 if "$PYTHON_BIN" scripts/wine_shop_collect.py inventory \
-    --workers "${WHEREISKELLEY_SHOP_INVENTORY_WORKERS:-64}" \
+    --workers "${WHEREISKELLEY_SHOP_INVENTORY_WORKERS:-96}" \
+    --processes "${WHEREISKELLEY_SHOP_INVENTORY_PROCESSES:-4}" \
     --per-domain "${WHEREISKELLEY_SHOP_PER_DOMAIN:-2}" \
     --max-pages "${WHEREISKELLEY_SHOP_MAX_PAGES:-160}" \
     --depth "${WHEREISKELLEY_SHOP_MAX_DEPTH:-5}" \

@@ -182,10 +182,6 @@
       margin-top: 0;
     }
     .collection-job-overview {
-      display: grid;
-      grid-template-columns: minmax(210px, 0.7fr) minmax(280px, 1.3fr);
-      align-items: end;
-      gap: 28px;
       margin-top: 14px;
     }
     .collection-job-progress-label {
@@ -208,29 +204,10 @@
       font-size: 22px;
     }
     .collection-job-progress-head span,
-    .collection-job-current,
     .collection-job-footer small {
       color: var(--muted);
       font-size: 12px;
       font-weight: 800;
-    }
-    .collection-job-current {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      min-height: 40px;
-      padding: 10px 12px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: #f8fafc;
-    }
-    .collection-job-current b {
-      max-width: 68%;
-      overflow: hidden;
-      color: var(--ink);
-      text-align: right;
-      text-overflow: ellipsis;
-      white-space: nowrap;
     }
     .collection-job-stages {
       display: grid;
@@ -960,10 +937,6 @@
       .collection-job-pipeline {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
-      .collection-job-overview {
-        grid-template-columns: 1fr;
-        gap: 10px;
-      }
       .dashboard-map-wrap {
         width: 100%;
         aspect-ratio: 16 / 10;
@@ -1012,17 +985,12 @@
       .collection-stat:nth-child(n + 3) {
         border-top: 1px solid var(--line);
       }
-      .collection-job-footer,
-      .collection-job-current {
+      .collection-job-footer {
         align-items: flex-start;
         flex-direction: column;
       }
       .collection-job-pipeline {
         grid-template-columns: 1fr;
-      }
-      .collection-job-current b {
-        max-width: 100%;
-        text-align: left;
       }
       .collection-job-stage {
         align-items: flex-start;
@@ -1199,7 +1167,7 @@
     const interval = number(payload?.resourceHistory?.intervalSeconds) || 30;
     const workers = payload?.progress?.workerConfig || {};
     const governor = payload?.progress?.resourceGovernor || {};
-    const isShop = options.kind === "shops";
+    const isShop = options.kind === "shops" || payload?.collectionKind === "shops";
     const shopPhase = String(payload?.progress?.phase || "");
     const workerText = isShop
       ? shopPhase.startsWith("overture_")
@@ -1207,7 +1175,7 @@
           ? `${fmtInt(payload?.progress?.downloadWorkers || 16)} parallel downloads`
           : `${fmtInt(payload?.progress?.sourceWorkers || 16)} streams x ${fmtInt(payload?.progress?.readerThreads || 4)} reader threads`
         : shopPhase.startsWith("inventory")
-          ? "Wine-shop inventory workers"
+          ? `${fmtInt(payload?.progress?.processes || 1)} processes / ${fmtInt(payload?.progress?.workers || 64)} website workers`
           : "Waiting for shop collection"
       : workers.discovery
         ? `${fmtInt(workers.discovery)} discovery / ${fmtInt(workers.html)} HTML / ${fmtInt(workers.pdf)} PDF`
@@ -2089,10 +2057,6 @@
           </div>
           <div class="dash-progress" style="--dash-progress:${html(percent)}%"><i></i></div>
         </div>
-        <div class="collection-job-current">
-          <span>${html(config.currentLabel || "Current")}</span>
-          <b>${html(config.current || "-")}</b>
-        </div>
       </div>
       ${steps ? `<div class="collection-job-pipeline" style="--pipeline-count:${Math.max(1, (config.steps || []).length)}">${steps}</div>` : ""}
       ${stats ? `<div class="collection-stat-grid">${stats}</div>` : ""}
@@ -2150,8 +2114,6 @@
               ? "Ready"
               : "List needed";
     const updatedAt = inventoryRun.finished_at || directoryRun.finished_at;
-    const current = progress.currentTarget || "-";
-    const currentWithEta = values.running && etaText !== "-" ? `${current} / ETA ${etaText}` : current;
     return collectionJobCardMarkup({
       kicker: "Restaurants",
       title: "Restaurant collection",
@@ -2163,9 +2125,7 @@
       progressLabel: directoryRunning ? "Guide list update" : "Overall run",
       progressText: scanCompleted && !values.running ? "Complete" : !directoryRunning && !scanStarted ? "Not started" : `${percent.toFixed(1)}%`,
       countText: scanCompleted && !values.running ? `${fmtInt(inventoryProcessed)} / ${fmtInt(websitesAvailable)} websites` : `${fmtInt(processed)} / ${fmtInt(total)}`,
-      progressHint: scanCompleted && !values.running ? "Latest run" : "",
-      currentLabel: "Current restaurant",
-      current: currentWithEta,
+      progressHint: values.running && etaText !== "-" ? `ETA ${etaText}` : scanCompleted ? "Latest run" : "",
       steps: [
         {
           label: "Michelin · La Liste · 50 Best",
@@ -2253,8 +2213,6 @@
     const savedWebsites = number(counts.withWebsite || counts.overtureWebsites);
     const inventoryFound = number(counts.inventoryFound);
     const products = number(counts.products);
-    const current = progress.currentTarget || progress.currentFile || "-";
-    const currentWithEta = anyRunning && eta !== "-" ? `${current} / ETA ${eta}` : current;
     const overturePreparing = overtureRunning && ["overture_preparing", "overture_caching"].includes(phase);
     const overtureSaving = overtureRunning && !overturePreparing;
     return collectionJobCardMarkup({
@@ -2272,9 +2230,7 @@
         : inventoryCompleted && !anyRunning
           ? `${fmtInt(processed)} websites checked`
           : `${fmtInt(processed)} / ${fmtInt(total)} websites`,
-      progressHint: inventoryCompleted && !anyRunning ? "Latest run" : "",
-      currentLabel: "Current shop",
-      current: currentWithEta,
+      progressHint: anyRunning && eta !== "-" ? `ETA ${eta}` : inventoryCompleted ? "Latest run" : "",
       steps: [
         {
           label: "Overture shop list",
@@ -2362,7 +2318,6 @@
         <div class="metric-box"><span>${html(values.workLabel)}</span><b>${html(fmtInt(values.processed))} / ${html(fmtInt(values.total))}</b></div>
         <div class="metric-box"><span>Elapsed</span><b>${html(formatDuration(values.elapsed))}</b></div>
         <div class="metric-box"><span>${values.running ? etaLabel : "Total time"}</span><b>${html(etaText)}</b></div>
-        <div class="metric-box"><span>Current restaurant</span><b>${html(progress.currentTarget || "-")}</b></div>
         <div class="metric-box"><span>Needs review</span><b>${html(fmtInt(number(summary.needsReview)))}</b></div>
         <div class="metric-box"><span>Errors</span><b>${html(fmtInt(errorCount))}</b></div>
       </div>

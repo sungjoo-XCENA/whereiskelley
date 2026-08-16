@@ -14,7 +14,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 import zipfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from html import unescape
 from html.parser import HTMLParser
@@ -1176,6 +1176,38 @@ def crawl_merchant_inventory(merchant, max_pages=160, max_depth=5, domain_slots=
     }
 
 
+def crawl_inventory_batch(merchants, max_pages, max_depth, per_domain, thread_workers):
+    """Run one I/O-heavy crawl batch inside a separate Python process."""
+    domain_slots = DomainSlots(per_domain)
+    robots = RobotsPolicy(domain_slots)
+    results = []
+    with ThreadPoolExecutor(max_workers=max(1, min(thread_workers, len(merchants)))) as pool:
+        futures = {
+            pool.submit(
+                crawl_merchant_inventory,
+                merchant,
+                max_pages,
+                max_depth,
+                domain_slots,
+                robots,
+            ): merchant
+            for merchant in merchants
+        }
+        for future in as_completed(futures):
+            merchant = futures[future]
+            try:
+                result = future.result()
+            except Exception as exc:
+                result = {
+                    "merchant_id": merchant["id"],
+                    "status": "review",
+                    "sources": [],
+                    "error": str(exc),
+                }
+            results.append((merchant, result))
+    return results
+
+
 def save_inventory_result(con, result):
     merchant_id = result["merchant_id"]
     now = utc_now()
@@ -1266,8 +1298,12 @@ def run_inventory(args):
     checked = found = errors = products = 0
     started = time.monotonic()
     started_at = utc_now()
-    domain_slots = DomainSlots(args.per_domain)
-    robots = RobotsPolicy(domain_slots)
+    process_workers = max(1, min(args.processes, args.workers))
+    thread_workers = max(1, (args.workers + process_workers - 1) // process_workers)
+    batches = [
+        merchants[index:index + thread_workers]
+        for index in range(0, len(merchants), thread_workers)
+    ]
     try:
         atomic_progress({
             "generatedAt": utc_now(), "startedAt": started_at,
@@ -1278,48 +1314,58 @@ def run_inventory(args):
             "message": "Preparing the saved wine-shop website queue.",
             "runId": run_id, "checked": 0, "total": total, "remaining": total,
             "found": 0, "products": 0, "errors": 0,
-            "workers": args.workers, "maxPages": args.max_pages, "maxDepth": args.depth,
+            "workers": args.workers, "processes": process_workers,
+            "threadsPerProcess": thread_workers,
+            "maxPages": args.max_pages, "maxDepth": args.depth,
         })
-        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        with ProcessPoolExecutor(max_workers=process_workers) as pool:
             futures = {
                 pool.submit(
-                    crawl_merchant_inventory,
-                    merchant,
+                    crawl_inventory_batch,
+                    batch,
                     args.max_pages,
                     args.depth,
-                    domain_slots,
-                    robots,
-                ): merchant
-                for merchant in merchants
+                    args.per_domain,
+                    thread_workers,
+                ): batch
+                for batch in batches
             }
             for future in as_completed(futures):
-                merchant = futures[future]
                 try:
-                    result = future.result()
+                    batch_results = future.result()
                 except Exception as exc:
-                    result = {"merchant_id": merchant["id"], "status": "review", "sources": [], "error": str(exc)}
-                checked += 1
-                if result["status"] == "found":
-                    found += 1
-                if result["status"] == "review":
-                    errors += 1
-                products += save_inventory_result(con, result)
-                if checked % 5 == 0 or checked == total:
-                    con.commit()
-                    elapsed = max(0.001, time.monotonic() - started)
-                    atomic_progress({
-                        "generatedAt": utc_now(), "startedAt": started_at,
-                        "status": "running", "phase": "inventory",
-                        "stageIndex": 4, "stageCount": 4,
-                        "stageLabel": "Scan websites and save inventories", "stageStatus": "running",
-                        "stageProcessed": checked, "stageTotal": total,
-                        "message": "Scanning official websites and saving verified catalogues.",
-                        "runId": run_id, "checked": checked, "total": total, "remaining": total - checked,
-                        "found": found, "products": products, "errors": errors, "currentMerchant": merchant["name"],
-                        "elapsedSeconds": int(elapsed),
-                        "estimatedRemainingSeconds": int((total - checked) / max(0.01, checked / elapsed)),
-                        "workers": args.workers, "maxPages": args.max_pages, "maxDepth": args.depth,
-                    })
+                    batch_results = [
+                        (
+                            merchant,
+                            {"merchant_id": merchant["id"], "status": "review", "sources": [], "error": str(exc)},
+                        )
+                        for merchant in futures[future]
+                    ]
+                for merchant, result in batch_results:
+                    checked += 1
+                    if result["status"] == "found":
+                        found += 1
+                    if result["status"] == "review":
+                        errors += 1
+                    products += save_inventory_result(con, result)
+                    if checked % 5 == 0 or checked == total:
+                        con.commit()
+                        elapsed = max(0.001, time.monotonic() - started)
+                        atomic_progress({
+                            "generatedAt": utc_now(), "startedAt": started_at,
+                            "status": "running", "phase": "inventory",
+                            "stageIndex": 4, "stageCount": 4,
+                            "stageLabel": "Scan websites and save inventories", "stageStatus": "running",
+                            "stageProcessed": checked, "stageTotal": total,
+                            "message": "Scanning official websites and saving verified catalogues.",
+                            "runId": run_id, "checked": checked, "total": total, "remaining": total - checked,
+                            "found": found, "products": products, "errors": errors, "currentMerchant": merchant["name"],
+                            "elapsedSeconds": int(elapsed),
+                            "estimatedRemainingSeconds": int((total - checked) / max(0.01, checked / elapsed)),
+                            "workers": args.workers, "processes": process_workers,
+                            "threadsPerProcess": thread_workers,
+                            "maxPages": args.max_pages, "maxDepth": args.depth,
+                        })
         con.execute("update merchant_scan_runs set status='done',finished_at=?,checked=?,found=?,errors=? where id=?", (utc_now(), checked, found, errors, run_id))
         con.commit()
         atomic_progress({
@@ -1352,7 +1398,8 @@ def build_parser():
     merchant.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
 
     inventory = sub.add_parser("inventory", help="Collect official merchant websites and price lists.")
-    inventory.add_argument("--workers", type=int, default=64)
+    inventory.add_argument("--workers", type=int, default=96)
+    inventory.add_argument("--processes", type=int, default=max(1, min(4, os.cpu_count() or 1)))
     inventory.add_argument("--per-domain", type=int, default=2)
     inventory.add_argument("--max-pages", type=int, default=160)
     inventory.add_argument("--depth", type=int, default=5)
