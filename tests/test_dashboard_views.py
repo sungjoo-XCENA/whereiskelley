@@ -56,6 +56,12 @@ class DashboardViewTests(unittest.TestCase):
         self.assertIn("button.restaurant.active", self.script)
         self.assertIn("button.shop.active", self.script)
 
+    def test_database_world_map_wraps_horizontally(self):
+        self.assertNotIn("strictBounds", self.script)
+
+    def test_resource_panel_hides_internal_sample_interval(self):
+        self.assertNotIn("samples / every", self.script)
+
     def test_collection_shows_worker_and_resource_limits(self):
         self.assertIn("workerConfig", self.script)
         self.assertIn("resourceGovernor", self.script)

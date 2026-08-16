@@ -1267,7 +1267,6 @@
       : "Collector warming up";
     const memory = Number.isFinite(Number(latest.memoryPercent)) ? `${number(latest.memoryPercent).toFixed(1)}%` : "-";
     const disk = Number.isFinite(Number(latest.diskPercent)) ? `${number(latest.diskPercent).toFixed(1)}%` : "-";
-    const interval = number(payload?.resourceHistory?.intervalSeconds) || 30;
     const workers = payload?.progress?.workerConfig || {};
     const governor = payload?.progress?.resourceGovernor || {};
     const isShop = options.kind === "shops" || payload?.collectionKind === "shops";
@@ -1299,7 +1298,6 @@
           <p class="dash-kicker">Server resources</p>
           <h2>Collection resource usage</h2>
         </div>
-        <span class="dash-pill">${html(fmtInt(samples.length))} samples / every ${html(fmtInt(interval))}s</span>
       </div>
       <div class="resource-policy">
         <span><b>Workers</b>${html(workerText)}</span>
@@ -1868,10 +1866,6 @@
         state.dashboardMap = new maps.Map(mapEl, {
           center: { lat: 30, lng: 8 },
           zoom: 2,
-          restriction: {
-            latLngBounds: { north: 85, south: -85, west: -180, east: 180 },
-            strictBounds: true
-          },
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: true,
