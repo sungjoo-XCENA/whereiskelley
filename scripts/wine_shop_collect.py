@@ -1272,15 +1272,16 @@ def save_inventory_result(con, result):
     return product_count
 
 
-def run_inventory(args):
-    ensure_shop_db(args.db)
-    con = connect_shop(args.db)
-    stale_before = (datetime.now(timezone.utc) - timedelta(days=args.stale_days)).isoformat(timespec="seconds")
+def select_inventory_merchants(con, args, stale_before):
     conditions = ["active=1", "website_url is not null", "trim(website_url)!=''"]
     params = []
     if args.merchant_id:
         conditions.append("id=?")
         params.append(args.merchant_id)
+    country = str(getattr(args, "country", "") or "").strip()
+    if country:
+        conditions.append("lower(trim(coalesce(country,'')))=lower(?)")
+        params.append(country)
     if args.resume:
         conditions.append("(last_inventory_checked_at is null or last_inventory_checked_at < ?)")
         params.append(stale_before)
@@ -1288,7 +1289,15 @@ def run_inventory(args):
     if args.limit:
         sql += " limit ?"
         params.append(args.limit)
-    merchants = [dict(row) for row in con.execute(sql, params).fetchall()]
+    return [dict(row) for row in con.execute(sql, params).fetchall()]
+
+
+def run_inventory(args):
+    ensure_shop_db(args.db)
+    con = connect_shop(args.db)
+    stale_before = (datetime.now(timezone.utc) - timedelta(days=args.stale_days)).isoformat(timespec="seconds")
+    country = str(getattr(args, "country", "") or "").strip()
+    merchants = select_inventory_merchants(con, args, stale_before)
     run_id = con.execute(
         "insert into merchant_scan_runs(phase,status,range_start,range_end) values('inventory','running',0,?)",
         (len(merchants),),
@@ -1313,6 +1322,7 @@ def run_inventory(args):
             "stageProcessed": 0, "stageTotal": total,
             "message": "Preparing the saved wine-shop website queue.",
             "runId": run_id, "checked": 0, "total": total, "remaining": total,
+            "country": country,
             "found": 0, "products": 0, "errors": 0,
             "workers": args.workers, "processes": process_workers,
             "threadsPerProcess": thread_workers,
@@ -1359,6 +1369,7 @@ def run_inventory(args):
                             "stageProcessed": checked, "stageTotal": total,
                             "message": "Scanning official websites and saving verified catalogues.",
                             "runId": run_id, "checked": checked, "total": total, "remaining": total - checked,
+                            "country": country,
                             "found": found, "products": products, "errors": errors, "currentMerchant": merchant["name"],
                             "elapsedSeconds": int(elapsed),
                             "estimatedRemainingSeconds": int((total - checked) / max(0.01, checked / elapsed)),
@@ -1376,6 +1387,7 @@ def run_inventory(args):
             "stageProcessed": checked, "stageTotal": total,
             "message": "Wine-shop inventory scan completed.",
             "runId": run_id, "checked": checked, "total": total,
+            "country": country,
             "remaining": 0, "found": found, "products": products, "errors": errors,
         })
     finally:
@@ -1407,6 +1419,7 @@ def build_parser():
     inventory.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
     inventory.add_argument("--limit", type=int, default=0)
     inventory.add_argument("--merchant-id", type=int, default=0)
+    inventory.add_argument("--country", default="", help="Only scan merchants matching this stored country code or name.")
     return parser
 
 

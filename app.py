@@ -393,6 +393,7 @@ def start_shop_collection(payload):
     if str(payload.get("password") or "") != ADMIN_PASSWORD:
         return {"ok": False, "error": "Wrong password."}, 401
     phase = str(payload.get("phase") or "inventory").strip()
+    country = ""
     if phase not in {"merchant_scan", "inventory", "overture"}:
         return {"ok": False, "error": "phase must be merchant_scan, overture, or inventory."}, 400
     running_pid = running_shop_collector(phase)
@@ -450,6 +451,9 @@ def start_shop_collection(payload):
         ]
         if int(payload.get("limit") or 0) > 0:
             command.extend(["--limit", str(int(payload["limit"]))])
+        country = str(payload.get("country") or "").strip()
+        if country:
+            command.extend(["--country", country])
 
     log_dir = ROOT / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -473,6 +477,7 @@ def start_shop_collection(payload):
     finally:
         stdout.close()
         stderr.close()
+    inventory_scope = f" for {country}" if country else ""
     return {
         "ok": True, "running": True, "phase": phase, "pid": process.pid,
         "message": (
@@ -480,7 +485,7 @@ def start_shop_collection(payload):
             if phase == "overture"
             else "Merchant registry scan started."
             if phase == "merchant_scan"
-            else "Wine-shop inventory collection started."
+            else f"Wine-shop inventory collection started{inventory_scope}."
         ),
     }, 202
 

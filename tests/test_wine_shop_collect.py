@@ -27,6 +27,7 @@ from scripts.wine_shop_collect import (
     parse_pdf_products,
     parse_xlsx_products,
     run_inventory,
+    select_inventory_merchants,
     save_inventory_result,
 )
 from wine_shop_db import connect_shop, ensure_shop_db, upsert_product
@@ -72,7 +73,7 @@ class WineShopCollectorTests(unittest.TestCase):
                 con.close()
                 args = Namespace(
                     db=str(db_path), stale_days=14, merchant_id=0, resume=False, limit=0,
-                    per_domain=2, workers=4, processes=2, max_pages=5, depth=2,
+                    country="", per_domain=2, workers=4, processes=2, max_pages=5, depth=2,
                 )
                 with patch("scripts.wine_shop_collect.atomic_progress"):
                     run_inventory(args)
@@ -91,6 +92,27 @@ class WineShopCollectorTests(unittest.TestCase):
         finally:
             server.shutdown()
             server.server_close()
+
+    def test_inventory_country_filter_only_selects_requested_country(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "shops.sqlite"
+            ensure_shop_db(db_path)
+            con = connect_shop(db_path)
+            try:
+                con.executemany(
+                    "insert into merchants(wine_searcher_id,name,normalized_name,website_url,country) values(?,?,?,?,?)",
+                    [
+                        (1, "Hong Kong Shop", "hong kong shop", "https://hk.test", "HK"),
+                        (2, "US Shop", "us shop", "https://us.test", "US"),
+                    ],
+                )
+                con.commit()
+                args = Namespace(merchant_id=0, country="HK", resume=False, limit=0)
+                merchants = select_inventory_merchants(con, args, "2026-08-01T00:00:00+00:00")
+            finally:
+                con.close()
+
+            self.assertEqual([merchant["name"] for merchant in merchants], ["Hong Kong Shop"])
 
     def test_repeated_access_denials_open_the_scan_circuit(self):
         circuit = AccessCircuit(threshold=3)
