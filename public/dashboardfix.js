@@ -30,6 +30,8 @@
   };
 
   const COLLECTION_REFRESH_MS = 5000;
+  const DASHBOARD_WORLD_CENTER = { lat: 20, lng: 0 };
+  const DASHBOARD_WORLD_ZOOM = 1;
 
   const css = document.createElement("style");
   css.textContent = `
@@ -1539,7 +1541,9 @@
     document.querySelector(".map-panel")?.classList.toggle("hidden", !showSearch);
     if (view === "database") {
       renderDatabase();
-      if (!state.guideLoadedOnce || !state.mapLoadedOnce) loadGuideStats({ force: true });
+      if (!state.guideLoadedOnce || !state.mapLoadedOnce || !hasActiveDatabaseMapData()) {
+        loadGuideStats({ force: true });
+      }
     }
     if (view === "collection") {
       renderCollection();
@@ -1714,6 +1718,13 @@
     return state.databaseMode === "shops" ? shopDatabasePayload() : (state.guidePayload || {});
   }
 
+  function hasActiveDatabaseMapData() {
+    if (state.databaseMode === "shops") {
+      return Array.isArray(state.shopPayload?.mapMerchants) && state.shopPayload.mapMerchants.length > 0;
+    }
+    return Array.isArray(state.guidePayload?.mapTargets) && state.guidePayload.mapTargets.length > 0;
+  }
+
   function markerColor(kind) {
     if (kind === "found") return "#16a34a";
     if (kind === "none") return "#dc2626";
@@ -1835,6 +1846,13 @@
     return `<strong>${html(target.name || "Unknown")}</strong><br>${html(location || "Unknown location")}<br>${targetPill(target)}${wineList}${website}`;
   }
 
+  function showDashboardWorldView() {
+    if (!state.dashboardMap) return;
+    state.dashboardInfoWindow?.close();
+    state.dashboardMap.setCenter(DASHBOARD_WORLD_CENTER);
+    state.dashboardMap.setZoom(DASHBOARD_WORLD_ZOOM);
+  }
+
   async function renderDashboardMap(payload, options = {}) {
     const mapEl = document.querySelector("#dashboardDbMap");
     const fallbackEl = document.querySelector("#dashboardMapFallback");
@@ -1864,8 +1882,8 @@
         state.dashboardDataClickBound = false;
         state.dashboardMapEl = mapEl;
         state.dashboardMap = new maps.Map(mapEl, {
-          center: { lat: 30, lng: 8 },
-          zoom: 2,
+          center: DASHBOARD_WORLD_CENTER,
+          zoom: DASHBOARD_WORLD_ZOOM,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: true,
@@ -1879,8 +1897,6 @@
         state.dashboardMapHasFit = false;
       }
       const signature = mapSignature(targets);
-      const bounds = new maps.LatLngBounds();
-      targets.forEach((target) => bounds.extend({ lat: target.lat, lng: target.lng }));
       if (!state.dashboardDataLayer) {
         state.dashboardDataLayer = new maps.Data({ map: state.dashboardMap });
         state.dashboardDataLayer.setStyle((feature) => ({
@@ -1904,8 +1920,7 @@
         state.dashboardMapSignature = signature;
       }
       if (!state.dashboardMapHasFit || options.fit) {
-        state.dashboardMap.fitBounds(bounds, 56);
-        if (targets.length === 1) state.dashboardMap.setZoom(12);
+        showDashboardWorldView();
         state.dashboardMapHasFit = true;
       }
       if (state.activeTargetId) selectDashboardTarget(state.activeTargetId, false);
@@ -2773,6 +2788,7 @@
       state.dashboardMapSignature = "";
       state.dashboardMapHasFit = false;
       renderDatabase();
+      if (!hasActiveDatabaseMapData()) loadGuideStats({ force: true });
     });
     activate("search");
   }

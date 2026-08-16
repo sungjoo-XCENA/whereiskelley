@@ -58,6 +58,13 @@ class DashboardViewTests(unittest.TestCase):
 
     def test_database_world_map_wraps_horizontally(self):
         self.assertNotIn("strictBounds", self.script)
+        self.assertIn("DASHBOARD_WORLD_ZOOM = 1", self.script)
+        self.assertIn("showDashboardWorldView()", self.script)
+        self.assertNotIn("state.dashboardMap.fitBounds", self.script)
+
+    def test_database_mode_fetches_missing_map_payload(self):
+        self.assertIn("function hasActiveDatabaseMapData()", self.script)
+        self.assertIn("!hasActiveDatabaseMapData()", self.script)
 
     def test_resource_panel_hides_internal_sample_interval(self):
         self.assertNotIn("samples / every", self.script)
