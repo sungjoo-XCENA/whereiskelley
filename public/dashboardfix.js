@@ -30,8 +30,8 @@
   };
 
   const COLLECTION_REFRESH_MS = 5000;
-  const DASHBOARD_WORLD_CENTER = { lat: 20, lng: 0 };
-  const DASHBOARD_WORLD_ZOOM = 1;
+  const DASHBOARD_WORLD_CENTER = { lat: 25, lng: 8 };
+  const DASHBOARD_WORLD_ZOOM = 2;
 
   const css = document.createElement("style");
   css.textContent = `
@@ -771,9 +771,8 @@
     }
     .dashboard-map-wrap {
       position: relative;
-      width: min(100%, 1120px);
-      height: auto;
-      aspect-ratio: 2 / 1;
+      width: 100%;
+      height: 430px;
       margin: 0 auto;
       overflow: hidden;
       border: 1px solid var(--line);
@@ -1032,8 +1031,7 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
       .dashboard-map-wrap {
-        width: 100%;
-        aspect-ratio: 16 / 10;
+        height: 400px;
       }
     }
     @media (max-width: 640px) {
@@ -1107,7 +1105,7 @@
         grid-template-columns: 1fr;
       }
       .dashboard-map-wrap {
-        aspect-ratio: 4 / 3;
+        height: 340px;
       }
     }
   `;

@@ -58,9 +58,13 @@ class DashboardViewTests(unittest.TestCase):
 
     def test_database_world_map_wraps_horizontally(self):
         self.assertNotIn("strictBounds", self.script)
-        self.assertIn("DASHBOARD_WORLD_ZOOM = 1", self.script)
+        self.assertIn("DASHBOARD_WORLD_CENTER = { lat: 25, lng: 8 }", self.script)
+        self.assertIn("DASHBOARD_WORLD_ZOOM = 2", self.script)
         self.assertIn("showDashboardWorldView()", self.script)
         self.assertNotIn("state.dashboardMap.fitBounds", self.script)
+
+    def test_database_map_matches_search_map_frame(self):
+        self.assertIn("width: 100%;\n      height: 430px;", self.script)
 
     def test_database_mode_fetches_missing_map_payload(self):
         self.assertIn("function hasActiveDatabaseMapData()", self.script)
