@@ -27,6 +27,7 @@ from country_codes import (
     country_values_match,
     normalize_country_code,
 )
+from search_matching import folded_tokens_match
 
 
 ROOT = Path(__file__).resolve().parent
@@ -1189,10 +1190,30 @@ def search(params):
             live_region,
         )
         live_source_ids = live_refresh["sourceItemIds"]
+        query_terms = loose_tokens(q)
+        if not live_source_ids and len(query_terms) > 1:
+            anchor = live_fallback_anchor(query_terms)
+            if anchor:
+                fallback_query = anchor if not vintage else f"{anchor} {vintage}"
+                fallback_refresh = refresh_from_search_api(
+                    fallback_query,
+                    live_pages,
+                    live_max_pdfs,
+                    live_page_cap,
+                    live_region,
+                )
+                if fallback_refresh["sourceItemIds"]:
+                    live_refresh = {
+                        **fallback_refresh,
+                        "requestedQuery": live_query,
+                        "fallbackQuery": fallback_query,
+                    }
+                    live_source_ids = fallback_refresh["sourceItemIds"]
 
     where = []
     args = []
-    fts_query = fts_match_query(q)
+    query_terms = loose_tokens(q)
+    fts_query = fts_match_query(q, match_any=len(query_terms) > 1)
     use_fts = bool(fts_query)
     if live_source_ids:
         placeholders = ",".join("?" for _ in live_source_ids)
@@ -1264,7 +1285,8 @@ def search(params):
           e.id asc
         limit ?
     """
-    args.append(limit)
+    candidate_limit = min(50000, max(2000, limit * 20)) if len(query_terms) > 1 else limit
+    args.append(candidate_limit)
 
     con = connect()
     try:
@@ -1273,6 +1295,11 @@ def search(params):
         con.close()
     results = []
     for row in rows:
+        searchable = fold_text(" ".join(filter(None, (
+            row["text"], row["producer"], row["wineName"], row["region"], row["grape"],
+        ))))
+        if query_terms and not folded_tokens_match(query_terms, searchable):
+            continue
         item = row_to_dict(row)
         price_text = item.pop("priceText") or ""
         item["prices"] = [price_text] if price_text else []
@@ -1320,6 +1347,8 @@ def search(params):
         item["wineList"]["localFileUrl"] = f"/files/{item['wineList']['localFilePath']}" if item["wineList"]["localFilePath"] else ""
         item["source"] = "Star Wine"
         results.append(item)
+        if len(results) >= limit:
+            break
     results.extend(search_collected_guides(q, country, city, vintage, limit))
     results.extend(search_shop_products(q, country, city, vintage, limit))
     return {"query": q, "count": len(results), "results": results, "liveRefresh": live_refresh}
@@ -1503,8 +1532,14 @@ def loose_tokens(value):
     return [token for token in sync_search_api.re.findall(r"\w+", fold_text(value)) if len(token) >= 2]
 
 
-def fts_match_query(value):
-    return " AND ".join(f'"{token.replace(chr(34), chr(34) * 2)}"' for token in loose_tokens(value))
+def fts_match_query(value, match_any=False):
+    operator = " OR " if match_any else " AND "
+    return operator.join(f'"{token.replace(chr(34), chr(34) * 2)}"' for token in loose_tokens(value))
+
+
+def live_fallback_anchor(tokens):
+    generic = {"chateau", "domain", "domaine", "maison", "the", "wine", "wines"}
+    return next((token for token in tokens if token not in generic), tokens[0] if tokens else "")
 
 
 def search_collected_guides(query, country="", city="", vintage="", limit=5000):
@@ -1556,7 +1591,7 @@ def search_collected_guides(query, country="", city="", vintage="", limit=5000):
     for row in rows:
         raw_text = row["raw_text"] or ""
         folded_line = fold_text(raw_text)
-        if not all(token in folded_line for token in tokens):
+        if not folded_tokens_match(tokens, folded_line):
             continue
         display_country = display_country_name(
             row["country"],
@@ -1651,7 +1686,7 @@ def matching_positions(raw, tokens):
         if position < 0:
             break
         window = folded[max(0, position - 40) : position + 260]
-        if all(token in window for token in tokens):
+        if folded_tokens_match(tokens, window):
             positions.append(position)
         cursor = position + max(1, len(primary))
     return positions
@@ -1659,7 +1694,7 @@ def matching_positions(raw, tokens):
 
 def matched_pdf_fragments(raw, query, country):
     tokens = query_tokens(query)
-    if tokens and not all(token in fold_text(raw) for token in tokens):
+    if tokens and not folded_tokens_match(tokens, fold_text(raw)):
         return []
 
     fragments = []

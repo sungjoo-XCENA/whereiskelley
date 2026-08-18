@@ -136,6 +136,38 @@ class WineShopDatabaseTests(unittest.TestCase):
             self.assertEqual(results[0]["venue"]["inventoryUrl"], "https://volcanowinery.com/wines")
             self.assertEqual(results[0]["priceValue"], 30)
 
+    def test_joined_transposed_name_matches_split_shop_product_name(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "shops.sqlite"
+            ensure_shop_db(db_path)
+            con = connect_shop(db_path)
+            try:
+                merchant_id = con.execute(
+                    "insert into merchants(name,normalized_name,website_url,country,city,active,inventory_status) values(?,?,?,?,?,1,'found')",
+                    ("Test Wines", "test wines", "https://wines.example", "FR", "Paris"),
+                ).lastrowid
+                source_id = con.execute(
+                    "insert into merchant_sources(merchant_id,source_type,source_url,status,parser_status) values(?,'html',?,'found','parsed')",
+                    (merchant_id, "https://wines.example/list"),
+                ).lastrowid
+                upsert_product(con, merchant_id, source_id, {
+                    "source_key": "koji-jae-hwa",
+                    "source_url": "https://wines.example/list",
+                    "raw_name": "Domaine Koji et Jae Hwa Bourgogne Rouge",
+                    "raw_text": "Domaine Koji et Jae Hwa Bourgogne Rouge EUR 100",
+                    "price_value": 100,
+                    "currency": "EUR",
+                    "price_text": "EUR 100",
+                })
+                con.commit()
+            finally:
+                con.close()
+
+            results = search_shop_products("koji jaewha", path=db_path)
+
+        self.assertEqual(len(results), 1)
+        self.assertIn("Jae Hwa", results[0]["text"])
+
     def test_hong_kong_filter_uses_iso_code_and_displays_country_name(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "shops.sqlite"

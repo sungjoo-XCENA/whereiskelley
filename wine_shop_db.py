@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
 from country_codes import COUNTRY_NAMES, country_display_name, normalize_country_code
+from search_matching import folded_tokens_match
 
 
 ROOT = Path(__file__).resolve().parent
@@ -285,7 +286,7 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
             row["merchant_name"], row["raw_name"], row["raw_text"], row["producer"],
             row["wine_name"], row["region"],
         ))))
-        if not all(token in searchable for token in tokens):
+        if not folded_tokens_match(tokens, searchable):
             continue
         source_url = row["source_url"] or row["inventory_url"] or row["website_url"] or ""
         stored_country_code = normalize_country_code(

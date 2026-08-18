@@ -38,6 +38,10 @@ class IntegratedSearchUiTests(unittest.TestCase):
         self.assertIn('"Source URL"', APP_SCRIPT)
         self.assertIn("Official website", APP_SCRIPT)
 
+    def test_collapsed_price_offer_has_no_shop_source_background(self):
+        styles = (ROOT / "public" / "styles.css").read_text(encoding="utf-8")
+        self.assertNotIn(".price-offer.shop", styles)
+
     def test_collapsed_rows_show_compact_source_marks(self):
         self.assertIn('short: "S", label: "Star Wine"', APP_SCRIPT)
         self.assertIn('short: "R", label: "Restaurant DB"', APP_SCRIPT)

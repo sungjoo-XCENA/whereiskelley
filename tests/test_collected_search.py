@@ -180,6 +180,57 @@ class CollectedSearchTests(unittest.TestCase):
 
         self.assertEqual(payload["count"], 0)
 
+    def test_joined_transposed_name_matches_split_romanization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "search.sqlite"
+            con = create_db(db_path)
+            insert_star_wine_row(
+                con,
+                raw_text="2021 Domaine Koji et Jae Hwa Bourgogne Rouge 1200",
+            )
+            con.close()
+            previous_path = app.DB_PATH
+            app.DB_PATH = db_path
+            try:
+                payload = app.search({"q": ["koji jaewha"], "limit": ["100"]})
+            finally:
+                app.DB_PATH = previous_path
+
+        self.assertEqual(payload["count"], 1)
+        self.assertIn("Jae Hwa", payload["results"][0]["text"])
+
+    def test_live_search_falls_back_to_distinctive_anchor_then_filters_locally(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "search.sqlite"
+            con = create_db(db_path)
+            insert_star_wine_row(
+                con,
+                raw_text="2021 Domaine Koji et Jae Hwa Bourgogne Rouge 1200",
+            )
+            con.execute("update wine_entries set source_item_id='koji-result'")
+            con.commit()
+            con.close()
+            previous_path = app.DB_PATH
+            app.DB_PATH = db_path
+            try:
+                with patch.object(
+                    app,
+                    "refresh_from_search_api",
+                    side_effect=[
+                        {"sourceItemIds": []},
+                        {"sourceItemIds": ["koji-result"]},
+                    ],
+                ) as refresh:
+                    payload = app.search(
+                        {"q": ["koji jaewha"], "live": ["1"], "limit": ["100"]}
+                    )
+            finally:
+                app.DB_PATH = previous_path
+
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(refresh.call_args_list[1].args[0], "koji")
+        self.assertEqual(payload["liveRefresh"]["fallbackQuery"], "koji")
+
     def test_country_filter_uses_greater_china_only_for_star_wine_region(self):
         self.assertEqual(app.starwine_region_for_country("China"), "greater-china")
         self.assertEqual(app.starwine_region_for_country("Hong Kong"), "greater-china")
