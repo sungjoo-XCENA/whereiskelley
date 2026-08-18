@@ -92,6 +92,20 @@ class IntegratedSearchUiTests(unittest.TestCase):
         self.assertIn('if (error.name === "AbortError") return', APP_SCRIPT)
         self.assertNotIn("submitButton.disabled = true", APP_SCRIPT)
 
+    def test_last_completed_search_is_restored_without_another_request(self):
+        self.assertIn('const SEARCH_CACHE_DB = "whereiskelley-search-cache"', APP_SCRIPT)
+        self.assertIn("indexedDB.open(SEARCH_CACHE_DB, 1)", APP_SCRIPT)
+        self.assertIn("SEARCH_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000", APP_SCRIPT)
+        self.assertIn("await saveCompletedSearchCache(latestResults, latestLiveRefresh)", APP_SCRIPT)
+        self.assertIn("const cached = await readCompletedSearchCache()", APP_SCRIPT)
+        self.assertIn("renderResults(cached.results, cached.liveRefresh || null)", APP_SCRIPT)
+
+    def test_search_filters_and_open_row_are_persisted(self):
+        self.assertIn('const SEARCH_INPUT_KEY = "whereiskelley.search-inputs.v1"', APP_SCRIPT)
+        self.assertIn('const SEARCH_VIEW_KEY = "whereiskelley.search-view.v1"', APP_SCRIPT)
+        self.assertIn("saveSearchViewState();", APP_SCRIPT)
+        self.assertIn("loadSearchViewState();", APP_SCRIPT)
+
     def test_collected_shop_uses_one_canonical_wine_list_button(self):
         self.assertIn("result.venue?.inventoryUrl", APP_SCRIPT)
         self.assertIn("const collectedListUrl = collectedResults", APP_SCRIPT)

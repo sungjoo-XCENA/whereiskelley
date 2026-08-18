@@ -28,6 +28,138 @@ let snapshotLineCache = null;
 let activeSearchController = null;
 let activeSearchRequestId = 0;
 
+const SEARCH_CACHE_DB = "whereiskelley-search-cache";
+const SEARCH_CACHE_STORE = "completed-searches";
+const SEARCH_CACHE_KEY = "last";
+const SEARCH_INPUT_KEY = "whereiskelley.search-inputs.v1";
+const SEARCH_VIEW_KEY = "whereiskelley.search-view.v1";
+const SEARCH_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function searchInputSnapshot() {
+  return {
+    query: queryInput.value.trim(),
+    country: countryInput.value,
+    city: cityInput.value.trim(),
+    vintage: vintageInput.value.trim()
+  };
+}
+
+function saveSearchInputState() {
+  try {
+    localStorage.setItem(SEARCH_INPUT_KEY, JSON.stringify(searchInputSnapshot()));
+  } catch (_error) {
+    // Search still works when browser storage is disabled.
+  }
+}
+
+function loadSearchInputState() {
+  try {
+    const value = JSON.parse(localStorage.getItem(SEARCH_INPUT_KEY) || "null");
+    return value && typeof value === "object" ? value : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function applySearchInputState(value) {
+  if (!value) return;
+  queryInput.value = String(value.query || "");
+  countryInput.value = String(value.country || "");
+  cityInput.value = String(value.city || "");
+  vintageInput.value = String(value.vintage || "");
+}
+
+function saveSearchViewState() {
+  try {
+    localStorage.setItem(SEARCH_VIEW_KEY, JSON.stringify({ activeVenueKey, sortState }));
+  } catch (_error) {
+    // The result cache remains useful without the optional view state.
+  }
+}
+
+function loadSearchViewState() {
+  try {
+    const value = JSON.parse(localStorage.getItem(SEARCH_VIEW_KEY) || "null");
+    if (!value || typeof value !== "object") return;
+    activeVenueKey = String(value.activeVenueKey || "");
+    if (value.sortState && ["place", "city", "country", "updated", "matches", "krw"].includes(value.sortState.key)) {
+      sortState = {
+        key: value.sortState.key,
+        direction: value.sortState.direction === "desc" ? "desc" : "asc"
+      };
+    }
+  } catch (_error) {
+    // Ignore malformed or unavailable browser storage.
+  }
+}
+
+function openSearchCache() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("IndexedDB unavailable"));
+      return;
+    }
+    const request = indexedDB.open(SEARCH_CACHE_DB, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(SEARCH_CACHE_STORE)) {
+        db.createObjectStore(SEARCH_CACHE_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Search cache unavailable"));
+  });
+}
+
+async function readCompletedSearchCache() {
+  let db;
+  try {
+    db = await openSearchCache();
+    const cached = await new Promise((resolve, reject) => {
+      const request = db.transaction(SEARCH_CACHE_STORE, "readonly")
+        .objectStore(SEARCH_CACHE_STORE)
+        .get(SEARCH_CACHE_KEY);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+    if (!cached || Date.now() - Number(cached.savedAt || 0) > SEARCH_CACHE_MAX_AGE_MS) {
+      if (cached) {
+        const transaction = db.transaction(SEARCH_CACHE_STORE, "readwrite");
+        transaction.objectStore(SEARCH_CACHE_STORE).delete(SEARCH_CACHE_KEY);
+      }
+      return null;
+    }
+    return cached;
+  } catch (_error) {
+    return null;
+  } finally {
+    db?.close();
+  }
+}
+
+async function saveCompletedSearchCache(results, liveRefresh) {
+  let db;
+  try {
+    db = await openSearchCache();
+    const transaction = db.transaction(SEARCH_CACHE_STORE, "readwrite");
+    transaction.objectStore(SEARCH_CACHE_STORE).put({
+      savedAt: Date.now(),
+      inputs: searchInputSnapshot(),
+      results,
+      liveRefresh
+    }, SEARCH_CACHE_KEY);
+    await new Promise((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } catch (_error) {
+    // A failed cache write must never fail a completed search.
+  } finally {
+    db?.close();
+  }
+}
+
 const COUNTRY_CURRENCY = {
   Argentina: "ARS",
   Australia: "AUD",
@@ -1305,6 +1437,9 @@ async function runSearch() {
       shopMatches,
       starWineMatches
     });
+    saveSearchInputState();
+    saveSearchViewState();
+    await saveCompletedSearchCache(latestResults, latestLiveRefresh);
   } finally {
     if (activeSearchController === controller) {
       activeSearchController = null;
@@ -1332,6 +1467,7 @@ resultsEl.addEventListener("click", (event) => {
       sortState = { key, direction: key === "krw" || key === "matches" || key === "updated" ? "desc" : "asc" };
     }
     renderResultList();
+    saveSearchViewState();
     return;
   }
   if (event.target.closest("a")) return;
@@ -1340,12 +1476,25 @@ resultsEl.addEventListener("click", (event) => {
   activeVenueKey = activeVenueKey === row.dataset.venueKey ? "" : row.dataset.venueKey;
   renderResultList();
   setActiveMapMarker(activeVenueKey);
+  saveSearchViewState();
 });
 
+for (const input of [queryInput, cityInput, vintageInput]) {
+  input.addEventListener("input", saveSearchInputState);
+}
+countryInput.addEventListener("change", saveSearchInputState);
+
 getJson("/api/filters")
-  .then((filters) => {
+  .then(async (filters) => {
     renderFilters(filters);
-    queryInput.value = "William Kelley";
+    const savedInputs = loadSearchInputState();
+    const cached = await readCompletedSearchCache();
+    applySearchInputState(cached?.inputs || savedInputs || { query: "William Kelley" });
+    loadSearchViewState();
+    if (cached && Array.isArray(cached.results)) {
+      renderResults(cached.results, cached.liveRefresh || null);
+      return;
+    }
     resultsEl.innerHTML = `<div class="empty-list"><h3>Ready to search</h3><p>Enter a wine name and press Search.</p></div>`;
     mapSummaryEl.textContent = "Waiting for search";
     showMapFallback("Search results will draw the map.", "Ready", false);
