@@ -65,6 +65,16 @@ COMMERCE_TEXT_WORDS = (
     "add to cart", "add to basket", "buy now", "shop now", "quick add", "checkout",
     "in stock", "out of stock", "available for purchase",
 )
+WINE_DOCUMENT_WORDS = (
+    "wine list", "wine menu", "wine selection", "wine catalogue", "wine catalog",
+    "wine price list", "carte des vins", "carta dei vini", "carta de vinos",
+    "weinliste", "weinkarte", "wijnkaart", "vinkort", "vinlista",
+)
+NON_WINE_DOCUMENT_WORDS = (
+    "horse race", "horse racing", "raceway", "racetrack", "race results",
+    "race result", "post position", "starting gate", "purse", "trotter",
+    "trotting", "pacing", "trainer", "driver", "finish time", "race time",
+)
 WINE_EVIDENCE = (
     "burgundy", "bourgogne", "burgund", "champagne", "bordeaux", "chablis", "beaujolais",
     "moulin a vent", "morgon", "fleurie", "cote de brouilly", "saint amour",
@@ -978,7 +988,29 @@ def parse_pdf_products(body, source_url):
         product = product_from_text(line, source_url)
         if product:
             products.append(product)
-    return products, "" if products else "PDF contained no recognizable Burgundy, Champagne, or Bordeaux wine rows."
+    folded = fold_text(text)
+    path = fold_text(unquote(urlparse(source_url).path)).replace("_", "-")
+    explicit_wine_document = any(word in folded for word in WINE_DOCUMENT_WORDS)
+    explicit_wine_path = any(
+        word in path
+        for word in (
+            "wine-list", "winelist", "wine_menu", "wine-menu", "wines", "pricelist",
+            "price-list", "carte-des-vins", "carta-vini", "carta-de-vinos", "weinliste",
+            "weinkarte", "wijnkaart", "vinkort", "vinlista",
+        )
+    )
+    non_wine_score = sum(min(folded.count(word), 4) for word in NON_WINE_DOCUMENT_WORDS)
+    if non_wine_score >= 3 and not explicit_wine_document:
+        return [], "PDF was identified as a non-wine document."
+    if not products:
+        return [], "PDF contained no recognizable Burgundy, Champagne, or Bordeaux wine rows."
+
+    # A generic PDF with one accidental grape or region name is not enough.
+    # Real lists either identify themselves or contain several independent rows.
+    distinct_rows = {fold_text(product.get("raw_text")) for product in products}
+    if not (explicit_wine_document or explicit_wine_path) and len(distinct_rows) < 3:
+        return [], "PDF did not contain enough independent wine-list rows."
+    return products, ""
 
 
 def parse_csv_products(body, source_url):
@@ -1027,7 +1059,9 @@ def link_priority(url, label):
     folded = fold_text(f"{url} {label}")
     score = sum(8 for word in WINE_PATH_WORDS if word in folded)
     if urlparse(url).path.lower().endswith((".pdf", ".csv", ".xlsx", ".xls")):
-        score += 20
+        # A file extension alone says nothing about its contents. Prioritize
+        # downloadable files only when their URL or link label is wine-related.
+        score += 6 if any(word in folded for word in WINE_PATH_WORDS) else -6
     if any(word in folded for word in ("menu", "download", "shop", "product", "collection")):
         score += 3
     if any(word in folded for word in ("privacy", "terms", "login", "account", "cart", "checkout", "blog", "news")):

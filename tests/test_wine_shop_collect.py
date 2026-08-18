@@ -306,7 +306,7 @@ class WineShopCollectorTests(unittest.TestCase):
 
     def test_pdf_csv_and_xlsx_price_lists_remain_supported(self):
         fake_reader = types.SimpleNamespace(
-            pages=[types.SimpleNamespace(extract_text=lambda: "2011 Chateau Rayas Chateauneuf du Pape EUR 1,700")]
+            pages=[types.SimpleNamespace(extract_text=lambda: "Wine List\n2011 Chateau Rayas Chateauneuf du Pape EUR 1,700")]
         )
         fake_module = types.SimpleNamespace(PdfReader=lambda _stream: fake_reader)
         with patch.dict(sys.modules, {"pypdf": fake_module}):
@@ -328,6 +328,23 @@ class WineShopCollectorTests(unittest.TestCase):
             archive.writestr("xl/worksheets/sheet1.xml", sheet)
         xlsx_products = parse_xlsx_products(stream.getvalue(), "https://shop.test/list.xlsx")
         self.assertEqual(xlsx_products[0]["price_value"], 1700.0)
+
+    def test_horse_racing_results_pdf_is_not_a_wine_list(self):
+        fake_reader = types.SimpleNamespace(
+            pages=[types.SimpleNamespace(extract_text=lambda: (
+                "Sunday Race Results 2014\n"
+                "Horse Racing Trotter Purse Driver Trainer Finish Time\n"
+                "SAMMY MERLOT 6 66 4 2 16 75 8.70 32.0"
+            ))]
+        )
+        fake_module = types.SimpleNamespace(PdfReader=lambda _stream: fake_reader)
+        with patch.dict(sys.modules, {"pypdf": fake_module}):
+            products, error = parse_pdf_products(
+                b"pdf",
+                "https://www.littlebrownjug.com/wp-content/uploads/2021/09/sunday-results-2014.pdf",
+            )
+        self.assertFalse(products)
+        self.assertEqual(error, "PDF was identified as a non-wine document.")
 
     def test_script_or_long_prose_is_not_saved_as_a_product(self):
         self.assertIsNone(product_from_text(
