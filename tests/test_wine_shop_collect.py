@@ -394,6 +394,52 @@ class WineShopCollectorTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
+    def test_tasting_blog_is_not_verified_as_shop_inventory(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/robots.txt":
+                    body = b"User-agent: *\nAllow: /\n"
+                    content_type = "text/plain"
+                elif self.path == "/":
+                    body = b'<a href="/blog/what-a-tasting/">What a tasting</a>'
+                    content_type = "text/html"
+                elif self.path == "/blog/what-a-tasting/":
+                    body = (
+                        b"<html><head><title>What a Tasting</title></head><body>"
+                        b"<h1>What a Tasting</h1><p>2000 Pol Roger Rose</p>"
+                        b"<p>2002 Pol Roger Cuvee Sir Winston Churchill</p>"
+                        b"<p>1993 Dom Perignon Oenotheque</p>"
+                        b"<p>1990 Bollinger R.D. Extra Brut</p></body></html>"
+                    )
+                    content_type = "text/html"
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("content-type", content_type)
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{server.server_port}"
+            slots = DomainSlots(2)
+            result = crawl_merchant_inventory(
+                {"id": 1, "website_url": base}, max_pages=10, max_depth=3,
+                domain_slots=slots, robots=RobotsPolicy(slots),
+            )
+            self.assertEqual(result["status"], "no_wine_list")
+            self.assertFalse(result["products"])
+        finally:
+            server.shutdown()
+            server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

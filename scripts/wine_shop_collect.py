@@ -53,6 +53,18 @@ WINE_PATH_WORDS = (
     "wein", "wijn", "drinks", "beverage", "cellar", "bottle", "catalog", "catalogue",
     "price-list", "pricelist", "carta-vini", "carte-des-vins", "shop-wine",
 )
+EDITORIAL_PATH_WORDS = (
+    "blog", "news", "event", "events", "journal", "story", "stories", "article",
+    "articles", "tasting", "tastings", "press", "recipe", "recipes",
+)
+CATALOG_PATH_WORDS = (
+    "wine-list", "winelist", "wines", "shop", "store", "products", "collections",
+    "catalog", "catalogue", "inventory", "price-list", "pricelist", "shop-wine",
+)
+COMMERCE_TEXT_WORDS = (
+    "add to cart", "add to basket", "buy now", "shop now", "quick add", "checkout",
+    "in stock", "out of stock", "available for purchase",
+)
 WINE_EVIDENCE = (
     "burgundy", "bourgogne", "burgund", "champagne", "bordeaux", "chablis", "beaujolais",
     "moulin a vent", "morgon", "fleurie", "cote de brouilly", "saint amour",
@@ -1023,6 +1035,36 @@ def link_priority(url, label):
     return score
 
 
+def html_inventory_signals(url, parser, products):
+    """Accept visible-text products only when the page behaves like a catalogue."""
+    if not products:
+        return False
+    parsed = urlparse(url)
+    path = fold_text(unquote(parsed.path)).replace("_", "-")
+    title = fold_text(" ".join(parser.title + parser.headings))
+    page_context = f"{path} {title}"
+    context_words = set(re.findall(r"[a-z0-9]+", page_context))
+    if any(word in context_words for word in EDITORIAL_PATH_WORDS):
+        return False
+
+    segments = {segment for segment in path.split("/") if segment}
+    catalogue_path = any(word in segments for word in CATALOG_PATH_WORDS)
+    product_path = any(word in segments for word in ("wine", "product"))
+    priced_count = sum(product.get("price_value") is not None for product in products)
+    page_text = fold_text(" ".join(parser.text[:12000]))
+    commerce_text = any(word in page_text for word in COMMERCE_TEXT_WORDS)
+    commerce_link = any(
+        any(word in fold_text(f"{href} {label}") for word in ("cart", "checkout", "product", "shop"))
+        for href, label in parser.links
+    )
+
+    if catalogue_path and (priced_count >= 1 or len(products) >= 3):
+        return True
+    if product_path and priced_count >= 1:
+        return True
+    return priced_count >= 2 and (commerce_text or commerce_link)
+
+
 def same_domain(left, right):
     a = (urlparse(left).hostname or "").lower().removeprefix("www.")
     b = (urlparse(right).hostname or "").lower().removeprefix("www.")
@@ -1145,10 +1187,13 @@ def crawl_merchant_inventory(merchant, max_pages=160, max_depth=5, domain_slots=
                             is_corksy_source = True
                 products.extend(structured_products(parse_json_ld(parser), final_url))
                 if link_priority(final_url, "") > 0 or any(term in fold_text(" ".join(parser.text[:3000])) for term in WINE_EVIDENCE):
+                    visible_products = []
                     for line in visible_lines(parser):
                         product = product_from_text(line, final_url)
                         if product:
-                            products.append(product)
+                            visible_products.append(product)
+                    if html_inventory_signals(final_url, parser, visible_products):
+                        products.extend(visible_products)
         if products:
             deduped = {}
             for product in products:
