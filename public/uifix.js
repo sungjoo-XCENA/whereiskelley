@@ -216,6 +216,8 @@
       if (label === "map") {
         const { name, place } = expandedPlaceParts(link);
         if (name || place) link.href = googleMapsSearchUrl(name, place);
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
         link.classList.add("map-link");
       }
       if (label === "star wine list page") {

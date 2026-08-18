@@ -55,6 +55,14 @@ class IntegratedSearchUiTests(unittest.TestCase):
         self.assertIn('gestureHandling: "greedy"', dashboard_fix)
         self.assertIn("scrollwheel: true", dashboard_fix)
 
+    def test_pdf_and_map_links_open_in_new_tabs(self):
+        download_fix = (ROOT / "public" / "downloadfix.js").read_text(encoding="utf-8")
+        ui_fix = (ROOT / "public" / "uifix.js").read_text(encoding="utf-8")
+        self.assertEqual(download_fix.count('target="_blank"'), 2)
+        self.assertEqual(download_fix.count('rel="noopener noreferrer"'), 2)
+        self.assertIn('link.target = "_blank"', ui_fix)
+        self.assertIn('link.rel = "noopener noreferrer"', ui_fix)
+
     def test_collapsed_rows_show_compact_source_marks(self):
         self.assertIn('short: "S", label: "Star Wine"', APP_SCRIPT)
         self.assertIn('short: "R", label: "Restaurant DB"', APP_SCRIPT)

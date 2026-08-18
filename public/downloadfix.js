@@ -22,7 +22,7 @@
   pdfMarkup = function pdfMarkup(list = {}) {
     const url = proxiedPdfUrl(list);
     if (!url) return `<span class="pdf-pill muted">No PDF</span>`;
-    return `<a class="pdf-pill pdf-link" href="${escapeHtml(url)}">PDF</a>`;
+    return `<a class="pdf-pill pdf-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">PDF</a>`;
   };
 
   pdfLinksMarkup = function pdfLinksMarkup(lists = []) {
@@ -32,7 +32,7 @@
       .map((list, index) => {
         const label = validLists.length === 1 ? "PDF" : `PDF ${index + 1}`;
         const url = proxiedPdfUrl(list);
-        return `<a href="${escapeHtml(url)}">${escapeHtml(label)}</a>`;
+        return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
       })
       .join("");
   };
