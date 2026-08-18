@@ -132,7 +132,9 @@ def shop_collection_status(path=None, map_limit=6000, include_map=True):
               (select count(*) from merchant_sources where status='found') as sources,
               (select count(*) from merchant_products where active=1) as products,
               (select count(*) from merchant_reviews where status='open') as openReviews,
-              (select count(*) from merchant_place_sources where provider='overture' and active=1) as overturePlaces,
+              (select count(*) from merchant_place_sources ps
+                 join merchants m on m.id=ps.merchant_id
+                where ps.provider='overture' and ps.active=1 and m.active=1) as overturePlaces,
               (select count(*) from merchant_websites where provider='overture' and active=1) as overtureWebsites
             """
         ).fetchone())

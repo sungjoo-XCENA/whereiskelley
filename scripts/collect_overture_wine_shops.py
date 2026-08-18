@@ -10,6 +10,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
+import math
 import os
 import queue
 import re
@@ -318,6 +319,7 @@ def build_query(path, columns, country="", bbox=None, limit=0):
     has = columns.__contains__
     name_expr = "names.primary" if has("names") else "''"
     category_parts = []
+    primary_category_parts = []
     select_parts = [
         "id",
         "{} AS name".format(name_expr),
@@ -331,11 +333,13 @@ def build_query(path, columns, country="", bbox=None, limit=0):
             "CAST(to_json(categories) AS VARCHAR) AS categories_json",
         ])
         category_parts.append("CAST(categories AS VARCHAR)")
+        primary_category_parts.append("categories.primary")
     else:
         select_parts.extend(["NULL AS old_primary", "NULL AS categories_json"])
     if has("basic_category"):
         select_parts.append("basic_category")
         category_parts.append("basic_category")
+        primary_category_parts.append("basic_category")
     else:
         select_parts.append("NULL AS basic_category")
     if has("taxonomy"):
@@ -344,6 +348,7 @@ def build_query(path, columns, country="", bbox=None, limit=0):
             "CAST(to_json(taxonomy) AS VARCHAR) AS taxonomy_json",
         ])
         category_parts.append("CAST(taxonomy AS VARCHAR)")
+        primary_category_parts.append("taxonomy.primary")
     else:
         select_parts.extend(["NULL AS taxonomy_primary", "NULL AS taxonomy_json"])
     if has("websites"):
@@ -379,6 +384,9 @@ def build_query(path, columns, country="", bbox=None, limit=0):
         select_parts.extend(["NULL AS longitude", "NULL AS latitude"])
 
     category_expr = "lower(CONCAT_WS(' ', {}))".format(", ".join(category_parts or ["''"]))
+    primary_category_expr = "lower(CONCAT_WS(' ', {}))".format(
+        ", ".join(primary_category_parts or ["''"])
+    )
     name_search = (
         r"(^|[^a-z])(wine|wines|cellar|cellars|liquor|spirits|caviste|vin|vins|vino|vini|"
         r"vinoteca|enoteca|wein|weinhandlung|wijn|vinho|vinhos|garrafeira|vinhandel|wino)"
@@ -393,7 +401,7 @@ def build_query(path, columns, country="", bbox=None, limit=0):
         if has("operating_status") else "TRUE",
         "(regexp_matches({}, {}) OR (regexp_matches(lower(COALESCE({}, '')), {}) "
         "AND NOT regexp_matches({}, '(^|[^a-z])(restaurant|bar|pub|winery|vineyard|hotel|lounge)([^a-z]|$)')))".format(
-            category_expr,
+            primary_category_expr,
             sql_literal(strict_categories),
             name_expr,
             sql_literal(name_search),
@@ -417,13 +425,17 @@ def build_query(path, columns, country="", bbox=None, limit=0):
 
 
 def candidate_from_row(row):
-    category_text = " ".join(
+    primary_category_text = " ".join(
+        str(row.get(key) or "")
+        for key in ("old_primary", "basic_category", "taxonomy_primary")
+    )
+    all_category_text = " ".join(
         str(row.get(key) or "")
         for key in ("old_primary", "categories_json", "basic_category", "taxonomy_primary", "taxonomy_json")
     )
-    category_match = bool(CATEGORY_RE.search(category_text))
+    category_match = bool(CATEGORY_RE.search(primary_category_text))
     name_match = bool(NAME_RE.search(str(row.get("name") or "")))
-    if not category_match and (not name_match or NON_RETAIL_RE.search(category_text)):
+    if not category_match and (not name_match or NON_RETAIL_RE.search(all_category_text)):
         return None
     websites = [normalize_url(value) for value in json_values(row.get("websites_json"))]
     websites = [value for value in websites if value]
@@ -438,7 +450,7 @@ def candidate_from_row(row):
     payload = {
         "provider_place_id": str(row.get("id") or ""),
         "name": str(row.get("name") or "").strip(),
-        "candidate_reason": "retail_category" if category_match else "retail_name",
+        "candidate_reason": "retail_primary_category" if category_match else "retail_name",
         "primary_category": row.get("taxonomy_primary") or row.get("basic_category") or row.get("old_primary"),
         "categories": parse_json(row.get("categories_json"), {}),
         "taxonomy": parse_json(row.get("taxonomy_json"), {}),
@@ -483,16 +495,95 @@ def load_import_state(con):
         )
     }
     domains = {}
+    merchants = {}
     for row in con.execute(
         """
-        select id,normalized_name,website_domain
+        select id,normalized_name,website_domain,country,city,address,latitude,longitude
         from merchants
-        where coalesce(normalized_name,'')!='' and coalesce(website_domain,'')!=''
+        where active=1 and coalesce(normalized_name,'')!='' and coalesce(website_domain,'')!=''
         order by id
         """
     ):
-        domains.setdefault((str(row[1]), str(row[2]).casefold()), int(row[0]))
-    return {"places": places, "domains": domains}
+        identity = {
+            "id": int(row[0]),
+            "country": str(row[3] or ""),
+            "city": str(row[4] or ""),
+            "address": str(row[5] or ""),
+            "latitude": row[6],
+            "longitude": row[7],
+        }
+        merchants[identity["id"]] = identity
+        domains.setdefault((str(row[1]), str(row[2]).casefold()), []).append(identity)
+    return {"places": places, "domains": domains, "merchants": merchants}
+
+
+def location_distance_km(left_lat, left_lng, right_lat, right_lng):
+    try:
+        lat1, lng1, lat2, lng2 = map(
+            math.radians,
+            (float(left_lat), float(left_lng), float(right_lat), float(right_lng)),
+        )
+    except (TypeError, ValueError):
+        return None
+    delta_lat = lat2 - lat1
+    delta_lng = lng2 - lng1
+    value = (
+        math.sin(delta_lat / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lng / 2) ** 2
+    )
+    return 6371.0088 * 2 * math.asin(min(1.0, math.sqrt(value)))
+
+
+def same_merchant_location(candidate, existing, maximum_distance_km=1.0):
+    candidate_country = fold_text(candidate.get("country_code"))
+    existing_country = fold_text(existing.get("country"))
+    if candidate_country and existing_country and candidate_country != existing_country:
+        return False
+
+    candidate_address = fold_text(candidate.get("address"))
+    existing_address = fold_text(existing.get("address"))
+    if candidate_address and existing_address and candidate_address == existing_address:
+        return True
+
+    distance = location_distance_km(
+        candidate.get("latitude"), candidate.get("longitude"),
+        existing.get("latitude"), existing.get("longitude"),
+    )
+    if distance is not None:
+        return distance <= maximum_distance_km
+
+    return False
+
+
+def merchant_identity(row):
+    return {
+        "id": int(row[0]),
+        "country": str(row[1] or ""),
+        "city": str(row[2] or ""),
+        "address": str(row[3] or ""),
+        "latitude": row[4],
+        "longitude": row[5],
+    }
+
+
+def current_merchant_identity(con, merchant_id, state=None):
+    if state is not None:
+        identity = state.get("merchants", {}).get(int(merchant_id))
+        if identity:
+            return identity
+    row = con.execute(
+        """
+        select id,country,city,address,latitude,longitude
+        from merchants where id=?
+        """,
+        (merchant_id,),
+    ).fetchone()
+    return merchant_identity(row) if row else None
+
+
+def source_needs_location_split(con, merchant_id, candidate, state=None):
+    identity = current_merchant_identity(con, merchant_id, state=state)
+    return bool(identity and not same_merchant_location(candidate, identity))
 
 
 def find_existing_merchant(con, candidate, state=None):
@@ -501,21 +592,29 @@ def find_existing_merchant(con, candidate, state=None):
     domain = website_domain(website)
     if domain:
         if state is not None:
-            merchant_id = state["domains"].get((normalized_name, domain))
-            if merchant_id is not None:
-                return merchant_id
-        row = con.execute(
-            "select id from merchants where normalized_name=? and website_domain=? limit 1",
-            (normalized_name, domain),
-        ).fetchone()
-        if row:
-            return int(row[0])
+            identities = state["domains"].get((normalized_name, domain), [])
+        else:
+            identities = [
+                merchant_identity(row)
+                for row in con.execute(
+                    """
+                    select id,country,city,address,latitude,longitude
+                    from merchants
+                    where active=1 and normalized_name=? and website_domain=? order by id
+                    """,
+                    (normalized_name, domain),
+                ).fetchall()
+            ]
+        for identity in identities:
+            if same_merchant_location(candidate, identity):
+                return identity["id"]
     lat, lng = candidate.get("latitude"), candidate.get("longitude")
     if lat is not None and lng is not None:
         row = con.execute(
             """
             select id from merchants
-            where normalized_name=? and latitude between ? and ? and longitude between ? and ?
+            where active=1 and normalized_name=?
+              and latitude between ? and ? and longitude between ? and ?
             order by abs(latitude-?) + abs(longitude-?) limit 1
             """,
             (normalized_name, float(lat) - 0.003, float(lat) + 0.003,
@@ -549,6 +648,42 @@ def create_merchant(con, candidate, now):
 
 def update_merchant(con, merchant_id, candidate, now):
     website = (candidate.get("websites") or [""])[0]
+    existing = con.execute(
+        "select website_url,profile_status from merchants where id=?",
+        (merchant_id,),
+    ).fetchone()
+    current_website = normalize_url(existing[0]) if existing else ""
+    incoming_website = normalize_url(website)
+    rejected = bool(existing and str(existing[1] or "").casefold() == "rejected")
+    replacement = bool(rejected and incoming_website and incoming_website != current_website)
+    if rejected and not replacement:
+        con.execute(
+            """
+            update merchants set
+              country=case when coalesce(country,'')='' then ? else country end,
+              city=case when coalesce(city,'')='' then ? else city end,
+              address=case when coalesce(address,'')='' then ? else address end,
+              latitude=coalesce(latitude, ?), longitude=coalesce(longitude, ?),
+              phone=case when coalesce(phone,'')='' then ? else phone end,
+              last_seen_at=?,active=0
+            where id=?
+            """,
+            (
+                candidate.get("country_code") or None, candidate.get("city") or None,
+                candidate.get("address") or None, candidate.get("latitude"), candidate.get("longitude"),
+                (json_values(candidate.get("phones")) or [None])[0], now, merchant_id,
+            ),
+        )
+        return False
+    if replacement:
+        con.execute(
+            """
+            update merchants set website_url=?,website_domain=?,profile_status='discovered',
+              profile_error='',inventory_status='pending',inventory_error='',active=1,last_seen_at=?
+            where id=?
+            """,
+            (incoming_website, website_domain(incoming_website), now, merchant_id),
+        )
     con.execute(
         """
         update merchants set
@@ -569,6 +704,7 @@ def update_merchant(con, merchant_id, candidate, now):
             (json_values(candidate.get("phones")) or [None])[0], now, merchant_id,
         ),
     )
+    return True
 
 
 def upsert_candidate(con, candidate, run_id, release, now=None, state=None):
@@ -585,18 +721,37 @@ def upsert_candidate(con, candidate, run_id, release, now=None, state=None):
             place_source_id = int(previous["id"])
             merchant_id = int(previous["merchant_id"])
             previous_hash = str(previous["raw_hash"] or "")
-        outcome = "unchanged" if previous_hash == candidate["raw_hash"] else "updated"
+        if source_needs_location_split(con, merchant_id, candidate, state=state):
+            old_merchant_id = merchant_id
+            merchant_id = create_merchant(con, candidate, now)
+            outcome = "updated"
+        else:
+            old_merchant_id = None
+            outcome = "unchanged" if previous_hash == candidate["raw_hash"] else "updated"
     else:
+        old_merchant_id = None
         merchant_id = find_existing_merchant(con, candidate, state=state)
         if merchant_id is None:
             merchant_id = create_merchant(con, candidate, now)
         place_source_id = None
         outcome = "inserted"
-    update_merchant(con, merchant_id, candidate, now)
+    merchant_active = update_merchant(con, merchant_id, candidate, now)
     website = (candidate.get("websites") or [""])[0]
     domain = website_domain(website)
-    if state is not None and domain:
-        state["domains"].setdefault((fold_text(candidate["name"]), domain), merchant_id)
+    if state is not None and domain and merchant_active:
+        key = (fold_text(candidate["name"]), domain)
+        identities = state["domains"].setdefault(key, [])
+        identity = {
+            "id": merchant_id,
+            "country": candidate.get("country_code") or "",
+            "city": candidate.get("city") or "",
+            "address": candidate.get("address") or "",
+            "latitude": candidate.get("latitude"),
+            "longitude": candidate.get("longitude"),
+        }
+        identities[:] = [item for item in identities if item["id"] != merchant_id]
+        identities.append(identity)
+        state.setdefault("merchants", {})[merchant_id] = identity
 
     if outcome == "unchanged":
         con.execute(
@@ -608,7 +763,11 @@ def upsert_candidate(con, candidate, run_id, release, now=None, state=None):
             (release, now, run_id, place_source_id),
         )
         con.execute(
-            "update merchant_websites set active=1,last_seen_at=? where place_source_id=?",
+            """
+            update merchant_websites set
+              active=case when status='rejected' then 0 else 1 end,last_seen_at=?
+            where place_source_id=?
+            """,
             (now, place_source_id),
         )
         if state is not None:
@@ -669,10 +828,31 @@ def upsert_candidate(con, candidate, run_id, release, now=None, state=None):
             ) values(?,?,?,?,?,'official_candidate','overture','unverified',?,?,1)
             on conflict(merchant_id,normalized_url) do update set
               place_source_id=excluded.place_source_id,url=excluded.url,domain=excluded.domain,
-              last_seen_at=excluded.last_seen_at,active=1
+              last_seen_at=excluded.last_seen_at,
+              active=case when merchant_websites.status='rejected' then 0 else 1 end
             """,
             (merchant_id, place_source_id, website, normalized, website_domain(normalized), now, now),
         )
+    if old_merchant_id is not None:
+        con.execute(
+            """
+            update merchants set active=0
+            where id=? and wine_searcher_id is null
+              and not exists(
+                select 1 from merchant_place_sources
+                where merchant_id=? and active=1
+              )
+            """,
+            (old_merchant_id, old_merchant_id),
+        )
+        if state is not None:
+            old_active = con.execute(
+                "select active from merchants where id=?", (old_merchant_id,)
+            ).fetchone()
+            if old_active and not old_active[0]:
+                state.get("merchants", {}).pop(old_merchant_id, None)
+                for identities in state.get("domains", {}).values():
+                    identities[:] = [item for item in identities if item["id"] != old_merchant_id]
     if state is not None:
         state["places"][candidate["provider_place_id"]] = (
             place_source_id, merchant_id, candidate["raw_hash"]
@@ -687,7 +867,13 @@ def upsert_candidate_batch(con, candidates, run_id, release, now=None, state=Non
     unchanged = []
     for candidate in candidates:
         previous = state["places"].get(candidate["provider_place_id"]) if state is not None else None
-        if previous and previous[2] == candidate["raw_hash"]:
+        if (
+            previous
+            and previous[2] == candidate["raw_hash"]
+            and not source_needs_location_split(
+                con, int(previous[1]), candidate, state=state
+            )
+        ):
             unchanged.append((int(previous[0]), int(previous[1])))
             continue
         try:
@@ -714,7 +900,8 @@ def upsert_candidate_batch(con, candidates, run_id, release, now=None, state=Non
         )
         con.execute(
             """
-            update merchants set last_seen_at=?,active=1
+            update merchants set last_seen_at=?,
+              active=case when profile_status='rejected' then 0 else 1 end
             where id in (select merchant_id from overture_unchanged_batch)
             """,
             (now,),
@@ -729,7 +916,8 @@ def upsert_candidate_batch(con, candidates, run_id, release, now=None, state=Non
         )
         con.execute(
             """
-            update merchant_websites set active=1,last_seen_at=?
+            update merchant_websites set
+              active=case when status='rejected' then 0 else 1 end,last_seen_at=?
             where place_source_id in (select place_source_id from overture_unchanged_batch)
             """,
             (now,),

@@ -75,6 +75,18 @@ NON_WINE_DOCUMENT_WORDS = (
     "race result", "post position", "starting gate", "purse", "trotter",
     "trotting", "pacing", "trainer", "driver", "finish time", "race time",
 )
+WINE_RETAIL_IDENTITY_WORDS = (
+    "wine shop", "wine store", "wine merchant", "fine wines", "shop wine",
+    "buy wine", "liquor store", "bottle shop", "wine and spirits",
+    "wines and spirits", "wine & spirits", "wines & spirits",
+)
+UNRELATED_BUSINESS_SIGNAL_GROUPS = {
+    "horse-racing business": (
+        "harness racing", "horse racing", "race entries", "race results",
+        "race schedule", "race programs", "racetrack", "raceway", "jugette",
+        "pacing classic", "starting gate", "post position", "estimated purse",
+    ),
+}
 WINE_EVIDENCE = (
     "burgundy", "bourgogne", "burgund", "champagne", "bordeaux", "chablis", "beaujolais",
     "moulin a vent", "morgon", "fleurie", "cote de brouilly", "saint amour",
@@ -976,6 +988,34 @@ def visible_lines(parser):
         yield " ".join(current)
 
 
+def website_business_identity_rejection(parser, final_url):
+    """Reject an official-site candidate that clearly belongs to another industry."""
+    if parser is None:
+        return ""
+    identity_text = " ".join(
+        parser.title
+        + parser.headings
+        + list(parser.meta.values())
+        + parser.text[:8000]
+        + [f"{href} {label}" for href, label in parser.links[:1000]]
+    )
+    folded = fold_text(f"{final_url} {identity_text}")
+    retail_identity = any(word in folded for word in WINE_RETAIL_IDENTITY_WORDS)
+    catalogue_identity = any(
+        any(word in fold_text(f"{href} {label}") for word in CATALOG_PATH_WORDS)
+        and any(word in fold_text(f"{href} {label}") for word in ("wine", "wines", "vin", "vino", "wein", "wijn"))
+        for href, label in parser.links
+    )
+    if retail_identity or catalogue_identity:
+        return ""
+    for business_type, signals in UNRELATED_BUSINESS_SIGNAL_GROUPS.items():
+        matched = {signal for signal in signals if signal in folded}
+        if len(matched) >= 3:
+            sample = ", ".join(sorted(matched)[:4])
+            return f"Official website is a {business_type}, not a wine retailer ({sample})."
+    return ""
+
+
 def parse_pdf_products(body, source_url):
     try:
         from pypdf import PdfReader
@@ -1118,6 +1158,18 @@ def crawl_merchant_inventory(merchant, max_pages=160, max_depth=5, domain_slots=
         return {"merchant_id": merchant["id"], "status": "review", "sources": [], "error": root_response.get("error") or f"HTTP {root_response['status']}"}
     root_text = root_response["body"].decode("utf-8", errors="replace")
     root_folded = fold_text(root_text[:100000])
+    root_parser = LinkTextParser()
+    try:
+        root_parser.feed(root_text)
+    except Exception:
+        root_parser = None
+    identity_error = website_business_identity_rejection(root_parser, root_response["url"])
+    if identity_error:
+        return {
+            "merchant_id": merchant["id"], "status": "rejected", "sources": [],
+            "products": {}, "error": identity_error, "pages_checked": 1,
+            "rejected_url": root_response["url"],
+        }
     platform = ""
     if "cdn.shopify.com" in root_text or "shopify.theme" in root_folded:
         platform = "shopify"
@@ -1304,6 +1356,53 @@ def save_inventory_result(con, result):
         "update merchants set inventory_status=?,inventory_error=?,last_inventory_checked_at=? where id=?",
         (result["status"], result.get("error") or "", now, merchant_id),
     )
+    if result["status"] == "rejected":
+        detail = result.get("error") or "Official website belongs to a different business."
+        con.execute(
+            """
+            update merchants set profile_status='rejected',profile_error=?,active=0
+            where id=?
+            """,
+            (detail, merchant_id),
+        )
+        con.execute("update merchant_products set active=0 where merchant_id=?", (merchant_id,))
+        con.execute(
+            "update merchant_sources set status='stale' where merchant_id=? and status='found'",
+            (merchant_id,),
+        )
+        con.execute(
+            """
+            update merchant_websites set status='rejected',active=0,last_checked_at=?
+            where merchant_id=?
+            """,
+            (now, merchant_id),
+        )
+        existing = con.execute(
+            """
+            select id from merchant_reviews
+            where merchant_id=? and reason='business_identity_mismatch' and status='open'
+            order by id desc limit 1
+            """,
+            (merchant_id,),
+        ).fetchone()
+        if existing:
+            con.execute(
+                "update merchant_reviews set detail=?,created_at=? where id=?",
+                (detail, now, existing[0]),
+            )
+        else:
+            con.execute(
+                "insert into merchant_reviews(merchant_id,reason,detail) values(?,?,?)",
+                (merchant_id, "business_identity_mismatch", detail),
+            )
+        con.execute(
+            """
+            update merchant_reviews set status='resolved',resolved_at=?
+            where merchant_id=? and reason='inventory_fetch_failed' and status='open'
+            """,
+            (now, merchant_id),
+        )
+        return 0
     # A temporary network/parser failure must not erase the last known-good inventory.
     if result["status"] != "review":
         con.execute("update merchant_products set active=0 where merchant_id=?", (merchant_id,))

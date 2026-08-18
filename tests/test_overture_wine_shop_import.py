@@ -112,6 +112,148 @@ class OvertureWineShopImportTests(unittest.TestCase):
         }
         self.assertIsNone(MODULE.candidate_from_row(row))
 
+    def test_alternate_liquor_category_does_not_make_a_shop_candidate(self):
+        row = {
+            "id": "little-brown-jug-nebraska",
+            "name": "Little Brown Jug",
+            "old_primary": "delicatessen",
+            "categories_json": '{"primary":"delicatessen","alternate":["liquor_store"]}',
+            "basic_category": "delicatessen",
+            "taxonomy_primary": "delicatessen",
+            "taxonomy_json": '{"primary":"delicatessen","alternate":["liquor_store"]}',
+        }
+        self.assertIsNone(MODULE.candidate_from_row(row))
+
+    def test_primary_liquor_category_stays_a_candidate_until_site_validation(self):
+        row = {
+            "id": "little-brown-jug-san-diego",
+            "name": "Little Brown Jug",
+            "old_primary": "liquor_store",
+            "categories_json": '{"primary":"liquor_store"}',
+            "basic_category": "liquor_store",
+            "taxonomy_primary": "liquor_store",
+            "taxonomy_json": '{"primary":"liquor_store"}',
+        }
+        candidate = MODULE.candidate_from_row(row)
+        self.assertIsNotNone(candidate)
+        self.assertEqual("retail_primary_category", candidate["candidate_reason"])
+
+    def test_same_name_and_domain_at_distant_locations_are_not_merged(self):
+        con = MODULE.connect_shop(self.db_path)
+        try:
+            run_id = con.execute(
+                "insert into merchant_discovery_runs(provider,status) values('overture','running')"
+            ).lastrowid
+            state = MODULE.load_import_state(con)
+            san_diego = self.candidate("san-diego", "Little Brown Jug")
+            san_diego.update({
+                "country_code": "US", "city": "San Diego",
+                "address": "4245 University Ave", "latitude": 32.7505,
+                "longitude": -117.1012, "websites": ["http://www.littlebrownjug.com"],
+            })
+            san_diego["raw_hash"] = MODULE.stable_hash(san_diego)
+            nebraska = self.candidate("nebraska", "Little Brown Jug")
+            nebraska.update({
+                "country_code": "US", "city": "Fairbury", "address": "715 F St",
+                "latitude": 40.1372, "longitude": -97.1806,
+                "websites": ["http://www.littlebrownjug.com"],
+            })
+            nebraska["raw_hash"] = MODULE.stable_hash(nebraska)
+
+            MODULE.upsert_candidate(con, san_diego, run_id, "2026-08-19.0", state=state)
+            MODULE.upsert_candidate(con, nebraska, run_id, "2026-08-19.0", state=state)
+            con.commit()
+
+            self.assertEqual(2, con.execute("select count(*) from merchants").fetchone()[0])
+            merchant_ids = {
+                row[0] for row in con.execute(
+                    "select merchant_id from merchant_place_sources"
+                ).fetchall()
+            }
+            self.assertEqual(2, len(merchant_ids))
+        finally:
+            con.close()
+
+    def test_rejected_overture_website_is_not_reactivated_by_same_url(self):
+        con = MODULE.connect_shop(self.db_path)
+        try:
+            first_run = con.execute(
+                "insert into merchant_discovery_runs(provider,status) values('overture','running')"
+            ).lastrowid
+            candidate = self.candidate()
+            MODULE.upsert_candidate(con, candidate, first_run, "2026-08-01.0")
+            merchant_id = con.execute("select id from merchants").fetchone()[0]
+            con.execute(
+                "update merchants set profile_status='rejected',active=0 where id=?",
+                (merchant_id,),
+            )
+            con.execute(
+                "update merchant_websites set status='rejected',active=0 where merchant_id=?",
+                (merchant_id,),
+            )
+            con.commit()
+
+            second_run = con.execute(
+                "insert into merchant_discovery_runs(provider,status) values('overture','running')"
+            ).lastrowid
+            MODULE.upsert_candidate(
+                con, candidate, second_run, "2026-08-19.0",
+                state=MODULE.load_import_state(con),
+            )
+            con.commit()
+
+            self.assertEqual(0, con.execute(
+                "select active from merchants where id=?", (merchant_id,)
+            ).fetchone()[0])
+            self.assertEqual(("rejected", 0), tuple(con.execute(
+                "select status,active from merchant_websites where merchant_id=?",
+                (merchant_id,),
+            ).fetchone()))
+        finally:
+            con.close()
+
+    def test_rejected_merchant_is_reactivated_for_a_replacement_website(self):
+        con = MODULE.connect_shop(self.db_path)
+        try:
+            first_run = con.execute(
+                "insert into merchant_discovery_runs(provider,status) values('overture','running')"
+            ).lastrowid
+            candidate = self.candidate()
+            MODULE.upsert_candidate(con, candidate, first_run, "2026-08-01.0")
+            merchant_id = con.execute("select id from merchants").fetchone()[0]
+            con.execute(
+                "update merchants set profile_status='rejected',active=0 where id=?",
+                (merchant_id,),
+            )
+            con.execute(
+                "update merchant_websites set status='rejected',active=0 where merchant_id=?",
+                (merchant_id,),
+            )
+            con.commit()
+
+            replacement = self.candidate()
+            replacement["websites"] = ["https://kelley-wines.example/catalogue"]
+            replacement["raw_hash"] = MODULE.stable_hash(replacement)
+            second_run = con.execute(
+                "insert into merchant_discovery_runs(provider,status) values('overture','running')"
+            ).lastrowid
+            MODULE.upsert_candidate(
+                con, replacement, second_run, "2026-08-19.0",
+                state=MODULE.load_import_state(con),
+            )
+            con.commit()
+
+            merchant = con.execute(
+                "select website_url,profile_status,active from merchants where id=?",
+                (merchant_id,),
+            ).fetchone()
+            self.assertEqual(
+                ("https://kelley-wines.example/catalogue", "discovered", 1),
+                tuple(merchant),
+            )
+        finally:
+            con.close()
+
     def test_cached_reimport_uses_fast_unchanged_path(self):
         con = MODULE.connect_shop(self.db_path)
         try:

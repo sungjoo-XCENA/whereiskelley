@@ -346,6 +346,107 @@ class WineShopCollectorTests(unittest.TestCase):
         self.assertFalse(products)
         self.assertEqual(error, "PDF was identified as a non-wine document.")
 
+    def test_horse_racing_official_site_is_rejected_before_document_crawl(self):
+        requested = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requested.append(self.path)
+                if self.path == "/robots.txt":
+                    body, content_type = b"User-agent: *\nAllow: /\n", "text/plain"
+                elif self.path == "/":
+                    body = (
+                        b"<html><head><title>Little Brown Jug Harness Racing</title></head>"
+                        b"<body><h1>Horse Racing</h1><h2>Race Entries and Race Results</h2>"
+                        b'<a href="/race-results.pdf">Race Programs and Estimated Purse</a>'
+                        b"<p>Pacing Classic starting gate and post position.</p></body></html>"
+                    )
+                    content_type = "text/html"
+                elif self.path == "/race-results.pdf":
+                    body, content_type = b"fake pdf", "application/pdf"
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("content-type", content_type)
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{server.server_port}"
+            slots = DomainSlots(2)
+            result = crawl_merchant_inventory(
+                {"id": 1, "website_url": base}, max_pages=10, max_depth=5,
+                domain_slots=slots, robots=RobotsPolicy(slots),
+            )
+            self.assertEqual("rejected", result["status"])
+            self.assertIn("horse-racing business", result["error"])
+            self.assertEqual(1, result["pages_checked"])
+            self.assertNotIn("/race-results.pdf", requested)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_business_identity_rejection_deactivates_merchant_inventory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "shops.sqlite"
+            ensure_shop_db(db_path)
+            con = connect_shop(db_path)
+            try:
+                merchant_id = con.execute(
+                    "insert into merchants(name,normalized_name,website_url,profile_status,inventory_status) "
+                    "values('Little Brown Jug','little brown jug','https://littlebrownjug.test','discovered','found')"
+                ).lastrowid
+                source_id = con.execute(
+                    "insert into merchant_sources(merchant_id,source_url,status) "
+                    "values(?,'https://littlebrownjug.test/race-results.pdf','found')",
+                    (merchant_id,),
+                ).lastrowid
+                upsert_product(con, merchant_id, source_id, {
+                    "source_key": "false-positive", "source_url": "https://littlebrownjug.test",
+                    "raw_name": "Race Merlot", "raw_text": "Race Merlot 2014 32.0",
+                    "wine_name": "Race Merlot", "vintage": "2014", "price_value": 32,
+                })
+                con.execute(
+                    "insert into merchant_websites(merchant_id,url,normalized_url,domain,status) "
+                    "values(?,'https://littlebrownjug.test','https://littlebrownjug.test',"
+                    "'littlebrownjug.test','unverified')",
+                    (merchant_id,),
+                )
+
+                save_inventory_result(con, {
+                    "merchant_id": merchant_id, "status": "rejected", "sources": [],
+                    "products": {}, "error": "Official website is a horse-racing business.",
+                })
+                con.commit()
+
+                self.assertEqual(("rejected", 0), tuple(con.execute(
+                    "select profile_status,active from merchants where id=?", (merchant_id,)
+                ).fetchone()))
+                self.assertEqual(0, con.execute(
+                    "select active from merchant_products where merchant_id=?", (merchant_id,)
+                ).fetchone()[0])
+                self.assertEqual("stale", con.execute(
+                    "select status from merchant_sources where id=?", (source_id,)
+                ).fetchone()[0])
+                self.assertEqual(("rejected", 0), tuple(con.execute(
+                    "select status,active from merchant_websites where merchant_id=?",
+                    (merchant_id,),
+                ).fetchone()))
+                self.assertEqual("business_identity_mismatch", con.execute(
+                    "select reason from merchant_reviews where merchant_id=? and status='open'",
+                    (merchant_id,),
+                ).fetchone()[0])
+            finally:
+                con.close()
+
     def test_script_or_long_prose_is_not_saved_as_a_product(self):
         self.assertIsNone(product_from_text(
             "window.document function() Burgundy 2021 EUR 1000 schema.org",
