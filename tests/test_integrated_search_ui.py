@@ -42,6 +42,19 @@ class IntegratedSearchUiTests(unittest.TestCase):
         styles = (ROOT / "public" / "styles.css").read_text(encoding="utf-8")
         self.assertNotIn(".price-offer.shop", styles)
 
+    def test_search_maps_enable_mouse_zoom_controls(self):
+        map_fix = (ROOT / "public" / "mapfix.js").read_text(encoding="utf-8")
+        for script in (APP_SCRIPT, map_fix):
+            self.assertIn("zoomControl: true", script)
+            self.assertIn('gestureHandling: "greedy"', script)
+            self.assertIn("scrollwheel: true", script)
+
+    def test_database_map_enables_mouse_zoom_controls(self):
+        dashboard_fix = (ROOT / "public" / "dashboardfix.js").read_text(encoding="utf-8")
+        self.assertIn("zoomControl: true", dashboard_fix)
+        self.assertIn('gestureHandling: "greedy"', dashboard_fix)
+        self.assertIn("scrollwheel: true", dashboard_fix)
+
     def test_collapsed_rows_show_compact_source_marks(self):
         self.assertIn('short: "S", label: "Star Wine"', APP_SCRIPT)
         self.assertIn('short: "R", label: "Restaurant DB"', APP_SCRIPT)

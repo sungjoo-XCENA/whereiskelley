@@ -1882,6 +1882,12 @@
         state.dashboardMap = new maps.Map(mapEl, {
           center: DASHBOARD_WORLD_CENTER,
           zoom: DASHBOARD_WORLD_ZOOM,
+          zoomControl: true,
+          zoomControlOptions: { position: maps.ControlPosition.RIGHT_BOTTOM },
+          gestureHandling: "greedy",
+          scrollwheel: true,
+          draggable: true,
+          keyboardShortcuts: true,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: true,

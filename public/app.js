@@ -1181,6 +1181,12 @@ async function drawGoogleMap(venues) {
       googleMap = new maps.Map(googleMapEl, {
         center: { lat: 25, lng: 8 },
         zoom: 2,
+        zoomControl: true,
+        zoomControlOptions: { position: maps.ControlPosition.RIGHT_BOTTOM },
+        gestureHandling: "greedy",
+        scrollwheel: true,
+        draggable: true,
+        keyboardShortcuts: true,
         mapTypeControl: false,
         streetViewControl: false,
         fullscreenControl: true,
