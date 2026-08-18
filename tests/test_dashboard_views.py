@@ -56,6 +56,22 @@ class DashboardViewTests(unittest.TestCase):
         self.assertIn("button.restaurant.active", self.script)
         self.assertIn("button.shop.active", self.script)
 
+    def test_database_map_can_filter_verified_places_by_wine_count(self):
+        self.assertIn('databaseMapFilter: "all"', self.script)
+        self.assertIn('data-database-map-filter="all"', self.script)
+        self.assertIn('data-database-map-filter="found"', self.script)
+        self.assertIn('data-database-map-filter="100"', self.script)
+        self.assertIn('data-database-map-filter="200"', self.script)
+        self.assertIn('targetKind(target) !== "found"', self.script)
+        self.assertIn('targetWineCount(target) >= 100', self.script)
+        self.assertIn('targetWineCount(target) >= 200', self.script)
+
+    def test_all_statuses_map_does_not_require_a_website(self):
+        visible_targets = self.script.split("function visibleMapTargets(payload)", 1)[1].split(
+            "function targetWineCount", 1
+        )[0]
+        self.assertNotIn("websiteUrl", visible_targets)
+
     def test_database_world_map_wraps_horizontally(self):
         self.assertNotIn("strictBounds", self.script)
         self.assertIn("DASHBOARD_WORLD_CENTER = { lat: 25, lng: 8 }", self.script)

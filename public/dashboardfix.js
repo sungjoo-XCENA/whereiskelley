@@ -3,6 +3,7 @@
     guidePayload: null,
     shopPayload: null,
     databaseMode: "restaurants",
+    databaseMapFilter: "all",
     collectionMode: "restaurants",
     dashboardMap: null,
     dashboardMapEl: null,
@@ -166,6 +167,50 @@
       display: flex;
       align-items: center;
       gap: 10px;
+    }
+    .database-map-filterbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      width: 100%;
+      margin-top: -2px;
+    }
+    .database-map-filter-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 3px;
+      border: 1px solid #d9dee7;
+      border-radius: 7px;
+      background: #f3f5f8;
+    }
+    .database-map-filter-control button {
+      min-height: 28px;
+      padding: 0 9px;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      background: transparent;
+      color: #667085;
+      font-size: 11px;
+      font-weight: 850;
+      cursor: pointer;
+    }
+    .database-map-filter-control button:hover:not(.active) {
+      background: rgba(255, 255, 255, 0.7);
+      color: #111418;
+    }
+    .database-map-filter-control button.active {
+      border-color: #86d7b9;
+      background: #e9f9f2;
+      color: #08795d;
+      box-shadow: 0 1px 2px rgba(8, 121, 93, 0.1);
+    }
+    .database-map-filter-count {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
     }
     .database-world-reset {
       display: inline-flex;
@@ -1041,7 +1086,8 @@
         flex-direction: column;
       }
       .database-map-titlebar,
-      .database-map-tools {
+      .database-map-tools,
+      .database-map-filterbar {
         width: 100%;
       }
       .database-map-tools {
@@ -1050,6 +1096,17 @@
       }
       .database-map-titlebar {
         gap: 10px;
+      }
+      .database-map-filterbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .database-map-filter-control {
+        width: 100%;
+        overflow-x: auto;
+      }
+      .database-map-filter-control button {
+        flex: 1 0 auto;
       }
       .collection-head {
         display: grid;
@@ -1675,9 +1732,40 @@
   function visibleMapTargets(payload) {
     return (payload?.mapTargets || [])
       .filter((target) => target.lat !== null && target.lng !== null && target.lat !== "" && target.lng !== "")
-      .filter((target) => String(target.websiteUrl || "").trim() !== "")
       .map((target) => ({ ...target, lat: Number(target.lat), lng: Number(target.lng) }))
       .filter((target) => Number.isFinite(target.lat) && Number.isFinite(target.lng));
+  }
+
+  function targetWineCount(target) {
+    return Math.max(
+      number(target?.productCount),
+      number(target?.chosenWineLineCount),
+      number(target?.wineLineCount)
+    );
+  }
+
+  function filteredMapTargets(targets) {
+    const filter = state.databaseMapFilter;
+    if (filter === "all") return targets;
+    return targets.filter((target) => {
+      if (targetKind(target) !== "found") return false;
+      if (filter === "found") return true;
+      if (filter === "100") return targetWineCount(target) >= 100;
+      if (filter === "200") return targetWineCount(target) >= 200;
+      return true;
+    });
+  }
+
+  function syncDatabaseMapFilterControls(payload) {
+    document.querySelectorAll("[data-database-map-filter]").forEach((button) => {
+      const active = button.dataset.databaseMapFilter === state.databaseMapFilter;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+    const rawTargets = visibleMapTargets(payload);
+    const filteredTargets = filteredMapTargets(rawTargets);
+    const count = document.querySelector("#databaseMapFilterCount");
+    if (count) count.textContent = `${fmtInt(filteredTargets.length)} of ${fmtInt(rawTargets.length)} mapped places`;
   }
 
   function shopDatabasePayload() {
@@ -1800,7 +1888,7 @@
   }
 
   function mapSignature(targets) {
-    return `${state.databaseMode}|${targets
+    return `${state.databaseMode}|${state.databaseMapFilter}|${targets
       .map((target) => [
         target.id,
         target.status,
@@ -1811,7 +1899,8 @@
         target.verifiedWineListCount,
         target.reviewSourceCount,
         target.wineListParserStatus,
-        target.chosenWineLineCount
+        target.chosenWineLineCount,
+        target.productCount
       ].join(":"))
       .join("|")}`;
   }
@@ -1856,14 +1945,22 @@
     const fallbackEl = document.querySelector("#dashboardMapFallback");
     if (!mapEl || !fallbackEl) return;
     if (state.activeView !== "database") return;
-    const targets = visibleMapTargets(payload);
+    const rawTargets = visibleMapTargets(payload);
+    const targets = filteredMapTargets(rawTargets);
+    syncDatabaseMapFilterControls(payload);
     if (!targets.length) {
       const noun = state.databaseMode === "shops" ? "wine shops" : "restaurants";
-      if (state.dashboardMarkers.size) return;
       for (const marker of state.dashboardMarkers.values()) marker.setMap(null);
       state.dashboardMarkers.clear();
+      if (state.dashboardDataLayer) {
+        state.dashboardDataLayer.forEach((feature) => state.dashboardDataLayer.remove(feature));
+      }
+      state.dashboardMapSignature = mapSignature([]);
+      state.dashboardInfoWindow?.close();
       fallbackEl.classList.remove("hidden");
-      fallbackEl.innerHTML = `<b>No mapped ${noun} yet</b><span>Coordinates will appear as the collector resolves ${noun}.</span>`;
+      fallbackEl.innerHTML = rawTargets.length
+        ? `<b>No places match this filter</b><span>Choose a lower wine-count threshold or show all statuses.</span>`
+        : `<b>No mapped ${noun} yet</b><span>Coordinates will appear as the collector resolves ${noun}.</span>`;
       return;
     }
     try {
@@ -2095,6 +2192,8 @@
     const root = ensureDataViews().databaseView;
     const payload = activeDatabasePayload();
     const noun = state.databaseMode === "shops" ? "wine shops" : "restaurants";
+    const mappedTargets = visibleMapTargets(payload);
+    const displayedTargets = filteredMapTargets(mappedTargets);
 
     const mapHtml = `<section class="dash-panel" data-dashboard-section="map">
       <div class="database-map-header">
@@ -2115,6 +2214,15 @@
             <span class="legend-dot" style="--dot:#f59e0b">Pending / review</span>
           </div>
           <button class="database-world-reset" type="button" data-clear-dashboard-selection title="Reset the map to show every saved place"><span aria-hidden="true">&#8634;</span>World view</button>
+        </div>
+        <div class="database-map-filterbar">
+          <div class="database-map-filter-control" role="group" aria-label="Map marker filter">
+            <button type="button" data-database-map-filter="all" aria-pressed="${state.databaseMapFilter === "all"}" class="${state.databaseMapFilter === "all" ? "active" : ""}">All statuses</button>
+            <button type="button" data-database-map-filter="found" aria-pressed="${state.databaseMapFilter === "found"}" class="${state.databaseMapFilter === "found" ? "active" : ""}">Verified</button>
+            <button type="button" data-database-map-filter="100" aria-pressed="${state.databaseMapFilter === "100"}" class="${state.databaseMapFilter === "100" ? "active" : ""}" title="Verified places with at least 100 saved wine rows">100+ wines</button>
+            <button type="button" data-database-map-filter="200" aria-pressed="${state.databaseMapFilter === "200"}" class="${state.databaseMapFilter === "200" ? "active" : ""}" title="Verified places with at least 200 saved wine rows">200+ wines</button>
+          </div>
+          <span class="database-map-filter-count" id="databaseMapFilterCount">${fmtInt(displayedTargets.length)} of ${fmtInt(mappedTargets.length)} mapped places</span>
         </div>
       </div>
       <div class="dashboard-map-wrap">
@@ -2793,6 +2901,20 @@
       state.dashboardMapHasFit = false;
       renderDatabase();
       if (!hasActiveDatabaseMapData()) loadGuideStats({ force: true });
+    });
+    document.body.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-database-map-filter]");
+      if (!button || button.dataset.databaseMapFilter === state.databaseMapFilter) return;
+      event.preventDefault();
+      state.databaseMapFilter = button.dataset.databaseMapFilter;
+      state.activeTargetId = null;
+      state.dashboardInfoWindow?.close();
+      state.dashboardMapSignature = "";
+      state.dashboardMapHasFit = false;
+      const payload = activeDatabasePayload();
+      syncDatabaseMapFilterControls(payload);
+      renderSelectedTarget(payload);
+      renderDashboardMap(payload, { fit: true });
     });
     activate("search");
   }
