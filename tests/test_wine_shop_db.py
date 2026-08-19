@@ -14,6 +14,49 @@ from wine_shop_db import (
 
 
 class WineShopDatabaseTests(unittest.TestCase):
+    def test_search_remains_available_during_collection_write(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "shops.sqlite"
+            ensure_shop_db(db_path)
+            con = connect_shop(db_path)
+            try:
+                merchant_id = con.execute(
+                    "insert into merchants(name,normalized_name,website_url,country,city,active,inventory_status) values(?,?,?,?,?,1,'found')",
+                    ("Concurrent Wines", "concurrent wines", "https://wines.example", "FR", "Paris"),
+                ).lastrowid
+                source_id = con.execute(
+                    "insert into merchant_sources(merchant_id,source_type,source_url,status,parser_status) values(?,'html',?,'found','parsed')",
+                    (merchant_id, "https://wines.example/list"),
+                ).lastrowid
+                upsert_product(con, merchant_id, source_id, {
+                    "source_key": "rayas-2011",
+                    "source_url": "https://wines.example/list",
+                    "raw_name": "Chateau Rayas 2011",
+                    "raw_text": "Chateau Rayas 2011 EUR 1000",
+                    "price_value": 1000,
+                    "currency": "EUR",
+                    "price_text": "EUR 1000",
+                })
+                con.commit()
+            finally:
+                con.close()
+
+            writer = connect_shop(db_path)
+            try:
+                writer.execute("begin immediate")
+                writer.execute(
+                    "update merchants set last_seen_at=? where id=?",
+                    (utc_now(), merchant_id),
+                )
+
+                results = search_shop_products("Rayas", path=db_path)
+            finally:
+                writer.rollback()
+                writer.close()
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["venue"]["name"], "Concurrent Wines")
+
     def test_map_only_includes_inventory_checked_shops_with_valid_locations(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "shops.sqlite"

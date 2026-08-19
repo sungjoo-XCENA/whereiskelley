@@ -1,4 +1,3 @@
-pragma journal_mode = wal;
 pragma synchronous = normal;
 pragma foreign_keys = on;
 pragma busy_timeout = 30000;

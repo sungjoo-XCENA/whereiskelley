@@ -51,20 +51,23 @@ def connect_shop(path=None):
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(db_path, timeout=30)
     con.row_factory = sqlite3.Row
-    con.execute("pragma journal_mode=wal")
+    # WAL mode persists in the database file. Reapplying it on every reader
+    # requires an exclusive lock and can block searches while collection writes.
+    con.execute("pragma busy_timeout=30000")
     con.execute("pragma synchronous=normal")
     con.execute("pragma foreign_keys=on")
-    con.execute("pragma busy_timeout=30000")
     return con
 
 
 def ensure_shop_db(path=None):
-    db_path = str(Path(path or SHOP_DB_PATH).resolve())
+    db_file = Path(path or SHOP_DB_PATH).resolve()
+    db_path = str(db_file)
     if db_path in _INITIALIZED_PATHS:
         return
     with _SCHEMA_LOCK:
         if db_path in _INITIALIZED_PATHS:
             return
+        is_new_database = not db_file.exists()
         con = connect_shop(db_path)
         try:
             con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -100,6 +103,8 @@ def ensure_shop_db(path=None):
                     (code, row["id"]),
                 )
             con.commit()
+            if is_new_database:
+                con.execute("pragma journal_mode=wal")
             _INITIALIZED_PATHS.add(db_path)
         finally:
             con.close()
