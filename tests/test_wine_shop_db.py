@@ -179,6 +179,59 @@ class WineShopDatabaseTests(unittest.TestCase):
             self.assertEqual(results[0]["venue"]["inventoryUrl"], "https://volcanowinery.com/wines")
             self.assertEqual(results[0]["priceValue"], 30)
 
+    def test_all_terms_are_filtered_before_candidate_limit(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "shops.sqlite"
+            ensure_shop_db(db_path)
+            con = connect_shop(db_path)
+            try:
+                decoy_merchant_id = con.execute(
+                    "insert into merchants(name,normalized_name,website_url,country,city,active,inventory_status) values(?,?,?,?,?,1,'found')",
+                    ("Discount Wines", "discount wines", "https://discount.example", "US", "Portland"),
+                ).lastrowid
+                decoy_source_id = con.execute(
+                    "insert into merchant_sources(merchant_id,source_type,source_url,status,parser_status) values(?,'html',?,'found','parsed')",
+                    (decoy_merchant_id, "https://discount.example/list"),
+                ).lastrowid
+                for index in range(2001):
+                    upsert_product(con, decoy_merchant_id, decoy_source_id, {
+                        "source_key": f"rose-{index}",
+                        "source_url": f"https://discount.example/rose-{index}",
+                        "raw_name": f"Rose {index}",
+                        "raw_text": f"Rose {index}",
+                        "wine_name": f"Rose {index}",
+                        "price_value": 1,
+                        "currency": "USD",
+                        "price_text": "USD 1",
+                    })
+
+                merchant_id = con.execute(
+                    "insert into merchants(name,normalized_name,website_url,country,city,active,inventory_status) values(?,?,?,?,?,1,'found')",
+                    ("Volcano Winery", "volcano winery", "https://volcanowinery.com/", "US", "Volcano"),
+                ).lastrowid
+                source_id = con.execute(
+                    "insert into merchant_sources(merchant_id,source_type,source_url,status,parser_status) values(?,'json',?,'found','parsed')",
+                    (merchant_id, "https://volcanowinery.com/wines"),
+                ).lastrowid
+                upsert_product(con, merchant_id, source_id, {
+                    "source_key": "volcano-rose",
+                    "source_url": "https://volcanowinery.com/wine/volcano-rose-750ml",
+                    "raw_name": "Rose 750ml",
+                    "raw_text": "Rose 750ml",
+                    "wine_name": "Rose 750ml",
+                    "price_value": 30,
+                    "currency": "USD",
+                    "price_text": "USD 30",
+                })
+                con.commit()
+            finally:
+                con.close()
+
+            results = search_shop_products("Volcano Rose", limit=1, path=db_path)
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["venue"]["name"], "Volcano Winery")
+
     def test_joined_transposed_name_matches_split_shop_product_name(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "shops.sqlite"

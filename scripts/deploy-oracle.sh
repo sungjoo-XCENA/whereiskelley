@@ -16,6 +16,11 @@ if pgrep -f "$APP_DIR/scripts/guide_discover_wine_lists.py" >/dev/null 2>&1; the
   exit 1
 fi
 
+shop_collection_running=0
+if pgrep -f "$APP_DIR/scripts/wine_shop_collect.py" >/dev/null 2>&1; then
+  shop_collection_running=1
+fi
+
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 backup_dir="$BACKUP_ROOT/$timestamp"
 mkdir -p "$backup_dir"
@@ -38,9 +43,11 @@ if [[ -f db/starwine.sqlite ]]; then
   mkdir -p "$backup_dir/db"
   cp -p db/starwine.sqlite "$backup_dir/db/starwine.sqlite"
 fi
-if [[ -f db/wine_shops.sqlite ]]; then
+if [[ "$shop_collection_running" == "0" && -f db/wine_shops.sqlite ]]; then
   mkdir -p "$backup_dir/db"
   cp -p db/wine_shops.sqlite "$backup_dir/db/wine_shops.sqlite"
+elif [[ "$shop_collection_running" == "1" ]]; then
+  echo "Wine-shop collection is running; leaving its ignored SQLite files in place."
 fi
 if [[ -d public/data ]]; then
   tar -czf "$backup_dir/public-data.tar.gz" public/data

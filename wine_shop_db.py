@@ -41,6 +41,28 @@ def search_tokens(value):
     return [token for token in re.findall(r"[\w]+", fold_text(value)) if len(token) >= 2]
 
 
+def joined_token_variants(token):
+    variants = [token]
+    if len(token) >= 5:
+        for index in range(len(token) - 1):
+            swapped = token[:index] + token[index + 1] + token[index] + token[index + 2:]
+            if swapped not in variants:
+                variants.append(swapped)
+    return variants
+
+
+def fts_token_query(token):
+    expressions = []
+    for variant in joined_token_variants(token):
+        escaped = variant.replace('"', '""')
+        expressions.append(f'"{escaped}"')
+        for split_at in range(2, len(variant) - 1):
+            left = variant[:split_at].replace('"', '""')
+            right = variant[split_at:].replace('"', '""')
+            expressions.append(f'("{left}" AND "{right}")')
+    return " OR ".join(dict.fromkeys(expressions))
+
+
 def content_hash(*values):
     joined = "\x1f".join(str(value or "") for value in values)
     return hashlib.sha256(joined.encode("utf-8", errors="ignore")).hexdigest()
@@ -224,11 +246,15 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
     candidate_limit = min(50000, max(2000, result_limit * 20))
     args = []
     filters = ["p.active=1", "m.active=1"]
-    fts_query = " OR ".join(f'"{token.replace(chr(34), chr(34) * 2)}"' for token in tokens)
-    merchant_matches = " or ".join("m.normalized_name like ?" for _ in tokens)
-    filters.append(f"(p.id in (select rowid from merchant_products_fts where merchant_products_fts match ?) or {merchant_matches})")
-    args.append(fts_query)
-    args.extend(f"%{token}%" for token in tokens)
+    # Require every query token before applying the candidate limit. A token may
+    # live in the shop name while another lives in the product text, but broad
+    # OR retrieval can fill the candidate window with unrelated cheap products.
+    for token in tokens:
+        filters.append(
+            "(p.id in (select rowid from merchant_products_fts "
+            "where merchant_products_fts match ?) or m.normalized_name like ?)"
+        )
+        args.extend((fts_token_query(token), f"%{token}%"))
     country_code = normalize_country_code(country)
     if country:
         if country_code:
@@ -260,11 +286,15 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
     except sqlite3.OperationalError:
         fallback_filters = ["p.active=1", "m.active=1"]
         fallback_args = []
-        candidate_parts = []
         for token in tokens:
-            candidate_parts.extend(("p.normalized_text like ?", "m.normalized_name like ?"))
-            fallback_args.extend((f"%{token}%", f"%{token}%"))
-        fallback_filters.append("(" + " or ".join(candidate_parts) + ")")
+            token_filters = []
+            for variant in joined_token_variants(token):
+                token_filters.extend((
+                    "replace(p.normalized_text,' ','') like ?",
+                    "replace(m.normalized_name,' ','') like ?",
+                ))
+                fallback_args.extend((f"%{variant}%", f"%{variant}%"))
+            fallback_filters.append("(" + " or ".join(token_filters) + ")")
         if country:
             if country_code:
                 fallback_filters.append("upper(trim(coalesce(m.country,'')))=?")
