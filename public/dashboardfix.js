@@ -157,8 +157,15 @@
     }
     .database-map-titlebar {
       display: flex;
-      align-items: flex-end;
-      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .database-map-control-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
     }
     .database-map-header .map-legend {
       margin: 0 0 3px;
@@ -167,14 +174,6 @@
       display: flex;
       align-items: center;
       gap: 10px;
-    }
-    .database-map-filterbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      width: 100%;
-      margin-top: -2px;
     }
     .database-map-filter-control {
       display: inline-flex;
@@ -1087,7 +1086,7 @@
       }
       .database-map-titlebar,
       .database-map-tools,
-      .database-map-filterbar {
+      .database-map-control-row {
         width: 100%;
       }
       .database-map-tools {
@@ -1097,13 +1096,12 @@
       .database-map-titlebar {
         gap: 10px;
       }
-      .database-map-filterbar {
-        align-items: flex-start;
-        flex-direction: column;
+      .database-map-control-row {
+        overflow-x: auto;
+        padding-bottom: 2px;
       }
       .database-map-filter-control {
-        width: 100%;
-        overflow-x: auto;
+        flex: 0 0 auto;
       }
       .database-map-filter-control button {
         flex: 1 0 auto;
@@ -2202,27 +2200,27 @@
             <p class="dash-kicker">Built database</p>
             <h2>Database map</h2>
           </div>
-          <div class="database-mode-control" role="tablist" aria-label="Database type">
-            <button type="button" role="tab" aria-selected="${state.databaseMode === "restaurants"}" data-database-mode="restaurants" class="restaurant ${state.databaseMode === "restaurants" ? "active" : ""}"><span class="database-mode-key">R</span><span>Restaurants</span></button>
-            <button type="button" role="tab" aria-selected="${state.databaseMode === "shops"}" data-database-mode="shops" class="shop ${state.databaseMode === "shops" ? "active" : ""}"><span class="database-mode-key">W</span><span>Wine shops</span></button>
+          <div class="database-map-control-row">
+            <div class="database-mode-control" role="tablist" aria-label="Database type">
+              <button type="button" role="tab" aria-selected="${state.databaseMode === "restaurants"}" data-database-mode="restaurants" class="restaurant ${state.databaseMode === "restaurants" ? "active" : ""}"><span class="database-mode-key">R</span><span>Restaurants</span></button>
+              <button type="button" role="tab" aria-selected="${state.databaseMode === "shops"}" data-database-mode="shops" class="shop ${state.databaseMode === "shops" ? "active" : ""}"><span class="database-mode-key">W</span><span>Wine shops</span></button>
+            </div>
+            <div class="database-map-filter-control" role="group" aria-label="Map marker filter">
+              <button type="button" data-database-map-filter="all" aria-pressed="${state.databaseMapFilter === "all"}" class="${state.databaseMapFilter === "all" ? "active" : ""}">All statuses</button>
+              <button type="button" data-database-map-filter="found" aria-pressed="${state.databaseMapFilter === "found"}" class="${state.databaseMapFilter === "found" ? "active" : ""}">Verified</button>
+              <button type="button" data-database-map-filter="100" aria-pressed="${state.databaseMapFilter === "100"}" class="${state.databaseMapFilter === "100" ? "active" : ""}" title="Verified places with at least 100 saved wine rows">100+ wines</button>
+              <button type="button" data-database-map-filter="200" aria-pressed="${state.databaseMapFilter === "200"}" class="${state.databaseMapFilter === "200" ? "active" : ""}" title="Verified places with at least 200 saved wine rows">200+ wines</button>
+            </div>
           </div>
         </div>
         <div class="database-map-tools">
+          <span class="database-map-filter-count" id="databaseMapFilterCount">${fmtInt(displayedTargets.length)} of ${fmtInt(mappedTargets.length)} mapped places</span>
           <div class="map-legend">
             <span class="legend-dot" style="--dot:#16a34a">Inventory found</span>
             <span class="legend-dot" style="--dot:#dc2626">No wine list</span>
             <span class="legend-dot" style="--dot:#f59e0b">Pending / review</span>
           </div>
           <button class="database-world-reset" type="button" data-clear-dashboard-selection title="Reset the map to show every saved place"><span aria-hidden="true">&#8634;</span>World view</button>
-        </div>
-        <div class="database-map-filterbar">
-          <div class="database-map-filter-control" role="group" aria-label="Map marker filter">
-            <button type="button" data-database-map-filter="all" aria-pressed="${state.databaseMapFilter === "all"}" class="${state.databaseMapFilter === "all" ? "active" : ""}">All statuses</button>
-            <button type="button" data-database-map-filter="found" aria-pressed="${state.databaseMapFilter === "found"}" class="${state.databaseMapFilter === "found" ? "active" : ""}">Verified</button>
-            <button type="button" data-database-map-filter="100" aria-pressed="${state.databaseMapFilter === "100"}" class="${state.databaseMapFilter === "100" ? "active" : ""}" title="Verified places with at least 100 saved wine rows">100+ wines</button>
-            <button type="button" data-database-map-filter="200" aria-pressed="${state.databaseMapFilter === "200"}" class="${state.databaseMapFilter === "200" ? "active" : ""}" title="Verified places with at least 200 saved wine rows">200+ wines</button>
-          </div>
-          <span class="database-map-filter-count" id="databaseMapFilterCount">${fmtInt(displayedTargets.length)} of ${fmtInt(mappedTargets.length)} mapped places</span>
         </div>
       </div>
       <div class="dashboard-map-wrap">
