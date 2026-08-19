@@ -612,43 +612,10 @@ def ensure_db():
     with DB_SCHEMA_LOCK:
         if resolved in DB_SCHEMA_READY:
             return
-        con = connect()
-        try:
-            for table in ("michelin_places", "guide_places", "restaurant_targets"):
-                columns = {row[1] for row in con.execute(f"pragma table_info({table})")}
-                if "country_raw" not in columns:
-                    con.execute(f"alter table {table} add column country_raw text")
-                con.execute(
-                    f"update {table} set country=upper(trim(country)) "
-                    "where length(trim(coalesce(country,'')))=2"
-                )
-                placeholders = ",".join("?" for _ in COUNTRY_NAMES)
-                legacy_rows = con.execute(
-                    f"""
-                    select id,country,country_raw,city,address
-                    from {table}
-                    where trim(coalesce(country,''))!=''
-                      and upper(trim(country)) not in ({placeholders})
-                    """,
-                    tuple(COUNTRY_NAMES),
-                ).fetchall()
-                for row in legacy_rows:
-                    code = normalize_country_code(
-                        row["country"], city=row["city"], address=row["address"]
-                    )
-                    if not code:
-                        continue
-                    con.execute(
-                        f"""
-                        update {table}
-                        set country_raw=coalesce(nullif(country_raw,''),country),country=?
-                        where id=?
-                        """,
-                        (code, row["id"]),
-                    )
-            con.commit()
-        finally:
-            con.close()
+        # HTTP requests only need to verify that the persisted database exists.
+        # Schema migrations belong to the collection/import commands; running
+        # UPDATE/ALTER statements here blocks every search behind an active
+        # collector transaction.
         DB_SCHEMA_READY.add(resolved)
 
 

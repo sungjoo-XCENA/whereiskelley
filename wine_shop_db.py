@@ -46,26 +46,35 @@ def content_hash(*values):
     return hashlib.sha256(joined.encode("utf-8", errors="ignore")).hexdigest()
 
 
-def connect_shop(path=None):
+def connect_shop(path=None, read_only=False):
     db_path = Path(path or SHOP_DB_PATH)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(db_path, timeout=30)
+    if read_only:
+        con = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
+    else:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        con = sqlite3.connect(db_path, timeout=30)
     con.row_factory = sqlite3.Row
     # WAL mode persists in the database file. Reapplying it on every reader
     # requires an exclusive lock and can block searches while collection writes.
     con.execute("pragma busy_timeout=30000")
-    con.execute("pragma synchronous=normal")
-    con.execute("pragma foreign_keys=on")
+    if read_only:
+        con.execute("pragma query_only=on")
+    else:
+        con.execute("pragma synchronous=normal")
+        con.execute("pragma foreign_keys=on")
     return con
 
 
-def ensure_shop_db(path=None):
+def ensure_shop_db(path=None, allow_migrations=True):
     db_file = Path(path or SHOP_DB_PATH).resolve()
     db_path = str(db_file)
     if db_path in _INITIALIZED_PATHS:
         return
     with _SCHEMA_LOCK:
         if db_path in _INITIALIZED_PATHS:
+            return
+        if db_file.exists() and not allow_migrations:
+            _INITIALIZED_PATHS.add(db_path)
             return
         is_new_database = not db_file.exists()
         con = connect_shop(db_path)
@@ -122,9 +131,9 @@ def _row_dict(row):
 
 
 def shop_collection_status(path=None, map_limit=6000, include_map=True):
-    ensure_shop_db(path)
+    ensure_shop_db(path, allow_migrations=False)
     progress = read_progress()
-    con = connect_shop(path)
+    con = connect_shop(path, read_only=True)
     try:
         counts = _row_dict(con.execute(
             """
@@ -209,8 +218,8 @@ def search_shop_products(query, country="", city="", vintage="", limit=5000, pat
     tokens = search_tokens(query)
     if not tokens:
         return []
-    ensure_shop_db(path)
-    con = connect_shop(path)
+    ensure_shop_db(path, allow_migrations=False)
+    con = connect_shop(path, read_only=True)
     result_limit = max(1, min(int(limit), 5000))
     candidate_limit = min(50000, max(2000, result_limit * 20))
     args = []
