@@ -95,6 +95,48 @@ class WineShopDatabaseTests(unittest.TestCase):
             payload = shop_collection_status(path=db_path)
             self.assertEqual([row["name"] for row in payload["mapMerchants"]], ["Checked Wine Shop"])
 
+    def test_map_limit_keeps_global_country_coverage(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "shops.sqlite"
+            ensure_shop_db(db_path)
+            con = connect_shop(db_path)
+            try:
+                rows = []
+                for index in range(20):
+                    rows.append((
+                        f"US Shop {index}", f"us shop {index}", f"https://us-{index}.example",
+                        "US", "New York", 40.7 + index / 1000, -74.0, utc_now(), "review",
+                    ))
+                rows.extend([
+                    (
+                        "French Shop", "french shop", "https://fr.example",
+                        "FR", "Paris", 48.8566, 2.3522, utc_now(), "review",
+                    ),
+                    (
+                        "Japan Shop", "japan shop", "https://jp.example",
+                        "JP", "Tokyo", 35.6762, 139.6503, utc_now(), "review",
+                    ),
+                ])
+                con.executemany(
+                    """
+                    insert into merchants(
+                      name,normalized_name,website_url,country,city,
+                      latitude,longitude,last_inventory_checked_at,inventory_status
+                    ) values(?,?,?,?,?,?,?,?,?)
+                    """,
+                    rows,
+                )
+                con.commit()
+            finally:
+                con.close()
+
+            payload = shop_collection_status(path=db_path, map_limit=3)
+
+            self.assertEqual(
+                {row["countryCode"] for row in payload["mapMerchants"]},
+                {"US", "FR", "JP"},
+            )
+
     def test_product_is_searchable_in_integrated_result_shape(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "shops.sqlite"

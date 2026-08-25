@@ -190,23 +190,49 @@ def shop_collection_status(path=None, map_limit=6000, include_map=True):
             _row_dict(row)
             for row in con.execute(
                 """
+                with eligible as (
+                  select
+                    m.*,
+                    upper(trim(coalesce(m.country, ''))) as map_country,
+                    row_number() over (
+                      partition by upper(trim(coalesce(m.country, '')))
+                      order by abs((m.id * 1103515245 + 12345) % 2147483647), m.id
+                    ) as country_rank,
+                    count(*) over (
+                      partition by upper(trim(coalesce(m.country, '')))
+                    ) as country_total
+                  from merchants m
+                  where m.active=1
+                    and m.last_inventory_checked_at is not null
+                    and m.latitude between -60 and 85
+                    and m.longitude between -180 and 180
+                    and upper(trim(coalesce(m.country, ''))) not in ('AQ', 'ANTARCTICA')
+                ),
+                sampled as (
+                  select *
+                  from eligible
+                  order by
+                    case when country_rank=1 then 0 else 1 end,
+                    country_rank * 1.0 / country_total,
+                    map_country,
+                    id
+                  limit ?
+                )
                 select m.id, m.wine_searcher_id as wineSearcherId, m.name, m.merchant_type as merchantType,
                        m.country, m.city, m.address, m.latitude as lat, m.longitude as lng,
                        m.website_url as websiteUrl, m.wine_searcher_url as wineSearcherUrl,
                        m.inventory_status as inventoryStatus, m.last_inventory_checked_at as lastCheckedAt,
                        count(distinct s.id) as sourceCount, count(distinct p.id) as productCount,
                        max(case when s.status='found' then s.source_url else null end) as inventoryUrl
-                from merchants m
+                from sampled m
                 left join merchant_sources s on s.merchant_id=m.id
                 left join merchant_products p on p.merchant_id=m.id and p.active=1
-                where m.active=1
-                  and m.last_inventory_checked_at is not null
-                  and m.latitude between -60 and 85
-                  and m.longitude between -180 and 180
-                  and upper(trim(coalesce(m.country, ''))) not in ('AQ', 'ANTARCTICA')
                 group by m.id
-                order by m.id
-                limit ?
+                order by
+                  case when m.country_rank=1 then 0 else 1 end,
+                  m.country_rank * 1.0 / m.country_total,
+                  m.map_country,
+                  m.id
                 """,
                 (int(map_limit),),
             ).fetchall()
