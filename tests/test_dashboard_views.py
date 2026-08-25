@@ -95,6 +95,13 @@ class DashboardViewTests(unittest.TestCase):
         self.assertIn("clusterMarkerIcon", self.script)
         self.assertNotIn("state.shopPayload?.mapMerchants", self.script)
 
+    def test_wine_shop_map_does_not_refetch_or_recenter_after_marker_selection(self):
+        self.assertIn("function shopMapRequestKey(request)", self.script)
+        self.assertIn("requestKey === state.shopMapLoadedRequestKey", self.script)
+        self.assertIn("new maps.InfoWindow({ disableAutoPan: true })", self.script)
+        self.assertNotIn("selectDashboardTarget(state.activeTargetId, false)", self.script)
+        self.assertIn("state.shopMapLoading && !state.shopMapPayload", self.script)
+
     def test_resource_panel_hides_internal_sample_interval(self):
         self.assertNotIn("samples / every", self.script)
 

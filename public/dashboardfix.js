@@ -6,6 +6,8 @@
     shopMapLoading: false,
     shopMapAbortController: null,
     shopMapRequestSeq: 0,
+    shopMapActiveRequestKey: "",
+    shopMapLoadedRequestKey: "",
     shopMapMoveTimer: null,
     databaseMode: "restaurants",
     databaseMapFilter: "all",
@@ -1772,7 +1774,7 @@
       if (state.databaseMode === "shops") {
         const represented = number(state.shopMapPayload?.coveredCount);
         const total = number(state.shopMapPayload?.totalMatching);
-        count.textContent = state.shopMapLoading
+        count.textContent = state.shopMapLoading && !state.shopMapPayload
           ? "Loading visible wine shops..."
           : `${fmtInt(represented)} of ${fmtInt(total)} shops represented in this view`;
       } else {
@@ -1991,14 +1993,31 @@
     };
   }
 
+  function shopMapRequestKey(request) {
+    if (!request) return "";
+    const rounded = (value) => Math.round(Number(value) * 100000) / 100000;
+    return [
+      rounded(request.west),
+      rounded(request.south),
+      rounded(request.east),
+      rounded(request.north),
+      Number(request.zoom),
+      request.filter || "all"
+    ].join("|");
+  }
+
   async function loadShopMapViewport() {
     if (state.databaseMode !== "shops" || state.activeView !== "database") return;
     const request = currentShopMapRequest();
     if (!request) return;
+    const requestKey = shopMapRequestKey(request);
+    if (state.shopMapLoading && requestKey === state.shopMapActiveRequestKey) return;
+    if (state.shopMapPayload && requestKey === state.shopMapLoadedRequestKey) return;
     const params = new URLSearchParams(Object.entries(request).map(([key, value]) => [key, String(value)]));
     const seq = ++state.shopMapRequestSeq;
     state.shopMapAbortController?.abort();
     state.shopMapAbortController = new AbortController();
+    state.shopMapActiveRequestKey = requestKey;
     state.shopMapLoading = true;
     syncDatabaseMapFilterControls(activeDatabasePayload());
     try {
@@ -2014,12 +2033,15 @@
       }
       state.shopMapPayload = payload;
       state.shopMapLoading = false;
+      state.shopMapActiveRequestKey = "";
+      state.shopMapLoadedRequestKey = requestKey;
       state.dashboardMapSignature = "";
       renderSelectedTarget(activeDatabasePayload());
       renderDashboardMap(activeDatabasePayload(), { fit: false, fromViewport: true });
     } catch (error) {
       if (error?.name === "AbortError" || seq !== state.shopMapRequestSeq) return;
       state.shopMapLoading = false;
+      state.shopMapActiveRequestKey = "";
       const count = document.querySelector("#databaseMapFilterCount");
       if (count) count.textContent = error.message || "Could not load wine shops for this area.";
     }
@@ -2106,7 +2128,7 @@
             { featureType: "transit", stylers: [{ visibility: "off" }] }
           ]
         });
-        state.dashboardInfoWindow = new maps.InfoWindow();
+        state.dashboardInfoWindow = new maps.InfoWindow({ disableAutoPan: true });
         state.dashboardMapHasFit = false;
       }
       if (!state.dashboardMapIdleBound) {
@@ -2154,7 +2176,6 @@
       if (state.databaseMode === "shops" && !state.shopMapPayload && !state.shopMapLoading) {
         scheduleShopMapViewportLoad(0);
       }
-      if (state.activeTargetId) selectDashboardTarget(state.activeTargetId, false);
     } catch (error) {
       fallbackEl.classList.remove("hidden");
       fallbackEl.innerHTML = `<b>Map unavailable</b><span>${html(error.message)}</span>`;
