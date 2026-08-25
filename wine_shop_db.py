@@ -152,6 +152,69 @@ def _row_dict(row):
     return {key: row[key] for key in row.keys()}
 
 
+def _balanced_map_merchant_ids(con, map_limit):
+    limit = max(0, int(map_limit))
+    if not limit:
+        return []
+
+    rows = con.execute(
+        """
+        select id,upper(trim(coalesce(country, ''))) as map_country
+        from merchants
+        where active=1
+          and last_inventory_checked_at is not null
+          and latitude between -60 and 85
+          and longitude between -180 and 180
+          and upper(trim(coalesce(country, ''))) not in ('AQ', 'ANTARCTICA')
+        order by map_country,id
+        """
+    ).fetchall()
+    groups = {}
+    for row in rows:
+        groups.setdefault(row["map_country"], []).append(int(row["id"]))
+    if not groups:
+        return []
+
+    # Overture IDs are geographically clustered. Shuffle deterministically inside
+    # each country, then reserve one slot per country before allocating the rest
+    # in proportion to the number of eligible shops.
+    for merchant_ids in groups.values():
+        merchant_ids.sort(
+            key=lambda merchant_id: (
+                abs((merchant_id * 1103515245 + 12345) % 2147483647),
+                merchant_id,
+            )
+        )
+
+    countries = sorted(groups)
+    if limit <= len(countries):
+        return [groups[country][0] for country in countries[:limit]]
+
+    allocations = {country: 1 for country in countries}
+    remaining_slots = min(limit, len(rows)) - len(countries)
+    remaining_shops = sum(max(0, len(groups[country]) - 1) for country in countries)
+    remainders = []
+    if remaining_slots and remaining_shops:
+        for country in countries:
+            available = max(0, len(groups[country]) - 1)
+            raw = remaining_slots * available / remaining_shops
+            extra = min(available, int(raw))
+            allocations[country] += extra
+            remainders.append((raw - extra, available - extra, country))
+        slots_left = min(limit, len(rows)) - sum(allocations.values())
+        for _, available, country in sorted(remainders, key=lambda item: (-item[0], item[2])):
+            if not slots_left:
+                break
+            if available:
+                allocations[country] += 1
+                slots_left -= 1
+
+    selected = []
+    for country in countries:
+        selected.extend(groups[country][:allocations[country]])
+    return selected
+
+
 def shop_collection_status(path=None, map_limit=6000, include_map=True):
     ensure_shop_db(path, allow_migrations=False)
     progress = read_progress()
@@ -186,57 +249,32 @@ def shop_collection_status(path=None, map_limit=6000, include_map=True):
                 "select * from merchant_discovery_runs order by id desc limit 8"
             ).fetchall()
         ]
-        map_merchants = [] if not include_map else [
-            _row_dict(row)
-            for row in con.execute(
-                """
-                with eligible as (
-                  select
-                    m.*,
-                    upper(trim(coalesce(m.country, ''))) as map_country,
-                    row_number() over (
-                      partition by upper(trim(coalesce(m.country, '')))
-                      order by abs((m.id * 1103515245 + 12345) % 2147483647), m.id
-                    ) as country_rank,
-                    count(*) over (
-                      partition by upper(trim(coalesce(m.country, '')))
-                    ) as country_total
-                  from merchants m
-                  where m.active=1
-                    and m.last_inventory_checked_at is not null
-                    and m.latitude between -60 and 85
-                    and m.longitude between -180 and 180
-                    and upper(trim(coalesce(m.country, ''))) not in ('AQ', 'ANTARCTICA')
-                ),
-                sampled as (
-                  select *
-                  from eligible
-                  order by
-                    case when country_rank=1 then 0 else 1 end,
-                    country_rank * 1.0 / country_total,
-                    map_country,
-                    id
-                  limit ?
-                )
-                select m.id, m.wine_searcher_id as wineSearcherId, m.name, m.merchant_type as merchantType,
-                       m.country, m.city, m.address, m.latitude as lat, m.longitude as lng,
-                       m.website_url as websiteUrl, m.wine_searcher_url as wineSearcherUrl,
-                       m.inventory_status as inventoryStatus, m.last_inventory_checked_at as lastCheckedAt,
-                       count(distinct s.id) as sourceCount, count(distinct p.id) as productCount,
-                       max(case when s.status='found' then s.source_url else null end) as inventoryUrl
-                from sampled m
-                left join merchant_sources s on s.merchant_id=m.id
-                left join merchant_products p on p.merchant_id=m.id and p.active=1
-                group by m.id
-                order by
-                  case when m.country_rank=1 then 0 else 1 end,
-                  m.country_rank * 1.0 / m.country_total,
-                  m.map_country,
-                  m.id
-                """,
-                (int(map_limit),),
-            ).fetchall()
-        ]
+        map_merchant_ids = _balanced_map_merchant_ids(con, map_limit) if include_map else []
+        map_merchants = []
+        if map_merchant_ids:
+            placeholders = ",".join("?" for _ in map_merchant_ids)
+            merchant_rows = {
+                int(row["id"]): _row_dict(row)
+                for row in con.execute(
+                    f"""
+                    select m.id, m.wine_searcher_id as wineSearcherId, m.name,
+                           m.merchant_type as merchantType, m.country, m.city, m.address,
+                           m.latitude as lat, m.longitude as lng, m.website_url as websiteUrl,
+                           m.wine_searcher_url as wineSearcherUrl,
+                           m.inventory_status as inventoryStatus,
+                           m.last_inventory_checked_at as lastCheckedAt,
+                           (select count(*) from merchant_sources s where s.merchant_id=m.id) as sourceCount,
+                           (select count(*) from merchant_products p
+                             where p.merchant_id=m.id and p.active=1) as productCount,
+                           (select max(s.source_url) from merchant_sources s
+                             where s.merchant_id=m.id and s.status='found') as inventoryUrl
+                    from merchants m
+                    where m.id in ({placeholders})
+                    """,
+                    tuple(map_merchant_ids),
+                ).fetchall()
+            }
+            map_merchants = [merchant_rows[merchant_id] for merchant_id in map_merchant_ids]
         for merchant in map_merchants:
             country_code = normalize_country_code(
                 merchant.get("country"),
