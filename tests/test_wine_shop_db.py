@@ -8,6 +8,7 @@ from wine_shop_db import (
     ensure_shop_db,
     search_shop_products,
     shop_collection_status,
+    shop_map_view,
     upsert_product,
     utc_now,
 )
@@ -136,6 +137,122 @@ class WineShopDatabaseTests(unittest.TestCase):
                 {row["countryCode"] for row in payload["mapMerchants"]},
                 {"US", "FR", "JP"},
             )
+
+    def test_viewport_map_clusters_cover_every_matching_shop(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "shops.sqlite"
+            ensure_shop_db(db_path)
+            con = connect_shop(db_path)
+            try:
+                con.executemany(
+                    """
+                    insert into merchants(
+                      name,normalized_name,website_url,country,city,
+                      latitude,longitude,last_inventory_checked_at,inventory_status
+                    ) values(?,?,?,?,?,?,?,?,?)
+                    """,
+                    [
+                        (
+                            f"Mapped Shop {index}", f"mapped shop {index}",
+                            f"https://mapped-{index}.example", "US", "New York",
+                            40.7 + (index % 10) / 1000,
+                            -74.0 + (index % 15) / 1000,
+                            utc_now(), "found" if index % 3 == 0 else "review",
+                        )
+                        for index in range(320)
+                    ],
+                )
+                con.commit()
+            finally:
+                con.close()
+
+            payload = shop_map_view(path=db_path, zoom=2)
+
+            self.assertEqual(payload["totalMatching"], 320)
+            self.assertEqual(payload["coveredCount"], 320)
+            self.assertFalse(payload["hasMore"])
+            self.assertEqual(
+                sum(int(entry.get("count", 1)) for entry in payload["entries"]),
+                320,
+            )
+            self.assertTrue(any(entry["type"] == "cluster" for entry in payload["entries"]))
+            self.assertTrue(any(entry["kind"] == "mixed" for entry in payload["entries"]))
+
+    def test_viewport_map_returns_only_visible_individual_shops_when_zoomed_in(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "shops.sqlite"
+            ensure_shop_db(db_path)
+            con = connect_shop(db_path)
+            try:
+                con.executemany(
+                    """
+                    insert into merchants(
+                      name,normalized_name,website_url,country,city,
+                      latitude,longitude,last_inventory_checked_at,inventory_status
+                    ) values(?,?,?,?,?,?,?,?,?)
+                    """,
+                    [
+                        ("HK One", "hk one", "https://hk1.example", "HK", "Hong Kong", 22.30, 114.17, utc_now(), "found"),
+                        ("HK Two", "hk two", "https://hk2.example", "HK", "Hong Kong", 22.31, 114.18, utc_now(), "review"),
+                        ("Paris Shop", "paris shop", "https://paris.example", "FR", "Paris", 48.85, 2.35, utc_now(), "found"),
+                    ],
+                )
+                con.commit()
+            finally:
+                con.close()
+
+            payload = shop_map_view(
+                path=db_path,
+                west=114.0,
+                south=22.0,
+                east=114.4,
+                north=22.5,
+                zoom=18,
+            )
+
+            self.assertEqual(payload["totalMatching"], 2)
+            self.assertEqual(payload["coveredCount"], 2)
+            self.assertEqual({entry["name"] for entry in payload["entries"]}, {"HK One", "HK Two"})
+            self.assertTrue(all(entry["type"] == "point" for entry in payload["entries"]))
+
+    def test_viewport_map_applies_saved_product_threshold_on_server(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "shops.sqlite"
+            ensure_shop_db(db_path)
+            con = connect_shop(db_path)
+            try:
+                merchant_ids = []
+                for name, longitude in (("Large List", 114.17), ("Small List", 114.18)):
+                    merchant_ids.append(con.execute(
+                        """
+                        insert into merchants(
+                          name,normalized_name,website_url,country,city,latitude,longitude,
+                          last_inventory_checked_at,inventory_status
+                        ) values(?,?,?,?,?,?,?,?,?)
+                        """,
+                        (name, name.lower(), f"https://{name.replace(' ', '').lower()}.example", "HK", "Hong Kong", 22.3, longitude, utc_now(), "found"),
+                    ).lastrowid)
+                for merchant_id, product_count in zip(merchant_ids, (110, 20)):
+                    source_id = con.execute(
+                        "insert into merchant_sources(merchant_id,source_type,source_url,status,parser_status) values(?,'html',?,'found','parsed')",
+                        (merchant_id, f"https://source-{merchant_id}.example"),
+                    ).lastrowid
+                    for index in range(product_count):
+                        upsert_product(con, merchant_id, source_id, {
+                            "source_key": f"wine-{merchant_id}-{index}",
+                            "source_url": f"https://source-{merchant_id}.example",
+                            "raw_name": f"Wine {index}",
+                            "raw_text": f"Wine {index}",
+                        })
+                con.commit()
+            finally:
+                con.close()
+
+            payload = shop_map_view(path=db_path, zoom=18, status_filter="100")
+
+            self.assertEqual(payload["totalMatching"], 1)
+            self.assertEqual(payload["coveredCount"], 1)
+            self.assertEqual(payload["entries"][0]["name"], "Large List")
 
     def test_product_is_searchable_in_integrated_result_shape(self):
         with tempfile.TemporaryDirectory() as temp_dir:

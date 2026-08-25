@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 import os
 import re
 import sqlite3
@@ -213,6 +214,186 @@ def _balanced_map_merchant_ids(con, map_limit):
     for country in countries:
         selected.extend(groups[country][:allocations[country]])
     return selected
+
+
+def _shop_map_status_filter(status_filter):
+    value = str(status_filter or "all").strip().lower()
+    if value == "found":
+        return " and m.inventory_status='found'", []
+    if value in ("100", "200"):
+        threshold = int(value)
+        return (
+            " and m.inventory_status='found' "
+            "and (select count(*) from merchant_products p "
+            "where p.merchant_id=m.id and p.active=1)>=?",
+            [threshold],
+        )
+    return "", []
+
+
+def _shop_map_kind(status):
+    if status == "found":
+        return "found"
+    if status == "no_wine_list":
+        return "none"
+    return "pending"
+
+
+def _shop_map_point(row):
+    merchant = _row_dict(row)
+    country_code = normalize_country_code(
+        merchant.get("country"),
+        city=merchant.get("city"),
+        address=merchant.get("address"),
+    )
+    merchant["countryCode"] = country_code
+    merchant["country"] = country_display_name(
+        country_code or merchant.get("country"),
+        city=merchant.get("city"),
+        address=merchant.get("address"),
+    )
+    merchant["type"] = "point"
+    merchant["kind"] = _shop_map_kind(merchant.get("inventoryStatus"))
+    merchant["count"] = 1
+    return merchant
+
+
+def shop_map_view(
+    path=None,
+    west=-180,
+    south=-60,
+    east=180,
+    north=85,
+    zoom=2,
+    status_filter="all",
+):
+    """Return a lossless, viewport-aware map representation.
+
+    At low zoom levels every eligible merchant is represented by a cluster or
+    point. At close zoom levels individual merchants are returned. The
+    coveredCount invariant lets the client and tests prove that no rows were
+    discarded by a display limit.
+    """
+    ensure_shop_db(path, allow_migrations=False)
+    west = max(-180.0, min(180.0, float(west)))
+    east = max(-180.0, min(180.0, float(east)))
+    south = max(-60.0, min(85.0, float(south)))
+    north = max(-60.0, min(85.0, float(north)))
+    if south > north:
+        south, north = north, south
+    zoom = max(0, min(20, int(float(zoom))))
+    extra_filter, extra_args = _shop_map_status_filter(status_filter)
+    longitude_clause = "m.longitude between ? and ?"
+    longitude_args = [west, east]
+    if west > east:
+        longitude_clause = "(m.longitude>=? or m.longitude<=?)"
+
+    con = connect_shop(path, read_only=True)
+    try:
+        rows = con.execute(
+            f"""
+            select m.id,m.latitude as lat,m.longitude as lng,
+                   m.inventory_status as inventoryStatus
+            from merchants m
+            where m.active=1
+              and m.last_inventory_checked_at is not null
+              and m.latitude between ? and ?
+              and {longitude_clause}
+              and m.latitude between -60 and 85
+              and m.longitude between -180 and 180
+              and upper(trim(coalesce(m.country,''))) not in ('AQ','ANTARCTICA')
+              {extra_filter}
+            order by m.id
+            """,
+            [south, north, *longitude_args, *extra_args],
+        ).fetchall()
+
+        total_matching = len(rows)
+        exact_points = zoom >= 16 or total_matching <= 250
+        groups = {}
+        if exact_points:
+            point_ids = [int(row["id"]) for row in rows]
+            cluster_entries = []
+        else:
+            # Roughly 8 cells per world tile. This keeps the world view
+            # readable while allowing clusters to split smoothly on zoom.
+            lng_cell = max(0.00025, 360.0 / ((2 ** zoom) * 8.0))
+            lat_cell = max(0.00025, 180.0 / ((2 ** zoom) * 8.0))
+            for row in rows:
+                key = (
+                    math.floor((float(row["lat"]) + 90.0) / lat_cell),
+                    math.floor((float(row["lng"]) + 180.0) / lng_cell),
+                )
+                groups.setdefault(key, []).append(row)
+            point_ids = [int(items[0]["id"]) for items in groups.values() if len(items) == 1]
+            cluster_entries = []
+            for (lat_key, lng_key), items in groups.items():
+                if len(items) == 1:
+                    continue
+                counts = {"found": 0, "none": 0, "pending": 0}
+                for item in items:
+                    counts[_shop_map_kind(item["inventoryStatus"])] += 1
+                nonzero_kinds = [kind for kind, count in counts.items() if count]
+                cluster_entries.append({
+                    "type": "cluster",
+                    "id": f"cluster-{zoom}-{lat_key}-{lng_key}",
+                    "lat": sum(float(item["lat"]) for item in items) / len(items),
+                    "lng": sum(float(item["lng"]) for item in items) / len(items),
+                    "count": len(items),
+                    "foundCount": counts["found"],
+                    "noneCount": counts["none"],
+                    "reviewCount": counts["pending"],
+                    "kind": nonzero_kinds[0] if len(nonzero_kinds) == 1 else "mixed",
+                })
+
+        point_entries = []
+        for offset in range(0, len(point_ids), 800):
+            batch = point_ids[offset:offset + 800]
+            if not batch:
+                continue
+            placeholders = ",".join("?" for _ in batch)
+            point_entries.extend(
+                _shop_map_point(row)
+                for row in con.execute(
+                    f"""
+                    select m.id,m.wine_searcher_id as wineSearcherId,m.name,
+                           m.merchant_type as merchantType,m.country,m.city,m.address,
+                           m.latitude as lat,m.longitude as lng,m.website_url as websiteUrl,
+                           m.wine_searcher_url as wineSearcherUrl,
+                           m.inventory_status as inventoryStatus,
+                           m.last_inventory_checked_at as lastCheckedAt,
+                           (select count(*) from merchant_sources s
+                             where s.merchant_id=m.id) as sourceCount,
+                           (select count(*) from merchant_products p
+                             where p.merchant_id=m.id and p.active=1) as productCount,
+                           (select max(s.source_url) from merchant_sources s
+                             where s.merchant_id=m.id and s.status='found') as inventoryUrl
+                    from merchants m
+                    where m.id in ({placeholders})
+                    """,
+                    batch,
+                ).fetchall()
+            )
+
+        entries = [*cluster_entries, *point_entries]
+        covered_count = sum(int(entry.get("count") or 1) for entry in entries)
+        if covered_count != total_matching:
+            raise RuntimeError(
+                f"Map coverage mismatch: represented {covered_count} of {total_matching} shops"
+            )
+        return {
+            "generatedAt": utc_now(),
+            "zoom": zoom,
+            "filter": str(status_filter or "all"),
+            "bounds": {"west": west, "south": south, "east": east, "north": north},
+            "totalMatching": total_matching,
+            "coveredCount": covered_count,
+            "entryCount": len(entries),
+            "hasMore": False,
+            "entries": entries,
+        }
+    finally:
+        con.close()
 
 
 def shop_collection_status(path=None, map_limit=6000, include_map=True):

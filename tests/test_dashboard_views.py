@@ -86,6 +86,15 @@ class DashboardViewTests(unittest.TestCase):
         self.assertIn("function hasActiveDatabaseMapData()", self.script)
         self.assertIn("!hasActiveDatabaseMapData()", self.script)
 
+    def test_wine_shop_map_is_loaded_by_viewport_without_a_display_limit(self):
+        self.assertIn("function loadShopMapViewport()", self.script)
+        self.assertIn("/api/shop-map?", self.script)
+        self.assertIn('state.dashboardMap.addListener("idle"', self.script)
+        self.assertIn("payload.coveredCount", self.script)
+        self.assertIn("payload.totalMatching", self.script)
+        self.assertIn("clusterMarkerIcon", self.script)
+        self.assertNotIn("state.shopPayload?.mapMerchants", self.script)
+
     def test_resource_panel_hides_internal_sample_interval(self):
         self.assertNotIn("samples / every", self.script)
 

@@ -2,6 +2,11 @@
   const state = {
     guidePayload: null,
     shopPayload: null,
+    shopMapPayload: null,
+    shopMapLoading: false,
+    shopMapAbortController: null,
+    shopMapRequestSeq: 0,
+    shopMapMoveTimer: null,
     databaseMode: "restaurants",
     databaseMapFilter: "all",
     collectionMode: "restaurants",
@@ -10,6 +15,7 @@
     dashboardInfoWindow: null,
     dashboardDataLayer: null,
     dashboardDataClickBound: false,
+    dashboardMapIdleBound: false,
     dashboardMapSignature: "",
     dashboardMarkers: new Map(),
     dashboardMapHasFit: false,
@@ -1455,14 +1461,11 @@
     const suffix = compact ? "?compact=1" : "";
     const [proxied, shops, resourceHistory] = await Promise.all([
       fetchJson(`/api/guide-collection${suffix}`, null),
-      fetchJson(`/api/shop-collection${suffix}`, null),
+      fetchJson("/api/shop-collection?compact=1", null),
       fetchJson("/data/resource-history.json", null)
     ]);
     if (compact && proxied && !proxied.mapTargets?.length && state.guidePayload?.mapTargets?.length) {
       proxied.mapTargets = state.guidePayload.mapTargets;
-    }
-    if (compact && shops && !shops.mapMerchants?.length && state.shopPayload?.mapMerchants?.length) {
-      shops.mapMerchants = state.shopPayload.mapMerchants;
     }
     state.shopPayload = shops;
     if (proxied && resourceHistory?.samples) proxied.resourceHistory = resourceHistory;
@@ -1709,6 +1712,7 @@
   }
 
   function targetKind(target) {
+    if (target?.kind) return target.kind;
     const status = target?.status || "";
     if (number(target.verifiedWineListCount) > 0 || (
       target.wineListStatus === "found" &&
@@ -1743,6 +1747,7 @@
   }
 
   function filteredMapTargets(targets) {
+    if (state.databaseMode === "shops") return targets;
     const filter = state.databaseMapFilter;
     if (filter === "all") return targets;
     return targets.filter((target) => {
@@ -1763,13 +1768,32 @@
     const rawTargets = visibleMapTargets(payload);
     const filteredTargets = filteredMapTargets(rawTargets);
     const count = document.querySelector("#databaseMapFilterCount");
-    if (count) count.textContent = `${fmtInt(filteredTargets.length)} of ${fmtInt(rawTargets.length)} mapped places`;
+    if (count) {
+      if (state.databaseMode === "shops") {
+        const represented = number(state.shopMapPayload?.coveredCount);
+        const total = number(state.shopMapPayload?.totalMatching);
+        count.textContent = state.shopMapLoading
+          ? "Loading visible wine shops..."
+          : `${fmtInt(represented)} of ${fmtInt(total)} shops represented in this view`;
+      } else {
+        count.textContent = `${fmtInt(filteredTargets.length)} of ${fmtInt(rawTargets.length)} mapped places`;
+      }
+    }
   }
 
   function shopDatabasePayload() {
-    const payload = state.shopPayload || {};
+    const payload = state.shopMapPayload || {};
     return {
-      mapTargets: (payload.mapMerchants || []).map((merchant) => {
+      mapTargets: (payload.entries || []).map((merchant) => {
+        if (merchant.type === "cluster") {
+          return {
+            ...merchant,
+            id: merchant.id,
+            isCluster: true,
+            name: `${fmtInt(merchant.count)} wine shops`,
+            status: merchant.kind === "found" ? "found" : merchant.kind === "none" ? "no_wine_list" : "review"
+          };
+        }
         const status = merchant.inventoryStatus === "found"
           ? "found"
           : merchant.inventoryStatus === "no_wine_list"
@@ -1794,7 +1818,9 @@
           productCount: Number(merchant.productCount || 0),
           sourceCount: Number(merchant.sourceCount || 0)
         };
-      })
+      }),
+      totalMatching: number(payload.totalMatching),
+      coveredCount: number(payload.coveredCount)
     };
   }
 
@@ -1804,7 +1830,7 @@
 
   function hasActiveDatabaseMapData() {
     if (state.databaseMode === "shops") {
-      return Array.isArray(state.shopPayload?.mapMerchants) && state.shopPayload.mapMerchants.length > 0;
+      return Boolean(state.shopMapPayload);
     }
     return Array.isArray(state.guidePayload?.mapTargets) && state.guidePayload.mapTargets.length > 0;
   }
@@ -1812,6 +1838,7 @@
   function markerColor(kind) {
     if (kind === "found") return "#16a34a";
     if (kind === "none") return "#dc2626";
+    if (kind === "mixed") return "#475569";
     return "#f59e0b";
   }
 
@@ -1885,6 +1912,22 @@
     };
   }
 
+  function clusterMarkerIcon(maps, target) {
+    const count = number(target?.count);
+    const text = count >= 1000 ? `${Math.round(count / 100) / 10}k` : String(count);
+    const diameter = count >= 1000 ? 46 : count >= 100 ? 42 : 38;
+    const color = markerColor(targetKind(target));
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${diameter}" height="${diameter}" viewBox="0 0 ${diameter} ${diameter}">
+      <circle cx="${diameter / 2}" cy="${diameter / 2}" r="${diameter / 2 - 2}" fill="${color}" fill-opacity="0.92" stroke="#ffffff" stroke-width="3"/>
+      <text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="${text.length > 4 ? 10 : 12}" font-weight="800" fill="#ffffff">${text}</text>
+    </svg>`;
+    return {
+      url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+      scaledSize: new maps.Size(diameter, diameter),
+      anchor: new maps.Point(diameter / 2, diameter / 2)
+    };
+  }
+
   function mapSignature(targets) {
     return `${state.databaseMode}|${state.databaseMapFilter}|${targets
       .map((target) => [
@@ -1898,7 +1941,8 @@
         target.reviewSourceCount,
         target.wineListParserStatus,
         target.chosenWineLineCount,
-        target.productCount
+        target.productCount,
+        target.count
       ].join(":"))
       .join("|")}`;
   }
@@ -1913,9 +1957,78 @@
       properties: {
         id: String(target.id),
         kind: targetKind(target),
-        name: target.name || "Restaurant"
+        name: target.name || "Restaurant",
+        isCluster: Boolean(target.isCluster),
+        clusterCount: number(target.count)
       }
     };
+  }
+
+  function currentShopMapRequest() {
+    if (!state.dashboardMap) return null;
+    const bounds = state.dashboardMap.getBounds();
+    if (!bounds) return null;
+    const northEast = bounds.getNorthEast();
+    const southWest = bounds.getSouthWest();
+    const zoom = Math.round(state.dashboardMap.getZoom() || DASHBOARD_WORLD_ZOOM);
+    if (zoom <= DASHBOARD_WORLD_ZOOM) {
+      return {
+        west: -180,
+        south: -60,
+        east: 180,
+        north: 85,
+        zoom,
+        filter: state.databaseMapFilter
+      };
+    }
+    return {
+      west: southWest.lng(),
+      south: southWest.lat(),
+      east: northEast.lng(),
+      north: northEast.lat(),
+      zoom,
+      filter: state.databaseMapFilter
+    };
+  }
+
+  async function loadShopMapViewport() {
+    if (state.databaseMode !== "shops" || state.activeView !== "database") return;
+    const request = currentShopMapRequest();
+    if (!request) return;
+    const params = new URLSearchParams(Object.entries(request).map(([key, value]) => [key, String(value)]));
+    const seq = ++state.shopMapRequestSeq;
+    state.shopMapAbortController?.abort();
+    state.shopMapAbortController = new AbortController();
+    state.shopMapLoading = true;
+    syncDatabaseMapFilterControls(activeDatabasePayload());
+    try {
+      const response = await fetch(`/api/shop-map?${params}`, {
+        cache: "no-store",
+        signal: state.shopMapAbortController.signal
+      });
+      if (!response.ok) throw new Error(`Wine-shop map request failed (HTTP ${response.status})`);
+      const payload = await response.json();
+      if (seq !== state.shopMapRequestSeq) return;
+      if (number(payload.coveredCount) !== number(payload.totalMatching)) {
+        throw new Error(`Map coverage mismatch: ${payload.coveredCount} of ${payload.totalMatching}`);
+      }
+      state.shopMapPayload = payload;
+      state.shopMapLoading = false;
+      state.dashboardMapSignature = "";
+      renderSelectedTarget(activeDatabasePayload());
+      renderDashboardMap(activeDatabasePayload(), { fit: false, fromViewport: true });
+    } catch (error) {
+      if (error?.name === "AbortError" || seq !== state.shopMapRequestSeq) return;
+      state.shopMapLoading = false;
+      const count = document.querySelector("#databaseMapFilterCount");
+      if (count) count.textContent = error.message || "Could not load wine shops for this area.";
+    }
+  }
+
+  function scheduleShopMapViewportLoad(delay = 180) {
+    if (state.databaseMode !== "shops" || state.activeView !== "database") return;
+    if (state.shopMapMoveTimer) window.clearTimeout(state.shopMapMoveTimer);
+    state.shopMapMoveTimer = window.setTimeout(() => loadShopMapViewport(), delay);
   }
 
   function infoHtml(target) {
@@ -1946,7 +2059,7 @@
     const rawTargets = visibleMapTargets(payload);
     const targets = filteredMapTargets(rawTargets);
     syncDatabaseMapFilterControls(payload);
-    if (!targets.length) {
+    if (!targets.length && state.databaseMode !== "shops") {
       const noun = state.databaseMode === "shops" ? "wine shops" : "restaurants";
       for (const marker of state.dashboardMarkers.values()) marker.setMap(null);
       state.dashboardMarkers.clear();
@@ -1973,6 +2086,7 @@
         state.dashboardDataLayer?.setMap(null);
         state.dashboardDataLayer = null;
         state.dashboardDataClickBound = false;
+        state.dashboardMapIdleBound = false;
         state.dashboardMapEl = mapEl;
         state.dashboardMap = new maps.Map(mapEl, {
           center: DASHBOARD_WORLD_CENTER,
@@ -1995,17 +2109,32 @@
         state.dashboardInfoWindow = new maps.InfoWindow();
         state.dashboardMapHasFit = false;
       }
+      if (!state.dashboardMapIdleBound) {
+        state.dashboardMap.addListener("idle", () => scheduleShopMapViewportLoad());
+        state.dashboardMapIdleBound = true;
+      }
       const signature = mapSignature(targets);
       if (!state.dashboardDataLayer) {
         state.dashboardDataLayer = new maps.Data({ map: state.dashboardMap });
-        state.dashboardDataLayer.setStyle((feature) => ({
-          icon: markerIcon(maps, markerColor(feature.getProperty("kind")), markerLabel(feature.getProperty("kind"))),
-          zIndex: markerZIndex(feature.getProperty("kind")),
-          title: feature.getProperty("name") || "Restaurant"
-        }));
+        state.dashboardDataLayer.setStyle((feature) => {
+          const target = (activeDatabasePayload().mapTargets || [])
+            .find((item) => String(item.id) === String(feature.getProperty("id")));
+          return {
+            icon: feature.getProperty("isCluster")
+              ? clusterMarkerIcon(maps, target || { count: feature.getProperty("clusterCount"), kind: feature.getProperty("kind") })
+              : markerIcon(maps, markerColor(feature.getProperty("kind")), markerLabel(feature.getProperty("kind"))),
+            zIndex: feature.getProperty("isCluster") ? 400 : markerZIndex(feature.getProperty("kind")),
+            title: feature.getProperty("name") || "Restaurant"
+          };
+        });
       }
       if (!state.dashboardDataClickBound) {
         state.dashboardDataLayer.addListener("click", (event) => {
+          if (event.feature.getProperty("isCluster")) {
+            state.dashboardMap.panTo(event.latLng);
+            state.dashboardMap.setZoom(Math.min(20, (state.dashboardMap.getZoom() || DASHBOARD_WORLD_ZOOM) + 2));
+            return;
+          }
           selectDashboardTarget(event.feature.getProperty("id"), true, event.latLng);
         });
         state.dashboardDataClickBound = true;
@@ -2021,6 +2150,9 @@
       if (!state.dashboardMapHasFit || options.fit) {
         showDashboardWorldView();
         state.dashboardMapHasFit = true;
+      }
+      if (state.databaseMode === "shops" && !state.shopMapPayload && !state.shopMapLoading) {
+        scheduleShopMapViewportLoad(0);
       }
       if (state.activeTargetId) selectDashboardTarget(state.activeTargetId, false);
     } catch (error) {
@@ -2895,6 +3027,7 @@
       state.databaseMode = button.dataset.databaseMode;
       state.activeTargetId = null;
       state.dashboardInfoWindow?.close();
+      if (state.databaseMode === "shops") state.shopMapPayload = null;
       state.dashboardMapSignature = "";
       state.dashboardMapHasFit = false;
       renderDatabase();
@@ -2908,11 +3041,17 @@
       state.activeTargetId = null;
       state.dashboardInfoWindow?.close();
       state.dashboardMapSignature = "";
-      state.dashboardMapHasFit = false;
       const payload = activeDatabasePayload();
       syncDatabaseMapFilterControls(payload);
       renderSelectedTarget(payload);
-      renderDashboardMap(payload, { fit: true });
+      if (state.databaseMode === "shops") {
+        state.shopMapPayload = null;
+        renderDashboardMap(activeDatabasePayload(), { fit: false });
+        scheduleShopMapViewportLoad(0);
+      } else {
+        state.dashboardMapHasFit = false;
+        renderDashboardMap(payload, { fit: true });
+      }
     });
     activate("search");
   }

@@ -87,7 +87,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import sync_search_api
-from wine_shop_db import connect_shop, ensure_shop_db, search_shop_products, shop_collection_status
+from wine_shop_db import connect_shop, ensure_shop_db, search_shop_products, shop_collection_status, shop_map_view
 from wine_shop_collect import atomic_progress as shop_atomic_progress
 from wine_shop_collect import parse_merchant_profile, save_profile_result
 
@@ -2016,6 +2016,18 @@ class Handler(BaseHTTPRequestHandler):
                     "overture": running_shop_collector("overture"),
                 }
                 return json_response(self, payload)
+            if parsed.path == "/api/shop-map":
+                return json_response(
+                    self,
+                    shop_map_view(
+                        west=params.get("west", ["-180"])[0],
+                        south=params.get("south", ["-60"])[0],
+                        east=params.get("east", ["180"])[0],
+                        north=params.get("north", ["85"])[0],
+                        zoom=params.get("zoom", ["2"])[0],
+                        status_filter=params.get("filter", ["all"])[0],
+                    ),
+                )
             if parsed.path == "/api/stats":
                 return json_response(self, stats())
             if parsed.path == "/api/guide-watch":
